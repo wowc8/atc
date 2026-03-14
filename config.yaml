@@ -1,0 +1,31 @@
+# ATC Runtime Configuration
+# Override locally with config.local.yaml (gitignored)
+
+server:
+  host: "127.0.0.1"
+  port: 8420
+  reload: false
+
+database:
+  path: "atc.db"
+  wal_mode: true
+
+tower:
+  enabled: true
+  auto_start: false
+
+resource_monitor:
+  enabled: true
+  interval_seconds: 5
+
+github:
+  poll_interval_seconds: 60
+
+budget:
+  check_interval_seconds: 30
+
+cost_tracker:
+  poll_interval_seconds: 30
+
+logging:
+  level: "INFO"

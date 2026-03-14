@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegram/nicegram-web/master/nicegram.schema.json",
+  "productName": "ATC",
+  "version": "0.1.0",
+  "identifier": "com.atc.app",
+  "build": {
+    "frontendDist": "../frontend/dist"
+  }
+}

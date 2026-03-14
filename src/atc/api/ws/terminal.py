@@ -1,0 +1,1 @@
+"""WebSocket terminal handler — stub."""

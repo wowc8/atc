@@ -1,0 +1,1 @@
+"""WebSocket hub handler — stub."""

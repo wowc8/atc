@@ -1,0 +1,1 @@
+"""Tower allocator — stub."""
