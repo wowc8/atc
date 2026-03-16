@@ -1,19 +1,36 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Dashboard from "./pages/Dashboard.tsx";
-import ProjectView from "./pages/ProjectView.tsx";
-import SettingsPage from "./pages/SettingsPage.tsx";
-import UsagePage from "./pages/UsagePage.tsx";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { AppProvider } from "./context/AppContext";
+import TowerBar from "./components/tower/TowerBar";
+import Dashboard from "./pages/Dashboard";
+import ProjectView from "./pages/ProjectView";
+import SettingsPage from "./pages/SettingsPage";
+import UsagePage from "./pages/UsagePage";
+
+function Layout() {
+  return (
+    <>
+      <TowerBar />
+      <main style={{ flex: 1, overflow: "auto" }}>
+        <Outlet />
+      </main>
+    </>
+  );
+}
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/projects/:id" element={<ProjectView />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/usage" element={<UsagePage />} />
-      </Routes>
-    </BrowserRouter>
+    <AppProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/projects/:id" element={<ProjectView />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/usage" element={<UsagePage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AppProvider>
   );
 }

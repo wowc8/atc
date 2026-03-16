@@ -1,0 +1,133 @@
+.tower-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--tower-bar-height);
+  padding: 0 var(--space-4);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  gap: var(--space-4);
+}
+
+.tower-bar__left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.tower-bar__brand {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-accent);
+  letter-spacing: 0.1em;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.tower-bar__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tower-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.tower-bar__status-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-transform: capitalize;
+}
+
+.tower-bar__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tower-bar__nav-item {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  font-family: var(--font-sans);
+}
+
+.tower-bar__nav-item:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.tower-bar__nav-item.active {
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+.tower-bar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.tower-bar__message {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tower-bar__metric {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.tower-bar__icon-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.tower-bar__icon-btn:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.tower-bar__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--color-status-red);
+  border-radius: 8px;
+}
