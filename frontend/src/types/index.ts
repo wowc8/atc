@@ -27,7 +27,14 @@ export interface Session {
   project_id: string;
   session_type: "ace" | "manager";
   name: string;
-  status: string;
+  status:
+    | "idle"
+    | "connecting"
+    | "working"
+    | "waiting"
+    | "paused"
+    | "disconnected"
+    | "error";
   task_id: string | null;
   host: string | null;
   tmux_session: string | null;
@@ -43,7 +50,13 @@ export interface Task {
   project_id: string;
   leader_id: string;
   title: string;
-  status: "pending" | "assigned" | "in_progress" | "blocked" | "done" | "cancelled";
+  status:
+    | "pending"
+    | "assigned"
+    | "in_progress"
+    | "blocked"
+    | "done"
+    | "cancelled";
   parent_task_id: string | null;
   description: string | null;
   priority: number;
@@ -69,4 +82,39 @@ export interface Notification {
   message: string;
   read: boolean;
   created_at: string;
+}
+
+export interface UsageSummary {
+  today_cost: number;
+  month_cost: number;
+  today_tokens: number;
+  month_tokens: number;
+}
+
+export interface GitHubSummary {
+  open_prs: number;
+  merged_today: number;
+  ci_pass_rate: number;
+}
+
+export type TowerStatusValue = "idle" | "planning" | "warning" | "error";
+
+export interface TowerStatus {
+  status: TowerStatusValue;
+  message: string;
+  active_projects: number;
+}
+
+export interface AppState {
+  projects: Project[];
+  leaders: Record<string, Leader>;
+  sessions: Session[];
+  tasks: Record<string, Task[]>;
+  budgets: Record<string, Budget>;
+  brainStatus: TowerStatus;
+  notifications: Notification[];
+  usage: UsageSummary;
+  github: Record<string, GitHubSummary>;
+  selectedProjectId: string | null;
+  selectedSessionId: string | null;
 }
