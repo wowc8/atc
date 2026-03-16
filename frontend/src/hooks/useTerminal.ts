@@ -1,0 +1,156 @@
+import { useEffect, useRef, useCallback } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
+
+interface UseTerminalOptions {
+  /** WebSocket channel to subscribe to for terminal data (e.g. "terminal:abc-123") */
+  channel?: string;
+  /** Whether the terminal should be active */
+  enabled?: boolean;
+}
+
+/**
+ * Hook that manages an xterm.js Terminal instance and connects it to the
+ * ATC WebSocket for streaming PTY output.
+ *
+ * Returns a ref callback to attach to a container div.
+ */
+export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Create terminal once
+  useEffect(() => {
+    if (!enabled) return;
+
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: '"SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace',
+      theme: {
+        background: "#0d1117",
+        foreground: "#e6edf3",
+        cursor: "#58a6ff",
+        selectionBackground: "#388bfd33",
+        black: "#0d1117",
+        red: "#f85149",
+        green: "#3fb950",
+        yellow: "#d29922",
+        blue: "#58a6ff",
+        magenta: "#bc8cff",
+        cyan: "#39d353",
+        white: "#e6edf3",
+      },
+      scrollback: 5000,
+      convertEol: true,
+    });
+
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+
+    termRef.current = term;
+    fitRef.current = fit;
+
+    // If container already mounted, open immediately
+    if (containerRef.current) {
+      term.open(containerRef.current);
+      fit.fit();
+    }
+
+    return () => {
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+    };
+  }, [enabled]);
+
+  // Fit on resize
+  useEffect(() => {
+    if (!enabled) return;
+    const handleResize = () => fitRef.current?.fit();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [enabled]);
+
+  // WebSocket connection for terminal channel
+  useEffect(() => {
+    if (!enabled || !channel) return;
+
+    function connect() {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ channel: "subscribe", data: [channel] }));
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.channel === channel && msg.data) {
+            termRef.current?.write(
+              typeof msg.data === "string" ? msg.data : JSON.stringify(msg.data),
+            );
+          }
+        } catch {
+          /* ignore malformed */
+        }
+      };
+
+      ws.onclose = () => {
+        reconnectRef.current = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = () => ws.close();
+    }
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectRef.current);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, [channel, enabled]);
+
+  // Handle user input → send to backend via WebSocket
+  useEffect(() => {
+    if (!enabled || !channel) return;
+    const term = termRef.current;
+    if (!term) return;
+
+    const disposable = term.onData((data) => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ channel, data }));
+      }
+    });
+
+    return () => disposable.dispose();
+  }, [channel, enabled]);
+
+  // Ref callback for container div
+  const attachRef = useCallback((el: HTMLDivElement | null) => {
+    containerRef.current = el;
+    if (el && termRef.current && !termRef.current.element) {
+      termRef.current.open(el);
+      // Delay fit to ensure container has dimensions
+      requestAnimationFrame(() => fitRef.current?.fit());
+    }
+  }, []);
+
+  const writeLine = useCallback((text: string) => {
+    termRef.current?.writeln(text);
+  }, []);
+
+  const fit = useCallback(() => {
+    fitRef.current?.fit();
+  }, []);
+
+  return { attachRef, terminal: termRef, writeLine, fit };
+}

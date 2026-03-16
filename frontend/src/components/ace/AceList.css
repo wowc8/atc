@@ -1,0 +1,103 @@
+.ace-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ace-list__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ace-list__header h3 {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ace-list__count {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-active);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.ace-list__create {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ace-list__create input {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  outline: none;
+  font-family: var(--font-sans);
+}
+
+.ace-list__create input:focus {
+  border-color: var(--color-accent);
+}
+
+.ace-list__tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ace-list__tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.ace-list__tab:hover {
+  background: var(--color-bg-hover);
+}
+
+.ace-list__tab.selected {
+  background: var(--color-accent-muted);
+  border-color: var(--color-accent);
+}
+
+.ace-list__tab-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ace-list__tab-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.ace-list__terminal-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 250px;
+}
+
+.ace-list__empty {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  padding: var(--space-4) 0;
+}
