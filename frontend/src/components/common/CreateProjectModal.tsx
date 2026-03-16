@@ -3,6 +3,8 @@ import { api } from "../../utils/api";
 import type { Project } from "../../types";
 import "./CreateProjectModal.css";
 
+const GITHUB_ORG_KEY = "atc:github_default_org";
+
 interface CreateProjectModalProps {
   open: boolean;
   onClose: () => void;
@@ -22,16 +24,18 @@ export default function CreateProjectModal({
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
+  const defaultOrg = localStorage.getItem(GITHUB_ORG_KEY) ?? "";
+
   useEffect(() => {
     if (open) {
       setName("");
       setDescription("");
       setRepoPath("");
-      setGithubRepo("");
+      setGithubRepo(defaultOrg ? `${defaultOrg}/` : "");
       setError(null);
       setTimeout(() => nameRef.current?.focus(), 50);
     }
-  }, [open]);
+  }, [open, defaultOrg]);
 
   useEffect(() => {
     if (!open) return;
@@ -117,8 +121,11 @@ export default function CreateProjectModal({
                 type="text"
                 value={repoPath}
                 onChange={(e) => setRepoPath(e.target.value)}
-                placeholder="/path/to/repo"
+                placeholder="/path/to/local/repo"
               />
+              <span className="form-hint">
+                Local clone path. Leave blank for net-new projects.
+              </span>
             </div>
 
             <div className="form-group">
@@ -128,8 +135,11 @@ export default function CreateProjectModal({
                 type="text"
                 value={githubRepo}
                 onChange={(e) => setGithubRepo(e.target.value)}
-                placeholder="owner/repo"
+                placeholder={defaultOrg ? `${defaultOrg}/repo-name` : "owner/repo"}
               />
+              <span className="form-hint">
+                Optional. A repo will be created after planning if left blank.
+              </span>
             </div>
           </div>
 
