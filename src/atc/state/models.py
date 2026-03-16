@@ -110,15 +110,18 @@ class UsageEvent:
 
 
 @dataclass
-class GitHubPR:
-    id: str  # "{owner}/{repo}#{number}"
-    project_id: str | None
-    number: int
-    title: str | None = None
-    status: str | None = None  # open|merged|closed
-    ci_status: str | None = None  # pending|running|success|failure
-    url: str | None = None
-    updated_at: str = ""
+class FailureLog:
+    id: str
+    level: str  # info|warning|error|critical
+    category: str  # creation_failure|runtime_error|budget_exceeded|etc
+    message: str
+    context: str  # JSON
+    created_at: str = ""
+    project_id: str | None = None
+    entity_type: str | None = None
+    entity_id: str | None = None
+    stack_trace: str | None = None
+    resolved: bool = False
 
 
 @dataclass
@@ -126,9 +129,9 @@ class Notification:
     id: str
     level: str  # info|warning|error|budget
     message: str
+    created_at: str = ""
     project_id: str | None = None
     read: bool = False
-    created_at: str = ""
 
 
 @dataclass
@@ -149,15 +152,13 @@ class TowerMemory:
 
 
 @dataclass
-class FailureLog:
+class ContextEntry:
     id: str
-    level: str  # info|warning|error|critical
-    category: str  # creation_failure|runtime_error|budget_exceeded|etc
-    message: str
-    context: str  # JSON
-    project_id: str | None = None
-    entity_type: str | None = None
-    entity_id: str | None = None
-    stack_trace: str | None = None
-    resolved: bool = False
+    project_id: str
+    key: str
+    entry_type: str  # text|status|list|link|json
+    value: str  # JSON-encoded
+    position: int = 0
+    updated_by: str = ""
     created_at: str = ""
+    updated_at: str = ""
