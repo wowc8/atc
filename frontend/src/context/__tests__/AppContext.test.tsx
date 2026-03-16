@@ -17,8 +17,8 @@ class MockWebSocket {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify([]), { status: 200 }),
+  vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+    Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
   );
   vi.stubGlobal("WebSocket", MockWebSocket);
 });
@@ -91,6 +91,10 @@ describe("AppContext", () => {
 
   it("dispatches SET_PROJECTS", async () => {
     renderWithContext(<TestConsumer />);
+    // Wait for initial fetchAll to settle
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
     await act(async () => {
       screen.getByTestId("set-projects").click();
     });

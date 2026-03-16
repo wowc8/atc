@@ -1,3 +1,184 @@
-export default function AceList() {
-  return <div>AceList</div>;
+import { useState } from "react";
+import { api } from "../../utils/api";
+import StatusBadge from "../common/StatusBadge";
+import ConfirmPopover from "../common/ConfirmPopover";
+import AceTerminal from "./AceTerminal";
+import type { Session } from "../../types";
+import "./AceList.css";
+
+interface AceListProps {
+  projectId: string;
+  sessions: Session[];
+  onRefresh: () => void;
+}
+
+export default function AceList({
+  projectId,
+  sessions,
+  onRefresh,
+}: AceListProps) {
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const selectedSession = sessions.find((s) => s.id === selectedId);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setCreating(true);
+    try {
+      const created = await api.post<Session>(`/projects/${projectId}/aces`, {
+        name: newName.trim(),
+      });
+      setNewName("");
+      setSelectedId(created.id);
+      onRefresh();
+    } catch (err) {
+      console.error("Failed to create ace:", err);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleStart(sessionId: string) {
+    setLoadingId(sessionId);
+    try {
+      await api.post(`/aces/${sessionId}/start`, {});
+      onRefresh();
+    } catch (err) {
+      console.error("Failed to start ace:", err);
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  async function handleStop(sessionId: string) {
+    setLoadingId(sessionId);
+    try {
+      await api.post(`/aces/${sessionId}/stop`);
+      onRefresh();
+    } catch (err) {
+      console.error("Failed to stop ace:", err);
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  async function handleDelete(sessionId: string) {
+    setLoadingId(sessionId);
+    try {
+      await api.delete(`/aces/${sessionId}`);
+      if (selectedId === sessionId) setSelectedId(null);
+      onRefresh();
+    } catch (err) {
+      console.error("Failed to delete ace:", err);
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  function isRunning(s: Session) {
+    return s.status === "working" || s.status === "waiting" || s.status === "connecting";
+  }
+
+  return (
+    <div className="ace-list" data-testid="ace-list">
+      <div className="ace-list__header">
+        <h3>Aces</h3>
+        <span className="ace-list__count">{sessions.length}</span>
+      </div>
+
+      {/* Create new ace */}
+      <form className="ace-list__create" onSubmit={handleCreate}>
+        <input
+          type="text"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="New ace name..."
+          disabled={creating}
+        />
+        <button
+          type="submit"
+          className="btn btn-sm btn-primary"
+          disabled={creating || !newName.trim()}
+        >
+          {creating ? "..." : "+ Add"}
+        </button>
+      </form>
+
+      {/* Session tabs */}
+      {sessions.length > 0 && (
+        <div className="ace-list__tabs">
+          {sessions.map((session) => (
+            <div
+              key={session.id}
+              className={`ace-list__tab ${selectedId === session.id ? "selected" : ""}`}
+            >
+              <button
+                className="ace-list__tab-name"
+                onClick={() => setSelectedId(session.id)}
+              >
+                <span>{session.name}</span>
+                <StatusBadge status={session.status} size="sm" />
+              </button>
+              <div className="ace-list__tab-actions">
+                {!isRunning(session) ? (
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => handleStart(session.id)}
+                    disabled={loadingId === session.id}
+                    title="Start"
+                  >
+                    Start
+                  </button>
+                ) : (
+                  <ConfirmPopover
+                    message={`Stop ${session.name}?`}
+                    confirmLabel="Stop"
+                    onConfirm={() => handleStop(session.id)}
+                    variant="danger"
+                  >
+                    <button
+                      className="btn btn-sm btn-danger"
+                      disabled={loadingId === session.id}
+                      title="Stop"
+                    >
+                      Stop
+                    </button>
+                  </ConfirmPopover>
+                )}
+                <ConfirmPopover
+                  message={`Delete ${session.name}? This cannot be undone.`}
+                  confirmLabel="Delete"
+                  onConfirm={() => handleDelete(session.id)}
+                  variant="danger"
+                >
+                  <button
+                    className="btn btn-sm btn-danger"
+                    disabled={loadingId === session.id || isRunning(session)}
+                    title="Delete"
+                  >
+                    Del
+                  </button>
+                </ConfirmPopover>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Terminal for selected ace */}
+      {selectedSession && (
+        <div className="ace-list__terminal-container">
+          <AceTerminal key={selectedSession.id} session={selectedSession} />
+        </div>
+      )}
+
+      {sessions.length === 0 && (
+        <p className="ace-list__empty">No aces yet. Create one above.</p>
+      )}
+    </div>
+  );
 }

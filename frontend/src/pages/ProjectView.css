@@ -37,63 +37,17 @@
 
 .project-view__layout {
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
 }
 
 .project-view__left {
-  overflow-y: auto;
-}
-
-.project-view__left h3 {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--space-3);
-}
-
-.project-view__muted {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-}
-
-.project-view__session-list {
-  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-}
-
-.project-view__session-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-family: var(--font-sans);
-  color: var(--color-text);
-  transition: background var(--transition-fast);
-}
-
-.project-view__session-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.project-view__session-item.selected {
-  background: var(--color-accent-muted);
-  border-color: var(--color-accent);
-}
-
-.project-view__session-name {
-  font-size: var(--text-sm);
-  font-weight: 500;
+  gap: var(--space-4);
+  overflow-y: auto;
 }
 
 .project-view__right {
@@ -101,55 +55,4 @@
   flex-direction: column;
   gap: var(--space-4);
   overflow-y: auto;
-}
-
-.project-view__leader h3,
-.project-view__tasks h3 {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--space-3);
-}
-
-.project-view__leader-info {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.project-view__leader-goal {
-  font-size: var(--text-sm);
-  color: var(--color-text);
-}
-
-.project-view__leader-meta {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-
-.project-view__task-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-3);
-}
-
-.project-view__task-col h4 {
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  letter-spacing: 0.05em;
-  margin-bottom: var(--space-2);
-}
-
-.project-view__task-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  margin-bottom: var(--space-2);
 }

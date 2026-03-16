@@ -31,7 +31,10 @@ describe("Dashboard", () => {
   it("shows empty state for projects", () => {
     renderWithProviders(<Dashboard />);
     expect(
-      screen.getByText("No active projects. Create one to get started."),
+      screen.getByText("No active projects."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Create your first project"),
     ).toBeInTheDocument();
   });
 

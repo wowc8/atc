@@ -127,14 +127,28 @@ export function AppProvider({ children }: AppProviderProps) {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [projects, sessions, notifications] = await Promise.all([
-        api.get<Project[]>("/projects"),
-        api.get<Session[]>("/sessions"),
-        api.get<Notification[]>("/notifications"),
-      ]);
+      const projects = await api.get<Project[]>("/projects");
       dispatch({ type: "SET_PROJECTS", payload: projects });
-      dispatch({ type: "SET_SESSIONS", payload: sessions });
-      dispatch({ type: "SET_NOTIFICATIONS", payload: notifications });
+
+      // Fetch aces per project + leader per project
+      const sessionResults = await Promise.allSettled(
+        projects.map((p) => api.get<Session[]>(`/projects/${p.id}/aces`)),
+      );
+      const allSessions: Session[] = [];
+      for (const r of sessionResults) {
+        if (r.status === "fulfilled") allSessions.push(...r.value);
+      }
+      dispatch({ type: "SET_SESSIONS", payload: allSessions });
+
+      const leaderResults = await Promise.allSettled(
+        projects.map((p) => api.get<Leader>(`/projects/${p.id}/manager`)),
+      );
+      const leaders: Record<string, Leader> = {};
+      for (let i = 0; i < projects.length; i++) {
+        const r = leaderResults[i]!;
+        if (r.status === "fulfilled") leaders[projects[i]!.id] = r.value;
+      }
+      dispatch({ type: "SET_LEADERS", payload: leaders });
     } catch {
       /* backend may not be running yet — silent fail */
     }

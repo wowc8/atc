@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import StatusBadge from "../components/common/StatusBadge";
 import TimeAgo from "../components/common/TimeAgo";
+import CreateProjectModal from "../components/common/CreateProjectModal";
 import "./Dashboard.css";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { state } = useAppContext();
+  const { state, fetchAll } = useAppContext();
   const { projects, sessions, usage, notifications } = state;
+  const [showCreate, setShowCreate] = useState(false);
 
   const activeProjects = projects.filter((p) => p.status === "active");
 
@@ -15,6 +18,12 @@ export default function Dashboard() {
     <div className="dashboard" data-testid="dashboard-page">
       <div className="dashboard__header">
         <h1>Dashboard</h1>
+        <button
+          className="btn btn-primary"
+          onClick={() => setShowCreate(true)}
+        >
+          + New Project
+        </button>
       </div>
 
       <div className="dashboard__grid">
@@ -90,7 +99,14 @@ export default function Dashboard() {
         <h2>Projects</h2>
         {activeProjects.length === 0 ? (
           <div className="dashboard__empty">
-            No active projects. Create one to get started.
+            <p>No active projects.</p>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowCreate(true)}
+              style={{ marginTop: "var(--space-3)" }}
+            >
+              Create your first project
+            </button>
           </div>
         ) : (
           <div className="dashboard__project-grid">
@@ -124,6 +140,14 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      <CreateProjectModal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={() => {
+          void fetchAll();
+        }}
+      />
     </div>
   );
 }
