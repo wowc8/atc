@@ -1,0 +1,164 @@
+"""Agent provider base protocol — abstract interface for CLI tool backends.
+
+Defines the contract that all agent providers (Claude Code, OpenCode, etc.)
+must implement. The session lifecycle delegates to a provider rather than
+hardcoding tmux commands directly.
+"""
+
+from __future__ import annotations
+
+import enum
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+
+class SessionStatus(enum.Enum):
+    """Lifecycle status of a provider-managed session."""
+
+    STARTING = "starting"
+    IDLE = "idle"
+    BUSY = "busy"
+    ERROR = "error"
+    STOPPED = "stopped"
+
+
+@dataclass(frozen=True)
+class SessionInfo:
+    """Snapshot of a session's current state as reported by the provider."""
+
+    session_id: str
+    status: SessionStatus
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PromptResult:
+    """Result of sending a prompt to a session."""
+
+    session_id: str
+    accepted: bool
+    message: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OutputChunk:
+    """A chunk of streaming output from a session."""
+
+    session_id: str
+    content: str
+    is_final: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class AgentProvider(Protocol):
+    """Protocol defining the interface for agent CLI tool backends.
+
+    Each provider encapsulates one way of running an AI coding agent
+    (e.g. Claude Code via tmux+PTY, OpenCode via REST API). The session
+    lifecycle layer uses this interface instead of calling tmux directly.
+    """
+
+    @property
+    def name(self) -> str:
+        """Human-readable provider name (e.g. 'claude_code', 'opencode')."""
+        ...
+
+    async def spawn_session(
+        self,
+        session_id: str,
+        *,
+        working_dir: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> SessionInfo:
+        """Spawn a new agent session.
+
+        Args:
+            session_id: Unique identifier for this session.
+            working_dir: Working directory for the agent process.
+            env: Extra environment variables to pass.
+
+        Returns:
+            SessionInfo with initial status.
+
+        Raises:
+            ProviderError: If the session cannot be spawned.
+        """
+        ...
+
+    async def send_prompt(self, session_id: str, prompt: str) -> PromptResult:
+        """Send a prompt/instruction to an existing session.
+
+        Args:
+            session_id: Target session identifier.
+            prompt: The text prompt to send.
+
+        Returns:
+            PromptResult indicating acceptance.
+
+        Raises:
+            ProviderError: If the prompt cannot be delivered.
+        """
+        ...
+
+    async def get_status(self, session_id: str) -> SessionInfo:
+        """Get the current status of a session.
+
+        Args:
+            session_id: Target session identifier.
+
+        Returns:
+            SessionInfo with current status.
+
+        Raises:
+            ProviderError: If the session is not found.
+        """
+        ...
+
+    async def stream_output(self, session_id: str) -> AsyncIterator[OutputChunk]:
+        """Stream real-time output from a session.
+
+        Yields OutputChunk objects as the agent produces output.
+        The final chunk has ``is_final=True``.
+
+        Args:
+            session_id: Target session identifier.
+
+        Yields:
+            OutputChunk with content fragments.
+
+        Raises:
+            ProviderError: If the stream cannot be established.
+        """
+        ...
+
+    async def stop_session(self, session_id: str) -> None:
+        """Stop and clean up a session.
+
+        Args:
+            session_id: Target session identifier.
+
+        Raises:
+            ProviderError: If the session cannot be stopped cleanly.
+        """
+        ...
+
+    async def list_sessions(self) -> list[SessionInfo]:
+        """List all sessions managed by this provider.
+
+        Returns:
+            List of SessionInfo for all known sessions.
+        """
+        ...
+
+
+class ProviderError(Exception):
+    """Base exception for agent provider errors."""
+
+    def __init__(self, provider: str, message: str) -> None:
+        self.provider = provider
+        super().__init__(f"[{provider}] {message}")

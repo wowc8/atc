@@ -47,6 +47,17 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
+class AgentProviderConfig(BaseModel):
+    """Configuration for the agent provider abstraction layer."""
+
+    default: str = "claude_code"
+    opencode_url: str = "http://localhost:4096"
+    opencode_username: str | None = None
+    opencode_password: str | None = None
+    tmux_session: str = "atc"
+    claude_command: str = "claude"
+
+
 class Settings(BaseSettings):
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
@@ -56,6 +67,7 @@ class Settings(BaseSettings):
     budget: BudgetConfig = BudgetConfig()
     cost_tracker: CostTrackerConfig = CostTrackerConfig()
     logging: LoggingConfig = LoggingConfig()
+    agent_provider: AgentProviderConfig = AgentProviderConfig()
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
