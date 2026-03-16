@@ -110,6 +110,18 @@ class UsageEvent:
 
 
 @dataclass
+class GitHubPR:
+    id: str  # "{owner}/{repo}#{number}"
+    project_id: str | None
+    number: int
+    title: str | None = None
+    status: str | None = None  # open|merged|closed
+    ci_status: str | None = None  # pending|running|success|failure
+    url: str | None = None
+    updated_at: str = ""
+
+
+@dataclass
 class FailureLog:
     id: str
     level: str  # info|warning|error|critical
