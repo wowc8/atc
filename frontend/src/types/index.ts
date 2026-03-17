@@ -117,6 +117,13 @@ export interface TowerStatus {
   active_projects: number;
 }
 
+export interface TowerDetail {
+  state: string;
+  current_goal: string | null;
+  current_project_id: string | null;
+  current_session_id: string | null;
+}
+
 export interface FailureLog {
   id: string;
   level: "info" | "warning" | "error" | "critical";
@@ -139,6 +146,7 @@ export interface AppState {
   taskGraphs: Record<string, TaskGraph[]>;
   budgets: Record<string, Budget>;
   brainStatus: TowerStatus;
+  towerDetail: TowerDetail;
   notifications: Notification[];
   failureLogs: FailureLog[];
   usage: UsageSummary;
