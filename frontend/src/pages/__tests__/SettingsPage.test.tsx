@@ -64,4 +64,31 @@ describe("SettingsPage", () => {
     fireEvent.change(input, { target: { value: "" } });
     expect(localStorage.getItem("atc:github_default_org")).toBeNull();
   });
+
+  it("shows export section", () => {
+    renderWithProviders(<SettingsPage />);
+    expect(screen.getByTestId("export-section")).toBeInTheDocument();
+    expect(screen.getByText("Export")).toBeInTheDocument();
+  });
+
+  it("shows export all button", () => {
+    renderWithProviders(<SettingsPage />);
+    expect(screen.getByTestId("export-all-btn")).toBeInTheDocument();
+  });
+
+  it("shows import section", () => {
+    renderWithProviders(<SettingsPage />);
+    expect(screen.getByTestId("import-section")).toBeInTheDocument();
+    expect(screen.getByText("Import")).toBeInTheDocument();
+  });
+
+  it("shows import project button", () => {
+    renderWithProviders(<SettingsPage />);
+    expect(screen.getByTestId("import-project-btn")).toBeInTheDocument();
+  });
+
+  it("shows import all button", () => {
+    renderWithProviders(<SettingsPage />);
+    expect(screen.getByTestId("import-all-btn")).toBeInTheDocument();
+  });
 });
