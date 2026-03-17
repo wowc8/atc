@@ -1,8 +1,9 @@
-"""Tower REST endpoints — minimal for Milestone 1.
+"""Tower REST endpoints — goal intake and tower status.
 
 Routes:
   GET    /api/tower/status           → Tower status summary
-  POST   /api/tower/goal             → submit new goal
+  POST   /api/tower/goal             → submit new goal (creates Leader + context)
+  POST   /api/tower/cancel           → cancel current goal
   GET    /api/tower/memory           → list tower memory entries
   DELETE /api/tower/memory/{key}     → forget a memory entry
 """
@@ -11,6 +12,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+
+from atc.tower.controller import TowerBusyError, TowerController
 
 router = APIRouter()
 
@@ -24,6 +27,10 @@ class TowerStatusResponse(BaseModel):
     status: str
     active_projects: int
     total_sessions: int
+    state: str
+    current_goal: str | None
+    current_project_id: str | None
+    current_session_id: str | None
 
 
 class MemoryEntry(BaseModel):
@@ -39,10 +46,18 @@ async def _get_db(request: Request):  # noqa: ANN202
     return request.app.state.db
 
 
+def _get_tower(request: Request) -> TowerController:
+    tower: TowerController | None = getattr(request.app.state, "tower_controller", None)
+    if tower is None:
+        raise HTTPException(status_code=503, detail="Tower controller not initialized")
+    return tower
+
+
 @router.get("/status", response_model=TowerStatusResponse)
 async def tower_status(request: Request) -> TowerStatusResponse:
     """Return a summary of the Tower's current state."""
     db = await _get_db(request)
+    tower = _get_tower(request)
 
     cursor = await db.execute("SELECT COUNT(*) FROM projects WHERE status = 'active'")
     row = await cursor.fetchone()
@@ -52,18 +67,28 @@ async def tower_status(request: Request) -> TowerStatusResponse:
     row = await cursor.fetchone()
     total_sessions = row[0] if row else 0
 
+    controller_status = tower.get_status()
+
     return TowerStatusResponse(
         status="running",
         active_projects=active_projects,
         total_sessions=total_sessions,
+        state=controller_status["state"],
+        current_goal=controller_status["current_goal"],
+        current_project_id=controller_status["current_project_id"],
+        current_session_id=controller_status["current_session_id"],
     )
 
 
 @router.post("/goal")
-async def submit_goal(body: GoalRequest, request: Request) -> dict[str, str]:
-    """Submit a new goal for a project's Leader to work on."""
+async def submit_goal(body: GoalRequest, request: Request) -> dict:
+    """Submit a new goal for a project's Leader to work on.
+
+    The Tower controller builds a context package, starts the Leader
+    session, and begins monitoring progress.
+    """
     db = await _get_db(request)
-    event_bus = getattr(request.app.state, "event_bus", None)
+    tower = _get_tower(request)
 
     # Verify project exists
     cursor = await db.execute("SELECT id FROM projects WHERE id = ?", (body.project_id,))
@@ -71,20 +96,26 @@ async def submit_goal(body: GoalRequest, request: Request) -> dict[str, str]:
     if row is None:
         raise HTTPException(status_code=404, detail=f"Project {body.project_id} not found")
 
-    # Update leader goal
-    await db.execute(
-        "UPDATE leaders SET goal = ?, updated_at = datetime('now') WHERE project_id = ?",
-        (body.goal, body.project_id),
-    )
-    await db.commit()
+    try:
+        result = await tower.submit_goal(body.project_id, body.goal)
+    except TowerBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if event_bus:
-        await event_bus.publish(
-            "tower_goal_submitted",
-            {"project_id": body.project_id, "goal": body.goal},
-        )
+    return result
 
-    return {"status": "accepted", "project_id": body.project_id}
+
+@router.post("/cancel")
+async def cancel_goal(request: Request) -> dict:
+    """Cancel the current goal and stop the Leader session."""
+    tower = _get_tower(request)
+
+    if tower.state.value == "idle":
+        raise HTTPException(status_code=409, detail="No active goal to cancel")
+
+    await tower.cancel_goal()
+    return {"status": "cancelled"}
 
 
 @router.get("/memory", response_model=list[MemoryEntry])
