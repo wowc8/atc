@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
-from atc.state.models import Leader, Project, Session
+from atc.state.models import Leader, Project, Session, TaskGraph
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator
@@ -310,6 +310,18 @@ CREATE TABLE IF NOT EXISTS tower_memory (
     updated_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS task_graphs (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id),
+    title           TEXT NOT NULL,
+    description     TEXT,
+    status          TEXT NOT NULL DEFAULT 'todo',
+    assigned_ace_id TEXT,
+    dependencies    TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS context_entries (
     id          TEXT PRIMARY KEY,
     project_id  TEXT NOT NULL REFERENCES projects(id),
@@ -588,3 +600,184 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
     d["alternate_on"] = bool(d.get("alternate_on", 0))
     d["auto_accept"] = bool(d.get("auto_accept", 0))
     return Session(**d)
+
+
+# ---------------------------------------------------------------------------
+# TaskGraph CRUD
+# ---------------------------------------------------------------------------
+
+_VALID_TASK_GRAPH_STATUSES = {"todo", "in_progress", "done"}
+
+_TASK_GRAPH_TRANSITIONS: dict[str, set[str]] = {
+    "todo": {"in_progress", "done"},
+    "in_progress": {"todo", "done"},
+    "done": {"todo", "in_progress"},
+}
+
+
+def _row_to_task_graph(row: aiosqlite.Row) -> TaskGraph:
+    d = dict(row)
+    if d.get("dependencies"):
+        d["dependencies"] = json.loads(d["dependencies"])
+    return TaskGraph(**d)
+
+
+async def create_task_graph(
+    db: aiosqlite.Connection,
+    project_id: str,
+    title: str,
+    *,
+    description: str | None = None,
+    status: str = "todo",
+    assigned_ace_id: str | None = None,
+    dependencies: list[str] | None = None,
+) -> TaskGraph:
+    """Insert a new task_graph row and return the dataclass."""
+    if status not in _VALID_TASK_GRAPH_STATUSES:
+        raise ValueError(f"Invalid status: {status}")
+    now = _now()
+    tg = TaskGraph(
+        id=_uuid(),
+        project_id=project_id,
+        title=title,
+        status=status,
+        description=description,
+        assigned_ace_id=assigned_ace_id,
+        dependencies=dependencies,
+        created_at=now,
+        updated_at=now,
+    )
+    await db.execute(
+        """INSERT INTO task_graphs
+           (id, project_id, title, description, status, assigned_ace_id,
+            dependencies, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            tg.id,
+            tg.project_id,
+            tg.title,
+            tg.description,
+            tg.status,
+            tg.assigned_ace_id,
+            tg.dependencies_json(),
+            tg.created_at,
+            tg.updated_at,
+        ),
+    )
+    await db.commit()
+    return tg
+
+
+async def get_task_graph(
+    db: aiosqlite.Connection, task_graph_id: str,
+) -> TaskGraph | None:
+    """Fetch a single task_graph by id."""
+    cursor = await db.execute(
+        "SELECT * FROM task_graphs WHERE id = ?", (task_graph_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _row_to_task_graph(row)
+
+
+async def list_task_graphs(
+    db: aiosqlite.Connection,
+    *,
+    project_id: str | None = None,
+) -> list[TaskGraph]:
+    """Return task graphs, optionally filtered by project."""
+    if project_id:
+        cursor = await db.execute(
+            "SELECT * FROM task_graphs WHERE project_id = ? ORDER BY created_at DESC",
+            (project_id,),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT * FROM task_graphs ORDER BY created_at DESC",
+        )
+    rows = await cursor.fetchall()
+    return [_row_to_task_graph(r) for r in rows]
+
+
+async def update_task_graph(
+    db: aiosqlite.Connection,
+    task_graph_id: str,
+    *,
+    title: str | None = None,
+    description: str | None = ...,  # type: ignore[assignment]
+    assigned_ace_id: str | None = ...,  # type: ignore[assignment]
+    dependencies: list[str] | None = ...,  # type: ignore[assignment]
+) -> TaskGraph | None:
+    """Update a task_graph's fields (only non-sentinel values)."""
+    existing = await get_task_graph(db, task_graph_id)
+    if existing is None:
+        return None
+
+    sets: list[str] = []
+    params: list[Any] = []
+
+    if title is not None:
+        sets.append("title = ?")
+        params.append(title)
+    if description is not ...:
+        sets.append("description = ?")
+        params.append(description)
+    if assigned_ace_id is not ...:
+        sets.append("assigned_ace_id = ?")
+        params.append(assigned_ace_id)
+    if dependencies is not ...:
+        sets.append("dependencies = ?")
+        params.append(json.dumps(dependencies) if dependencies is not None else None)
+
+    if not sets:
+        return existing
+
+    sets.append("updated_at = ?")
+    params.append(_now())
+    params.append(task_graph_id)
+
+    await db.execute(
+        f"UPDATE task_graphs SET {', '.join(sets)} WHERE id = ?",
+        params,
+    )
+    await db.commit()
+    return await get_task_graph(db, task_graph_id)
+
+
+async def update_task_graph_status(
+    db: aiosqlite.Connection,
+    task_graph_id: str,
+    new_status: str,
+) -> TaskGraph | None:
+    """Transition task_graph status with validation."""
+    if new_status not in _VALID_TASK_GRAPH_STATUSES:
+        raise ValueError(f"Invalid status: {new_status}")
+
+    existing = await get_task_graph(db, task_graph_id)
+    if existing is None:
+        return None
+
+    allowed = _TASK_GRAPH_TRANSITIONS.get(existing.status, set())
+    if new_status not in allowed:
+        raise ValueError(
+            f"Cannot transition from '{existing.status}' to '{new_status}'"
+        )
+
+    await db.execute(
+        "UPDATE task_graphs SET status = ?, updated_at = ? WHERE id = ?",
+        (new_status, _now(), task_graph_id),
+    )
+    await db.commit()
+    return await get_task_graph(db, task_graph_id)
+
+
+async def delete_task_graph(
+    db: aiosqlite.Connection, task_graph_id: str,
+) -> bool:
+    """Hard-delete a task_graph row. Returns True if deleted."""
+    cursor = await db.execute(
+        "DELETE FROM task_graphs WHERE id = ?", (task_graph_id,),
+    )
+    await db.commit()
+    return cursor.rowcount > 0

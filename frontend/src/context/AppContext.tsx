@@ -13,6 +13,7 @@ import type {
   Session,
   Notification,
   Task,
+  TaskGraph,
   Budget,
   UsageSummary,
   GitHubSummary,
@@ -29,6 +30,7 @@ const initialState: AppState = {
   leaders: {},
   sessions: [],
   tasks: {},
+  taskGraphs: {},
   budgets: {},
   brainStatus: { status: "idle", message: "", active_projects: 0 },
   notifications: [],
@@ -47,6 +49,7 @@ type Action =
   | { type: "SET_LEADERS"; payload: Record<string, Leader> }
   | { type: "SET_SESSIONS"; payload: Session[] }
   | { type: "SET_TASKS"; payload: Record<string, Task[]> }
+  | { type: "SET_TASK_GRAPHS"; payload: Record<string, TaskGraph[]> }
   | { type: "SET_BUDGETS"; payload: Record<string, Budget> }
   | { type: "SET_BRAIN_STATUS"; payload: TowerStatus }
   | { type: "SET_NOTIFICATIONS"; payload: Notification[] }
@@ -69,6 +72,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, sessions: action.payload };
     case "SET_TASKS":
       return { ...state, tasks: action.payload };
+    case "SET_TASK_GRAPHS":
+      return { ...state, taskGraphs: action.payload };
     case "SET_BUDGETS":
       return { ...state, budgets: action.payload };
     case "SET_BRAIN_STATUS":
@@ -149,6 +154,18 @@ export function AppProvider({ children }: AppProviderProps) {
         if (r.status === "fulfilled") leaders[projects[i]!.id] = r.value;
       }
       dispatch({ type: "SET_LEADERS", payload: leaders });
+
+      const taskGraphResults = await Promise.allSettled(
+        projects.map((p) =>
+          api.get<TaskGraph[]>(`/projects/${p.id}/task-graphs`),
+        ),
+      );
+      const taskGraphs: Record<string, TaskGraph[]> = {};
+      for (let i = 0; i < projects.length; i++) {
+        const r = taskGraphResults[i]!;
+        if (r.status === "fulfilled") taskGraphs[projects[i]!.id] = r.value;
+      }
+      dispatch({ type: "SET_TASK_GRAPHS", payload: taskGraphs });
     } catch {
       /* backend may not be running yet — silent fail */
     }

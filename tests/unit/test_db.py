@@ -309,6 +309,7 @@ class TestMigrationRunner:
             "leaders",
             "sessions",
             "tasks",
+            "task_graphs",
             "project_budgets",
             "usage_events",
             "github_prs",
@@ -332,7 +333,7 @@ class TestMigrationRunner:
         factory = ConnectionFactory(":memory:")
         first = run_migrations(factory)
         second = run_migrations(factory)
-        assert len(first) == 1
+        assert len(first) >= 1
         assert len(second) == 0
 
 

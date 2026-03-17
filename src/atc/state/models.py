@@ -164,6 +164,28 @@ class TowerMemory:
 
 
 @dataclass
+class TaskGraph:
+    id: str
+    project_id: str
+    title: str
+    status: str  # todo|in_progress|done
+    description: str | None = None
+    assigned_ace_id: str | None = None
+    dependencies: list[str] | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+    def dependencies_json(self) -> str | None:
+        """Serialize dependencies list to JSON for DB storage."""
+        return json.dumps(self.dependencies) if self.dependencies is not None else None
+
+    @staticmethod
+    def dependencies_from_json(raw: str | None) -> list[str] | None:
+        """Deserialize dependencies JSON from DB."""
+        return json.loads(raw) if raw is not None else None
+
+
+@dataclass
 class ContextEntry:
     id: str
     project_id: str
