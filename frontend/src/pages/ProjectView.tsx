@@ -10,12 +10,12 @@ import "./ProjectView.css";
 export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const { state, fetchAll } = useAppContext();
-  const { projects, sessions, leaders, tasks } = state;
+  const { projects, sessions, leaders, taskGraphs } = state;
 
   const project = projects.find((p) => p.id === id);
   const projectSessions = sessions.filter((s) => s.project_id === id);
   const leader = id ? leaders[id] : undefined;
-  const projectTasks = id ? (tasks[id] ?? []) : [];
+  const projectTaskGraphs = id ? (taskGraphs[id] ?? []) : [];
 
   if (!project) {
     return (
@@ -41,8 +41,27 @@ export default function ProjectView() {
       </div>
 
       <div className="project-view__layout">
-        {/* Left panel — Leader + Context */}
+        {/* Left panel — Tasks (top) + Workers (bottom) */}
         <aside className="project-view__left">
+          <div className="panel">
+            <TaskBoard
+              projectId={project.id}
+              taskGraphs={projectTaskGraphs}
+              onRefresh={fetchAll}
+            />
+          </div>
+
+          <div className="panel">
+            <AceList
+              projectId={project.id}
+              sessions={projectSessions}
+              onRefresh={fetchAll}
+            />
+          </div>
+        </aside>
+
+        {/* Right panel — Leader + Context */}
+        <main className="project-view__right">
           <div className="panel">
             <LeaderConsole
               projectId={project.id}
@@ -53,21 +72,6 @@ export default function ProjectView() {
 
           <div className="panel">
             <ContextViewer leader={leader} />
-          </div>
-        </aside>
-
-        {/* Right panel — Aces + Tasks */}
-        <main className="project-view__right">
-          <div className="panel">
-            <AceList
-              projectId={project.id}
-              sessions={projectSessions}
-              onRefresh={fetchAll}
-            />
-          </div>
-
-          <div className="panel">
-            <TaskBoard tasks={projectTasks} />
           </div>
         </main>
       </div>

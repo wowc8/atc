@@ -1,9 +1,30 @@
-.task-board h3 {
+.task-board__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.task-board__header h3 {
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: var(--space-3);
+  margin: 0;
+}
+
+.task-board__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.task-board__view-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  padding: 2px;
 }
 
 .task-board__empty {
@@ -11,6 +32,7 @@
   color: var(--color-text-muted);
 }
 
+/* Kanban grid */
 .task-board__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -36,6 +58,7 @@
   font-weight: 400;
 }
 
+/* Card */
 .task-board__card {
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg);
@@ -62,9 +85,100 @@
   font-family: var(--font-mono);
 }
 
+.task-board__unassigned {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 .task-board__card-desc {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   margin-top: var(--space-1);
   line-height: 1.4;
+}
+
+.task-board__card-actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+/* Create form */
+.task-board__create-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.task-board__create-input {
+  width: 100%;
+  padding: var(--space-2);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.task-board__create-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.task-board__create-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* Table view */
+.task-board__table-wrap {
+  overflow-x: auto;
+}
+
+.task-board__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.task-board__table th {
+  text-align: left;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.task-board__table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: middle;
+}
+
+.task-board__table tbody tr:hover {
+  background: var(--color-bg-elevated);
+}
+
+.task-board__table-title {
+  font-weight: 500;
+  display: block;
+}
+
+.task-board__table-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  display: block;
+  margin-top: 2px;
+}
+
+.task-board__table-actions {
+  display: flex;
+  gap: var(--space-1);
 }

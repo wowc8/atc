@@ -66,6 +66,18 @@ export interface Task {
   updated_at: string;
 }
 
+export interface TaskGraph {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string | null;
+  status: "todo" | "in_progress" | "done";
+  assigned_ace_id: string | null;
+  dependencies: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Budget {
   project_id: string;
   daily_token_limit: number | null;
@@ -110,6 +122,7 @@ export interface AppState {
   leaders: Record<string, Leader>;
   sessions: Session[];
   tasks: Record<string, Task[]>;
+  taskGraphs: Record<string, TaskGraph[]>;
   budgets: Record<string, Budget>;
   brainStatus: TowerStatus;
   notifications: Notification[];

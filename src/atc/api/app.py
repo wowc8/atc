@@ -160,12 +160,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     # Register routers
-    from atc.api.routers import aces, projects, tasks, tower, usage
+    from atc.api.routers import aces, projects, task_graphs, tasks, tower, usage
     from atc.api.routers import settings as settings_router
 
     app.include_router(tower.router, prefix="/api/tower", tags=["tower"])
     app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
     app.include_router(tasks.router, prefix="/api", tags=["tasks"])
+    app.include_router(task_graphs.router, prefix="/api", tags=["task_graphs"])
     app.include_router(aces.router, prefix="/api", tags=["aces"])
     app.include_router(usage.router, prefix="/api/usage", tags=["usage"])
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
