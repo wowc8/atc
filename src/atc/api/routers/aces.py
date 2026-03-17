@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from atc.agents.deploy import AceDeploySpec, deploy_ace_files
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
 from atc.state import db as db_ops
@@ -34,6 +35,8 @@ class CreateAceRequest(BaseModel):
     name: str
     task_id: str | None = None
     host: str | None = None
+    task_title: str | None = None
+    task_description: str | None = None
 
 
 class StartAceRequest(BaseModel):
@@ -118,6 +121,21 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
+    # Deploy config files so the Ace gets CLAUDE.md + hooks
+    import uuid
+
+    preview_id = str(uuid.uuid4())
+    spec = AceDeploySpec(
+        session_id=preview_id,
+        project_name=project.name,
+        task_title=body.task_title or body.name,
+        task_description=body.task_description,
+        repo_path=project.repo_path,
+        github_repo=project.github_repo,
+    )
+    deployed = deploy_ace_files(spec)
+    working_dir = project.repo_path or str(deployed.root)
+
     session_id = await ace_ops.create_ace(
         db,
         project_id,
@@ -125,6 +143,8 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
         task_id=body.task_id,
         host=body.host,
         event_bus=event_bus,
+        working_dir=working_dir,
+        launch_command="claude --dangerously-skip-permissions",
     )
     session = await db_ops.get_session(db, session_id)
     if session is None:
@@ -160,7 +180,9 @@ async def stop_ace(session_id: str, request: Request) -> dict[str, str]:
 
 @router.patch("/aces/{session_id}/status")
 async def update_ace_status(
-    session_id: str, body: StatusUpdateRequest, request: Request,
+    session_id: str,
+    body: StatusUpdateRequest,
+    request: Request,
 ) -> dict[str, str]:
     """Update session status — called by PostToolUse and Stop hooks."""
     from atc.session.state_machine import SessionStatus, transition
@@ -175,9 +197,7 @@ async def update_ace_status(
     try:
         target = SessionStatus(body.status)
     except ValueError:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid status: {body.status}"
-        ) from None
+        raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}") from None
 
     current = SessionStatus(session.status)
     if current == target:
@@ -194,7 +214,9 @@ async def update_ace_status(
 
 @router.post("/aces/{session_id}/notify")
 async def notify_ace(
-    session_id: str, body: NotifyRequest, request: Request,
+    session_id: str,
+    body: NotifyRequest,
+    request: Request,
 ) -> dict[str, str]:
     """Receive a notification from an agent's Notification hook."""
     import logging
@@ -218,10 +240,13 @@ async def notify_ace(
     # Broadcast to WebSocket clients
     ws_hub = getattr(request.app.state, "ws_hub", None)
     if ws_hub is not None:
-        await ws_hub.broadcast("notifications", {
-            "session_id": session_id,
-            "message": body.message,
-        })
+        await ws_hub.broadcast(
+            "notifications",
+            {
+                "session_id": session_id,
+                "message": body.message,
+            },
+        )
 
     logger = logging.getLogger(__name__)
     logger.info("Notification from %s: %s", session_id, body.message)
@@ -231,7 +256,9 @@ async def notify_ace(
 
 @router.post("/aces/{session_id}/message")
 async def message_ace(
-    session_id: str, body: MessageRequest, request: Request,
+    session_id: str,
+    body: MessageRequest,
+    request: Request,
 ) -> dict[str, str]:
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
@@ -250,9 +277,7 @@ async def message_ace(
     if current in (SessionStatus.IDLE, SessionStatus.WAITING):
         try:
             await transition(session.id, current, SessionStatus.WORKING, event_bus)
-            await db_ops.update_session_status(
-                db, session.id, SessionStatus.WORKING.value
-            )
+            await db_ops.update_session_status(db, session.id, SessionStatus.WORKING.value)
         except InvalidTransitionError:
             pass
 
