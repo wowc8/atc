@@ -246,6 +246,7 @@ class TestTowerStatus:
         assert data["status"] == "running"
         assert data["active_projects"] == 0
         assert data["total_sessions"] == 0
+        assert data["state"] == "idle"
 
     def test_tower_status_after_project(self, client: TestClient) -> None:
         client.post("/api/projects", json={"name": "counted-proj"})
@@ -266,7 +267,16 @@ class TestTowerStatus:
         # At least 1 session (the ace; leader session is only created on start)
         assert data["total_sessions"] >= 1
 
-    def test_submit_goal(self, client: TestClient) -> None:
+    @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
+    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
+    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    def test_submit_goal(
+        self,
+        mock_ensure: AsyncMock,
+        mock_spawn: AsyncMock,
+        mock_send: AsyncMock,
+        client: TestClient,
+    ) -> None:
         resp = client.post("/api/projects", json={"name": "goal-proj"})
         project_id = resp.json()["id"]
 
@@ -275,7 +285,12 @@ class TestTowerStatus:
             json={"project_id": project_id, "goal": "Ship v1"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "accepted"
+        data = resp.json()
+        assert data["status"] == "accepted"
+        assert data["project_id"] == project_id
+        assert "session_id" in data
+        assert "context_package" in data
+        assert data["context_package"]["goal"] == "Ship v1"
 
     def test_submit_goal_missing_project(self, client: TestClient) -> None:
         resp = client.post(
@@ -283,6 +298,63 @@ class TestTowerStatus:
             json={"project_id": "nonexistent", "goal": "Ship v1"},
         )
         assert resp.status_code == 404
+
+    @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
+    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
+    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    def test_submit_goal_twice_returns_conflict(
+        self,
+        mock_ensure: AsyncMock,
+        mock_spawn: AsyncMock,
+        mock_send: AsyncMock,
+        client: TestClient,
+    ) -> None:
+        resp = client.post("/api/projects", json={"name": "busy-proj"})
+        project_id = resp.json()["id"]
+
+        resp = client.post(
+            "/api/tower/goal",
+            json={"project_id": project_id, "goal": "First goal"},
+        )
+        assert resp.status_code == 200
+
+        resp = client.post(
+            "/api/tower/goal",
+            json={"project_id": project_id, "goal": "Second goal"},
+        )
+        assert resp.status_code == 409
+
+    @patch("atc.leader.leader._kill_pane", new_callable=AsyncMock)
+    @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
+    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
+    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    def test_cancel_goal(
+        self,
+        mock_ensure: AsyncMock,
+        mock_spawn: AsyncMock,
+        mock_send: AsyncMock,
+        mock_kill: AsyncMock,
+        client: TestClient,
+    ) -> None:
+        resp = client.post("/api/projects", json={"name": "cancel-proj"})
+        project_id = resp.json()["id"]
+
+        client.post(
+            "/api/tower/goal",
+            json={"project_id": project_id, "goal": "Cancel me"},
+        )
+
+        resp = client.post("/api/tower/cancel")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+        # Tower should be idle again
+        resp = client.get("/api/tower/status")
+        assert resp.json()["state"] == "idle"
+
+    def test_cancel_no_active_goal(self, client: TestClient) -> None:
+        resp = client.post("/api/tower/cancel")
+        assert resp.status_code == 409
 
 
 # ---------------------------------------------------------------------------

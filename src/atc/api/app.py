@@ -50,6 +50,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ws_hub = WsHub()
     app.state.ws_hub = ws_hub
 
+    # 4b. Start Tower controller
+    from atc.tower.controller import TowerController
+
+    tower_controller = TowerController(db, event_bus, ws_hub=ws_hub)
+    app.state.tower_controller = tower_controller
+
     # 5. Start PTY stream pool and wire to WsHub
     pty_pool = PtyStreamPool(event_bus)
     await pty_pool.start()
