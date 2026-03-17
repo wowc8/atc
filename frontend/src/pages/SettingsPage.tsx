@@ -26,6 +26,7 @@ export default function SettingsPage() {
   // Export state
   const [exportStatus, setExportStatus] = useState<ExportStatus>("idle");
   const [exportError, setExportError] = useState("");
+  const [selectedExportProjectId, setSelectedExportProjectId] = useState("");
 
   // Import state
   const [importStatus, setImportStatus] = useState<ImportStatus>("idle");
@@ -153,12 +154,7 @@ export default function SettingsPage() {
           <h2>Connection</h2>
           <div className="form-group">
             <label htmlFor="backend-url">Backend URL</label>
-            <input
-              id="backend-url"
-              type="text"
-              value={backendUrl}
-              readOnly
-            />
+            <input id="backend-url" type="text" value={backendUrl} readOnly />
           </div>
           <div className="settings-page__status">
             <span className="settings-page__dot settings-page__dot--connected" />
@@ -225,11 +221,8 @@ export default function SettingsPage() {
                   <select
                     id="export-project-select"
                     data-testid="export-project-select"
-                    defaultValue=""
-                    onChange={(e) => {
-                      if (e.target.value) handleExportProject(e.target.value);
-                      e.target.value = "";
-                    }}
+                    value={selectedExportProjectId}
+                    onChange={(e) => setSelectedExportProjectId(e.target.value)}
                     disabled={exportStatus === "exporting"}
                   >
                     <option value="" disabled>
@@ -241,13 +234,28 @@ export default function SettingsPage() {
                       </option>
                     ))}
                   </select>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      if (selectedExportProjectId) {
+                        handleExportProject(selectedExportProjectId);
+                        setSelectedExportProjectId("");
+                      }
+                    }}
+                    disabled={
+                      exportStatus === "exporting" || !selectedExportProjectId
+                    }
+                    data-testid="export-project-btn"
+                  >
+                    Export
+                  </button>
                 </div>
               </div>
             )}
 
             <button
               className="btn btn-primary"
-              onClick={handleExportAll}
+              onClick={() => handleExportAll()}
               disabled={exportStatus === "exporting"}
               data-testid="export-all-btn"
             >
@@ -256,7 +264,10 @@ export default function SettingsPage() {
           </div>
 
           {exportStatus === "exporting" && (
-            <div className="settings-page__progress" data-testid="export-progress">
+            <div
+              className="settings-page__progress"
+              data-testid="export-progress"
+            >
               <div className="settings-page__progress-bar">
                 <div className="settings-page__progress-fill settings-page__progress-fill--indeterminate" />
               </div>
@@ -369,14 +380,20 @@ export default function SettingsPage() {
           )}
 
           {importStatus === "importing" && (
-            <div className="settings-page__progress" data-testid="import-progress">
+            <div
+              className="settings-page__progress"
+              data-testid="import-progress"
+            >
               <div className="settings-page__progress-bar">
                 <div className="settings-page__progress-fill settings-page__progress-fill--indeterminate" />
               </div>
             </div>
           )}
           {importStatus === "done" && importResult && (
-            <div className="settings-page__success" data-testid="import-success">
+            <div
+              className="settings-page__success"
+              data-testid="import-success"
+            >
               <p>Import complete.</p>
               {importResult.project_name && (
                 <p>
@@ -391,8 +408,7 @@ export default function SettingsPage() {
                 )}
               {importResult.auto_backup_path && (
                 <p className="form-hint">
-                  Previous data backed up to:{" "}
-                  {importResult.auto_backup_path}
+                  Previous data backed up to: {importResult.auto_backup_path}
                 </p>
               )}
             </div>
@@ -422,10 +438,7 @@ export default function SettingsPage() {
               Support/com.atc/backups/
             </p>
             <div className="settings-page__dialog-actions">
-              <button
-                className="btn"
-                onClick={() => setRestoreConfirm(null)}
-              >
+              <button className="btn" onClick={() => setRestoreConfirm(null)}>
                 Cancel
               </button>
               <button
