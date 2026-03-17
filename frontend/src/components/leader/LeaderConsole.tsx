@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../../utils/api";
 import { useTerminal } from "../../hooks/useTerminal";
+import { useAppContext } from "../../context/AppContext";
 import StatusBadge from "../common/StatusBadge";
 import ConfirmPopover from "../common/ConfirmPopover";
 import type { Leader } from "../../types";
@@ -9,7 +10,7 @@ import "./LeaderConsole.css";
 interface LeaderConsoleProps {
   projectId: string;
   leader: Leader | undefined;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void> | void;
 }
 
 export default function LeaderConsole({
@@ -17,6 +18,7 @@ export default function LeaderConsole({
   leader,
   onRefresh,
 }: LeaderConsoleProps) {
+  const { state, dispatch } = useAppContext();
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -40,7 +42,7 @@ export default function LeaderConsole({
         goal: goal.trim() || null,
       });
       setGoal("");
-      onRefresh();
+      await onRefresh();
     } catch (err) {
       console.error("Failed to start leader:", err);
     } finally {
@@ -52,7 +54,15 @@ export default function LeaderConsole({
     setLoading(true);
     try {
       await api.post(`/projects/${projectId}/leader/stop`);
-      onRefresh();
+      // Optimistically update leader status to idle
+      if (leader) {
+        const updatedLeaders = {
+          ...state.leaders,
+          [projectId]: { ...leader, status: "idle" as const, session_id: null },
+        };
+        dispatch({ type: "SET_LEADERS", payload: updatedLeaders });
+      }
+      await onRefresh();
     } catch (err) {
       console.error("Failed to stop leader:", err);
     } finally {

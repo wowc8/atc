@@ -1,11 +1,11 @@
 .project-view {
-  padding: var(--space-6);
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: var(--space-4);
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
+  gap: var(--space-4);
+  overflow: hidden;
 }
 
 .project-view__empty {
@@ -15,7 +15,7 @@
 }
 
 .project-view__header {
-  margin-bottom: var(--space-6);
+  flex-shrink: 0;
 }
 
 .project-view__title {
@@ -35,24 +35,44 @@
   color: var(--color-text-secondary);
 }
 
+/* Main 60/40 layout */
 .project-view__layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 3fr 2fr;
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
 }
 
+/* Left column: tasks top, aces bottom */
 .project-view__left {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-height: 0;
   overflow-y: auto;
 }
 
+.project-view__tasks {
+  flex: 1;
+  min-height: 200px;
+  overflow-y: auto;
+}
+
+.project-view__aces {
+  flex-shrink: 0;
+}
+
+/* Right column: leader full height */
 .project-view__right {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  overflow-y: auto;
+  min-height: 0;
+}
+
+.project-view__leader {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
