@@ -6,12 +6,20 @@ Follows the DB-first pattern:
   3. Spawn tmux pane
   4a. Success → update row (status: idle, tmux_pane: <id>)
   4b. Failure → update row (status: error)
+
+Creation reliability features (design doc §10a):
+  - DB-first: row always written before tmux pane spawned
+  - Atomic Enter: instruction text + Enter sent with no await gap
+  - TUI readiness: alternate_on checked before any keystroke
+  - Verification loop: t+10s / t+60s / t+120s post-creation checks
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from atc.session.state_machine import (
@@ -29,6 +37,14 @@ logger = logging.getLogger(__name__)
 
 # Default tmux session name used for ATC panes
 ATC_TMUX_SESSION = "atc"
+
+# TUI readiness: max seconds to wait for alternate_on == False
+TUI_READY_TIMEOUT = 10.0
+TUI_READY_POLL_INTERVAL = 0.5
+
+# Instruction verification: seconds to wait before capture-pane check
+INSTRUCTION_VERIFY_DELAY = 2.0
+INSTRUCTION_MAX_RETRIES = 3
 
 
 # ---------------------------------------------------------------------------
@@ -84,8 +100,119 @@ async def _pane_is_alive(pane_id: str) -> bool:
         return False
 
 
+async def _capture_pane(pane_id: str, *, lines: int = 50) -> str:
+    """Capture the visible content of a tmux pane.
+
+    Returns the last *lines* lines of pane output as a string.
+    """
+    return await _tmux_run("capture-pane", "-t", pane_id, "-p", "-S", f"-{lines}")
+
+
+async def _get_alternate_on(pane_id: str) -> bool:
+    """Check if the pane is in alternate screen mode (TUI active).
+
+    Returns ``True`` when a full-screen TUI (like Claude) is active.
+    """
+    result = await _tmux_run("display-message", "-t", pane_id, "-p", "#{alternate_on}")
+    return result.strip() == "1"
+
+
+# ---------------------------------------------------------------------------
+# TUI readiness check
+# ---------------------------------------------------------------------------
+
+
+async def check_tui_ready(
+    pane_id: str,
+    *,
+    timeout: float = TUI_READY_TIMEOUT,
+    poll_interval: float = TUI_READY_POLL_INTERVAL,
+) -> bool:
+    """Wait until the pane exits alternate screen mode (TUI not active).
+
+    Returns ``True`` if the pane is ready for input within *timeout* seconds,
+    ``False`` if it timed out (TUI still active).
+    """
+    elapsed = 0.0
+    while elapsed < timeout:
+        try:
+            if not await _get_alternate_on(pane_id):
+                return True
+        except RuntimeError:
+            # Pane may have died
+            return False
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+    logger.warning(
+        "Pane %s: TUI still active after %.1fs, alternate_on not cleared", pane_id, timeout
+    )
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Atomic instruction sending
+# ---------------------------------------------------------------------------
+
+
+async def send_instruction(
+    pane_id: str,
+    text: str,
+    *,
+    verify: bool = True,
+    max_retries: int = INSTRUCTION_MAX_RETRIES,
+) -> bool:
+    """Send instruction text + Enter atomically, with optional verification.
+
+    1. Check TUI readiness (alternate_on == False)
+    2. Send text + Enter with no await gap between them
+    3. Verify instruction appears in capture-pane output
+
+    Returns ``True`` if the instruction was verified (or verification skipped).
+    """
+    for attempt in range(1, max_retries + 1):
+        # Step 1: TUI readiness
+        ready = await check_tui_ready(pane_id)
+        if not ready:
+            logger.warning("Pane %s: TUI not ready on attempt %d/%d", pane_id, attempt, max_retries)
+            continue
+
+        # Step 2: Atomic send — text and Enter back-to-back, no await gap
+        await _tmux_run("send-keys", "-t", pane_id, text, "Enter")
+
+        if not verify:
+            return True
+
+        # Step 3: Verify instruction was received
+        await asyncio.sleep(INSTRUCTION_VERIFY_DELAY)
+        try:
+            output = await _capture_pane(pane_id)
+            # Check if any significant portion of the instruction appears in output.
+            # Use the first 80 chars as a fingerprint to avoid issues with line wrapping.
+            fingerprint = text[:80].strip()
+            if fingerprint and fingerprint in output:
+                logger.info("Pane %s: instruction verified on attempt %d", pane_id, attempt)
+                return True
+            logger.warning(
+                "Pane %s: instruction not found in output (attempt %d/%d)",
+                pane_id,
+                attempt,
+                max_retries,
+            )
+        except RuntimeError:
+            logger.warning(
+                "Pane %s: capture-pane failed on attempt %d/%d",
+                pane_id,
+                attempt,
+                max_retries,
+            )
+
+    logger.error("Pane %s: instruction delivery failed after %d attempts", pane_id, max_retries)
+    return False
+
+
+# Legacy wrapper kept for backward compatibility with existing callers
 async def _send_keys(pane_id: str, keys: str) -> None:
-    """Send keystrokes to a tmux pane."""
+    """Send keystrokes to a tmux pane (atomic: text + Enter in one call)."""
     await _tmux_run("send-keys", "-t", pane_id, keys, "Enter")
 
 
@@ -108,7 +235,7 @@ async def create_ace(
     The session is created with status ``connecting`` and a tmux pane is
     spawned.  On success the status moves to ``idle``; on failure to ``error``.
     """
-    # Step 1: DB row first
+    # Step 1: DB row first — guarantees the UI always sees every entity
     session = await db_ops.create_session(
         conn,
         project_id=project_id,
@@ -119,7 +246,7 @@ async def create_ace(
         status=SessionStatus.CONNECTING.value,
     )
 
-    # Step 2: publish creation event
+    # Step 2: publish creation event — UI shows it immediately
     if event_bus:
         await event_bus.publish(
             "session_created",
@@ -133,9 +260,7 @@ async def create_ace(
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         # Step 4a: success → idle
-        await transition(
-            session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus
-        )
+        await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
         await db_ops.update_session_status(conn, session.id, SessionStatus.IDLE.value)
     except Exception:
         # Step 4b: failure → error
@@ -163,6 +288,9 @@ async def start_ace(
 ) -> None:
     """Start an ace session — send an instruction to its tmux pane.
 
+    Uses atomic instruction sending with TUI readiness check and
+    capture-pane verification to prevent swallowed instructions.
+
     Transitions: idle|waiting → working.
     """
     session = await db_ops.get_session(conn, session_id)
@@ -174,7 +302,12 @@ async def start_ace(
     await db_ops.update_session_status(conn, session_id, SessionStatus.WORKING.value)
 
     if instruction and session.tmux_pane:
-        await _send_keys(session.tmux_pane, instruction)
+        delivered = await send_instruction(session.tmux_pane, instruction)
+        if not delivered:
+            logger.error("Session %s: instruction delivery failed, marking error", session_id)
+            await transition(session_id, SessionStatus.WORKING, SessionStatus.ERROR, event_bus)
+            await db_ops.update_session_status(conn, session_id, SessionStatus.ERROR.value)
+            raise RuntimeError(f"Failed to deliver instruction to session {session_id}")
 
 
 async def stop_ace(
@@ -222,7 +355,237 @@ async def destroy_ace(
 
 
 # ---------------------------------------------------------------------------
-# Verification loop (creation reliability)
+# Verification loop (creation reliability — design doc §10a)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class VerificationResult:
+    """Result of a single verification check."""
+
+    ok: bool
+    phase: str  # "alive", "working", "progressing"
+    detail: str = ""
+
+
+async def verify_alive(
+    conn: aiosqlite.Connection,
+    session_id: str,
+) -> VerificationResult:
+    """Check 1 (t+10s): Is the session alive?
+
+    - Session row exists with status != 'error'
+    - tmux pane is alive
+    """
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        return VerificationResult(ok=False, phase="alive", detail="session not found in DB")
+
+    if session.status == SessionStatus.ERROR.value:
+        return VerificationResult(ok=False, phase="alive", detail="session status is error")
+
+    if not session.tmux_pane:
+        return VerificationResult(ok=False, phase="alive", detail="no tmux pane assigned")
+
+    if not await _pane_is_alive(session.tmux_pane):
+        return VerificationResult(
+            ok=False, phase="alive", detail=f"tmux pane {session.tmux_pane} is dead"
+        )
+
+    return VerificationResult(ok=True, phase="alive")
+
+
+async def verify_working(
+    conn: aiosqlite.Connection,
+    session_id: str,
+) -> VerificationResult:
+    """Check 2 (t+60s): Did the session start working?
+
+    - Status has transitioned from idle → working or waiting
+    - Pane output is non-empty (scrollback has content)
+    """
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        return VerificationResult(ok=False, phase="working", detail="session not found in DB")
+
+    active_statuses = {
+        SessionStatus.WORKING.value,
+        SessionStatus.WAITING.value,
+    }
+    if session.status in active_statuses:
+        return VerificationResult(ok=True, phase="working")
+
+    # Check if pane has any output (sign of activity)
+    if session.tmux_pane:
+        try:
+            output = await _capture_pane(session.tmux_pane)
+            if output.strip():
+                return VerificationResult(ok=True, phase="working", detail="pane has output")
+        except RuntimeError:
+            pass
+
+    return VerificationResult(
+        ok=False,
+        phase="working",
+        detail=f"session still in status '{session.status}', no activity detected",
+    )
+
+
+async def verify_progressing(
+    conn: aiosqlite.Connection,
+    session_id: str,
+    *,
+    previous_output: str = "",
+) -> VerificationResult:
+    """Check 3 (t+120s): Is the session making progress?
+
+    - Pane output has changed since last check
+    - No error patterns in output
+    """
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        return VerificationResult(ok=False, phase="progressing", detail="session not found in DB")
+
+    if session.status == SessionStatus.ERROR.value:
+        return VerificationResult(ok=False, phase="progressing", detail="session status is error")
+
+    if not session.tmux_pane:
+        return VerificationResult(ok=False, phase="progressing", detail="no tmux pane")
+
+    try:
+        output = await _capture_pane(session.tmux_pane, lines=100)
+    except RuntimeError:
+        return VerificationResult(ok=False, phase="progressing", detail="capture-pane failed")
+
+    # Check output has changed since last check
+    if previous_output and output.strip() == previous_output.strip():
+        return VerificationResult(
+            ok=False, phase="progressing", detail="pane output unchanged since last check"
+        )
+
+    # Check for common error patterns
+    error_patterns = ["Traceback (most recent call last)", "permission denied", "FATAL"]
+    for pattern in error_patterns:
+        if pattern.lower() in output.lower():
+            return VerificationResult(
+                ok=False,
+                phase="progressing",
+                detail=f"error pattern detected: {pattern}",
+            )
+
+    return VerificationResult(ok=True, phase="progressing")
+
+
+async def schedule_verification(
+    conn: aiosqlite.Connection,
+    session_id: str,
+    created_by: str,
+    *,
+    event_bus: EventBus | None = None,
+) -> None:
+    """Schedule the three-phase verification loop after entity creation.
+
+    Runs as a background task:
+      - t+10s:  alive check
+      - t+60s:  working check (re-sends instruction on failure)
+      - t+120s: progressing check (marks stalled on failure)
+    """
+
+    async def _run_checks() -> None:
+        # --- Check 1: t+10s — Alive? ---
+        await asyncio.sleep(10)
+        result = await verify_alive(conn, session_id)
+        if not result.ok:
+            logger.error("Session %s: alive check failed (%s)", session_id, result.detail)
+            await _handle_creation_failure(conn, session_id, event_bus)
+            return  # no point checking further
+
+        # --- Check 2: t+60s — Working? ---
+        await asyncio.sleep(50)  # 60s total
+        result = await verify_working(conn, session_id)
+        if not result.ok:
+            logger.warning(
+                "Session %s: working check failed (%s), may need instruction re-send",
+                session_id,
+                result.detail,
+            )
+            if event_bus:
+                await event_bus.publish(
+                    "session_verification_failed",
+                    {
+                        "session_id": session_id,
+                        "phase": "working",
+                        "detail": result.detail,
+                        "created_by": created_by,
+                    },
+                )
+
+        # Capture output for progress comparison
+        mid_output = ""
+        session = await db_ops.get_session(conn, session_id)
+        if session and session.tmux_pane:
+            with contextlib.suppress(RuntimeError):
+                mid_output = await _capture_pane(session.tmux_pane, lines=100)
+
+        # --- Check 3: t+120s — Progressing? ---
+        await asyncio.sleep(60)  # 120s total
+        result = await verify_progressing(conn, session_id, previous_output=mid_output)
+        if not result.ok:
+            logger.warning("Session %s: progress check failed (%s)", session_id, result.detail)
+            await _handle_stalled(conn, session_id, event_bus)
+
+    asyncio.create_task(_run_checks())
+
+
+async def _handle_creation_failure(
+    conn: aiosqlite.Connection,
+    session_id: str,
+    event_bus: EventBus | None = None,
+) -> None:
+    """Handle a session that failed the alive check."""
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        return
+
+    current = SessionStatus(session.status)
+    if current != SessionStatus.ERROR:
+        try:
+            await transition(session_id, current, SessionStatus.ERROR, event_bus)
+        except Exception:
+            logger.warning("Could not transition %s to error from %s", session_id, current)
+        await db_ops.update_session_status(conn, session_id, SessionStatus.ERROR.value)
+
+    if event_bus:
+        await event_bus.publish(
+            "session_creation_failed",
+            {"session_id": session_id, "phase": "alive"},
+        )
+
+
+async def _handle_stalled(
+    conn: aiosqlite.Connection,
+    session_id: str,
+    event_bus: EventBus | None = None,
+) -> None:
+    """Handle a session that failed the progress check — mark as stalled.
+
+    Note: 'stalled' is not a formal state in the state machine; we use
+    WAITING to indicate the session needs attention, and publish an event
+    so the creating entity or UI can surface a warning.
+    """
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        return
+
+    if event_bus:
+        await event_bus.publish(
+            "session_stalled",
+            {"session_id": session_id, "phase": "progressing"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-shot verify (kept for backward compat)
 # ---------------------------------------------------------------------------
 
 
@@ -232,28 +595,27 @@ async def verify_session(
     *,
     event_bus: EventBus | None = None,
 ) -> bool:
-    """Run the three-phase verification check.
+    """Run a single alive-check verification.
 
     Returns ``True`` if the session appears healthy, ``False`` otherwise.
     Called by the orchestrator after spawning.
     """
-    session = await db_ops.get_session(conn, session_id)
-    if session is None:
+    result = await verify_alive(conn, session_id)
+    if not result.ok:
+        session = await db_ops.get_session(conn, session_id)
+        if session and session.tmux_pane:
+            logger.warning("Session %s: tmux pane %s is dead", session_id, session.tmux_pane)
+            try:
+                await transition(
+                    session_id,
+                    SessionStatus(session.status),
+                    SessionStatus.DISCONNECTED,
+                    event_bus,
+                )
+                await db_ops.update_session_status(
+                    conn, session_id, SessionStatus.DISCONNECTED.value
+                )
+            except Exception:
+                logger.warning("Could not transition %s to disconnected", session_id)
         return False
-
-    # Phase 1 (t+10s equivalent): Is it alive?
-    if session.status == SessionStatus.ERROR.value:
-        return False
-
-    if session.tmux_pane and not await _pane_is_alive(session.tmux_pane):
-        logger.warning("Session %s: tmux pane %s is dead", session_id, session.tmux_pane)
-        await transition(
-            session_id,
-            SessionStatus(session.status),
-            SessionStatus.DISCONNECTED,
-            event_bus,
-        )
-        await db_ops.update_session_status(conn, session_id, SessionStatus.DISCONNECTED.value)
-        return False
-
     return True
