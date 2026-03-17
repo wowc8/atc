@@ -69,10 +69,14 @@ PR and CI tracking via `gh` CLI:
 
 ## Failure Logging
 
-**Status**: Stub
+**Status**: Implemented
 
 Structured failure log with:
-- Category-based classification
-- Full context capture for debugging
-- "Copy for Claude" export format
-- Real-time WebSocket notifications
+- `failure_logs` DB table (created in initial migration)
+- `failure_log()` async helper for fire-and-forget logging
+- REST API: `GET /api/failure-logs`, `GET /api/failure-logs/{id}`, `PATCH /api/failure-logs/{id}/resolve`, `GET /api/failure-logs/unresolved-count`
+- LogViewer slide-out panel accessible from TowerBar
+- Level/category filtering and resolved toggle
+- "Copy for Claude" button on each entry (formats as Markdown)
+- Real-time WebSocket notifications via `failure_logs` channel
+- Unresolved failure badge in TowerBar

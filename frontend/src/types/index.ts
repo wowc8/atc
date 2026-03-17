@@ -117,6 +117,20 @@ export interface TowerStatus {
   active_projects: number;
 }
 
+export interface FailureLog {
+  id: string;
+  level: "info" | "warning" | "error" | "critical";
+  category: string;
+  message: string;
+  context: Record<string, unknown> | null;
+  project_id: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  stack_trace: string | null;
+  resolved: boolean;
+  created_at: string;
+}
+
 export interface AppState {
   projects: Project[];
   leaders: Record<string, Leader>;
@@ -126,6 +140,7 @@ export interface AppState {
   budgets: Record<string, Budget>;
   brainStatus: TowerStatus;
   notifications: Notification[];
+  failureLogs: FailureLog[];
   usage: UsageSummary;
   github: Record<string, GitHubSummary>;
   selectedProjectId: string | null;

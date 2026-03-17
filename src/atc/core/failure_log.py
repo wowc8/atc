@@ -13,7 +13,18 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import aiosqlite
 
+    from atc.api.ws.hub import WsHub
+
 logger = logging.getLogger(__name__)
+
+# Module-level WsHub reference, set via set_ws_hub() during app startup.
+_ws_hub: WsHub | None = None
+
+
+def set_ws_hub(hub: WsHub) -> None:
+    """Wire the WebSocket hub for real-time failure log broadcasting."""
+    global _ws_hub  # noqa: PLW0603
+    _ws_hub = hub
 
 
 async def log_failure(
@@ -78,6 +89,24 @@ async def log_failure(
         message,
         log_id,
     )
+
+    # Broadcast to WebSocket subscribers for real-time badge updates
+    if _ws_hub is not None:
+        try:
+            await _ws_hub.broadcast("failure_logs", {
+                "new": {
+                    "id": log_id,
+                    "level": level,
+                    "category": category,
+                    "message": message,
+                    "project_id": project_id,
+                    "entity_type": entity_type,
+                    "created_at": now,
+                },
+            })
+        except Exception:
+            logger.debug("Failed to broadcast failure log via WebSocket")
+
     return log_id
 
 
