@@ -50,4 +50,18 @@ export const api = {
     }),
 
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+
+  /** POST that returns a Blob (for zip downloads). */
+  postBlob: async (path: string, body?: unknown): Promise<Blob> => {
+    const res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new ApiError(res.status, text);
+    }
+    return res.blob();
+  },
 };
