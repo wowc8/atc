@@ -12,6 +12,7 @@ import type {
   Leader,
   Session,
   Notification,
+  FailureLog,
   Task,
   TaskGraph,
   Budget,
@@ -34,6 +35,7 @@ const initialState: AppState = {
   budgets: {},
   brainStatus: { status: "idle", message: "", active_projects: 0 },
   notifications: [],
+  failureLogs: [],
   usage: { today_cost: 0, month_cost: 0, today_tokens: 0, month_tokens: 0 },
   github: {},
   selectedProjectId: null,
@@ -58,7 +60,10 @@ type Action =
   | { type: "SELECT_PROJECT"; payload: string | null }
   | { type: "SELECT_SESSION"; payload: string | null }
   | { type: "ADD_NOTIFICATION"; payload: Notification }
-  | { type: "MARK_NOTIFICATION_READ"; payload: string };
+  | { type: "MARK_NOTIFICATION_READ"; payload: string }
+  | { type: "SET_FAILURE_LOGS"; payload: FailureLog[] }
+  | { type: "ADD_FAILURE_LOG"; payload: FailureLog }
+  | { type: "RESOLVE_FAILURE_LOG"; payload: string };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -98,6 +103,20 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         notifications: state.notifications.map((n) =>
           n.id === action.payload ? { ...n, read: true } : n,
+        ),
+      };
+    case "SET_FAILURE_LOGS":
+      return { ...state, failureLogs: action.payload };
+    case "ADD_FAILURE_LOG":
+      return {
+        ...state,
+        failureLogs: [action.payload, ...state.failureLogs],
+      };
+    case "RESOLVE_FAILURE_LOG":
+      return {
+        ...state,
+        failureLogs: state.failureLogs.map((f) =>
+          f.id === action.payload ? { ...f, resolved: true } : f,
         ),
       };
   }
@@ -166,6 +185,10 @@ export function AppProvider({ children }: AppProviderProps) {
         if (r.status === "fulfilled") taskGraphs[projects[i]!.id] = r.value;
       }
       dispatch({ type: "SET_TASK_GRAPHS", payload: taskGraphs });
+
+      // Fetch failure logs
+      const failureLogs = await api.get<FailureLog[]>("/failure-logs?limit=200");
+      dispatch({ type: "SET_FAILURE_LOGS", payload: failureLogs });
     } catch {
       /* backend may not be running yet — silent fail */
     }
@@ -175,11 +198,19 @@ export function AppProvider({ children }: AppProviderProps) {
     if (msg.channel === "state") {
       const data = msg.data as Partial<AppState>;
       dispatch({ type: "SET_STATE", payload: data });
+    } else if (msg.channel === "failure_logs") {
+      const data = msg.data as Record<string, unknown>;
+      if (data.new) {
+        dispatch({ type: "ADD_FAILURE_LOG", payload: data.new as FailureLog });
+      }
+      if (typeof data.resolved === "string") {
+        dispatch({ type: "RESOLVE_FAILURE_LOG", payload: data.resolved });
+      }
     }
   }, []);
 
   useWebSocket({
-    channels: ["state"],
+    channels: ["state", "failure_logs"],
     onMessage: handleWsMessage,
   });
 

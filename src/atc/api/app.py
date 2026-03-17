@@ -50,6 +50,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ws_hub = WsHub()
     app.state.ws_hub = ws_hub
 
+    # Wire failure log broadcasting
+    from atc.core.failure_log import set_ws_hub
+
+    set_ws_hub(ws_hub)
+
     # 4b. Start Tower controller
     from atc.tower.controller import TowerController
 
@@ -160,7 +165,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     # Register routers
-    from atc.api.routers import aces, leader, projects, task_graphs, tasks, tower, usage
+    from atc.api.routers import (
+        aces,
+        failure_logs,
+        leader,
+        projects,
+        task_graphs,
+        tasks,
+        tower,
+        usage,
+    )
     from atc.api.routers import settings as settings_router
 
     app.include_router(tower.router, prefix="/api/tower", tags=["tower"])
@@ -171,6 +185,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(aces.router, prefix="/api", tags=["aces"])
     app.include_router(usage.router, prefix="/api/usage", tags=["usage"])
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
+    app.include_router(failure_logs.router, prefix="/api", tags=["failure_logs"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:

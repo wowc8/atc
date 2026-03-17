@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
+import LogViewer from "./LogViewer";
 import "./TowerBar.css";
 
 function StatusDot({ status }: { status: string }) {
@@ -22,91 +24,111 @@ export default function TowerBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { state } = useAppContext();
-  const { brainStatus, usage, notifications, projects } = state;
+  const { brainStatus, usage, notifications, projects, failureLogs } = state;
+  const [logViewerOpen, setLogViewerOpen] = useState(false);
 
   const activeProjects = projects.filter((p) => p.status === "active").length;
   const unreadCount = notifications.filter((n) => !n.read).length;
+  const unresolvedLogCount = failureLogs.filter((f) => !f.resolved).length;
 
   const isActive = (path: string) => location.pathname.startsWith(path);
 
   return (
-    <header className="tower-bar" data-testid="tower-bar">
-      <div className="tower-bar__left">
-        <button
-          className="tower-bar__brand"
-          onClick={() => navigate("/dashboard")}
-        >
-          ATC
-        </button>
+    <>
+      <header className="tower-bar" data-testid="tower-bar">
+        <div className="tower-bar__left">
+          <button
+            className="tower-bar__brand"
+            onClick={() => navigate("/dashboard")}
+          >
+            ATC
+          </button>
 
-        <div className="tower-bar__status">
-          <StatusDot status={brainStatus.status} />
-          <span className="tower-bar__status-text">{brainStatus.status}</span>
+          <div className="tower-bar__status">
+            <StatusDot status={brainStatus.status} />
+            <span className="tower-bar__status-text">{brainStatus.status}</span>
+          </div>
         </div>
-      </div>
 
-      <nav className="tower-bar__nav">
-        <button
-          className={`tower-bar__nav-item ${isActive("/dashboard") ? "active" : ""}`}
-          onClick={() => navigate("/dashboard")}
-        >
-          Dashboard
-        </button>
-        <button
-          className={`tower-bar__nav-item ${isActive("/usage") ? "active" : ""}`}
-          onClick={() => navigate("/usage")}
-        >
-          Usage
-        </button>
-        <button
-          className={`tower-bar__nav-item ${isActive("/settings") ? "active" : ""}`}
-          onClick={() => navigate("/settings")}
-        >
-          Settings
-        </button>
-      </nav>
+        <nav className="tower-bar__nav">
+          <button
+            className={`tower-bar__nav-item ${isActive("/dashboard") ? "active" : ""}`}
+            onClick={() => navigate("/dashboard")}
+          >
+            Dashboard
+          </button>
+          <button
+            className={`tower-bar__nav-item ${isActive("/usage") ? "active" : ""}`}
+            onClick={() => navigate("/usage")}
+          >
+            Usage
+          </button>
+          <button
+            className={`tower-bar__nav-item ${isActive("/settings") ? "active" : ""}`}
+            onClick={() => navigate("/settings")}
+          >
+            Settings
+          </button>
+        </nav>
 
-      <div className="tower-bar__right">
-        {brainStatus.message && (
-          <span className="tower-bar__message" title={brainStatus.message}>
-            {brainStatus.message}
-          </span>
-        )}
-
-        <span className="tower-bar__metric" data-testid="cost-summary">
-          ${usage.today_cost.toFixed(2)} today
-        </span>
-
-        <span className="tower-bar__metric" data-testid="token-summary">
-          {formatTokens(usage.today_tokens)} tokens
-        </span>
-
-        <span className="tower-bar__metric" data-testid="project-count">
-          {activeProjects} project{activeProjects !== 1 ? "s" : ""}
-        </span>
-
-        <button
-          className="tower-bar__icon-btn"
-          data-testid="notification-bell"
-          onClick={() => navigate("/dashboard")}
-          title={`${unreadCount} unread notification${unreadCount !== 1 ? "s" : ""}`}
-        >
-          <NotificationIcon />
-          {unreadCount > 0 && (
-            <span className="tower-bar__badge">{unreadCount}</span>
+        <div className="tower-bar__right">
+          {brainStatus.message && (
+            <span className="tower-bar__message" title={brainStatus.message}>
+              {brainStatus.message}
+            </span>
           )}
-        </button>
 
-        <button
-          className="tower-bar__icon-btn"
-          data-testid="settings-button"
-          onClick={() => navigate("/settings")}
-          title="Settings"
-        >
-          <SettingsIcon />
-        </button>
-      </div>
-    </header>
+          <span className="tower-bar__metric" data-testid="cost-summary">
+            ${usage.today_cost.toFixed(2)} today
+          </span>
+
+          <span className="tower-bar__metric" data-testid="token-summary">
+            {formatTokens(usage.today_tokens)} tokens
+          </span>
+
+          <span className="tower-bar__metric" data-testid="project-count">
+            {activeProjects} project{activeProjects !== 1 ? "s" : ""}
+          </span>
+
+          <button
+            className="tower-bar__icon-btn"
+            data-testid="failure-log-btn"
+            onClick={() => setLogViewerOpen((prev) => !prev)}
+            title={`${unresolvedLogCount} unresolved failure${unresolvedLogCount !== 1 ? "s" : ""}`}
+          >
+            <FailureLogIcon />
+            {unresolvedLogCount > 0 && (
+              <span className="tower-bar__badge" data-testid="failure-log-badge">
+                {unresolvedLogCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            className="tower-bar__icon-btn"
+            data-testid="notification-bell"
+            onClick={() => navigate("/dashboard")}
+            title={`${unreadCount} unread notification${unreadCount !== 1 ? "s" : ""}`}
+          >
+            <NotificationIcon />
+            {unreadCount > 0 && (
+              <span className="tower-bar__badge">{unreadCount}</span>
+            )}
+          </button>
+
+          <button
+            className="tower-bar__icon-btn"
+            data-testid="settings-button"
+            onClick={() => navigate("/settings")}
+            title="Settings"
+          >
+            <SettingsIcon />
+          </button>
+        </div>
+      </header>
+
+      {logViewerOpen && <LogViewer onClose={() => setLogViewerOpen(false)} />}
+    </>
   );
 }
 
@@ -114,6 +136,14 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
   return String(n);
+}
+
+function FailureLogIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z" />
+    </svg>
+  );
 }
 
 function NotificationIcon() {
