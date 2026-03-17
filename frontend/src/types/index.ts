@@ -6,9 +6,25 @@ export interface Project {
   description: string | null;
   repo_path: string | null;
   github_repo: string | null;
+  agent_provider: "claude_code" | "opencode";
   status: "active" | "paused" | "archived";
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentProviderConfig {
+  default: string;
+  opencode_url: string;
+  tmux_session: string;
+  claude_command: string;
+}
+
+export interface ProviderInfo {
+  name: string;
+  supports_streaming: boolean;
+  supports_tool_use: boolean;
+  context_window: number;
+  model: string;
 }
 
 export interface Leader {

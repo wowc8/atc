@@ -30,6 +30,7 @@ class CreateProjectRequest(BaseModel):
     description: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
+    agent_provider: str = "claude_code"
 
 
 class ProjectResponse(BaseModel):
@@ -39,6 +40,7 @@ class ProjectResponse(BaseModel):
     description: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
+    agent_provider: str = "claude_code"
     created_at: str
     updated_at: str
 
@@ -86,6 +88,7 @@ async def create_project(body: CreateProjectRequest, request: Request) -> Projec
             description=body.description,
             repo_path=body.repo_path,
             github_repo=body.github_repo,
+            agent_provider=body.agent_provider,
         )
     except Exception:
         logger.exception("Failed to create project %r", body.name)
@@ -111,6 +114,36 @@ async def get_project(project_id: str, request: Request) -> ProjectResponse:
     return ProjectResponse(**project.__dict__)
 
 
+class UpdateProjectProviderRequest(BaseModel):
+    agent_provider: str
+
+
+@router.patch("/{project_id}/agent-provider")
+async def update_project_provider(
+    project_id: str,
+    body: UpdateProjectProviderRequest,
+    request: Request,
+) -> ProjectResponse:
+    """Update the agent provider for a project."""
+    from atc.agents.factory import list_providers
+
+    available = list_providers()
+    if body.agent_provider not in available:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown provider {body.agent_provider!r}. Available: {', '.join(available)}",
+        )
+
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    await db_ops.update_project_agent_provider(db, project_id, body.agent_provider)
+    project = await db_ops.get_project(db, project_id)
+    return ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
+
+
 @router.get("/{project_id}/manager", response_model=LeaderResponse)
 async def get_leader(project_id: str, request: Request) -> LeaderResponse:
     db = await _get_db(request)
@@ -134,9 +167,7 @@ async def start_leader(
 ) -> dict[str, str]:
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
-    session_id = await leader_ops.start_leader(
-        db, project_id, goal=body.goal, event_bus=event_bus
-    )
+    session_id = await leader_ops.start_leader(db, project_id, goal=body.goal, event_bus=event_bus)
     return {"status": "started", "session_id": session_id}
 
 
@@ -155,9 +186,7 @@ async def send_leader_message(
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
     try:
-        await leader_ops.send_leader_message(
-            db, project_id, body.message, event_bus=event_bus
-        )
+        await leader_ops.send_leader_message(db, project_id, body.message, event_bus=event_bus)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
     return {"status": "sent"}

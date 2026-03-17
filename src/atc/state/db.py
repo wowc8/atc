@@ -158,9 +158,7 @@ class ConnectionFactory:
                     )
                     sleep(wait)
 
-        raise sqlite3.OperationalError(
-            f"Database busy after {retries + 1} attempts"
-        ) from last_err
+        raise sqlite3.OperationalError(f"Database busy after {retries + 1} attempts") from last_err
 
 
 # ---------------------------------------------------------------------------
@@ -195,14 +193,15 @@ async def get_connection(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS projects (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    description TEXT,
-    repo_path   TEXT,
-    github_repo TEXT,
-    status      TEXT NOT NULL DEFAULT 'active',
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    repo_path       TEXT,
+    github_repo     TEXT,
+    agent_provider  TEXT NOT NULL DEFAULT 'claude_code',
+    status          TEXT NOT NULL DEFAULT 'active',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS leaders (
@@ -356,6 +355,7 @@ async def create_project(
     description: str | None = None,
     repo_path: str | None = None,
     github_repo: str | None = None,
+    agent_provider: str = "claude_code",
 ) -> Project:
     """Insert a new project row and return the dataclass."""
     now = _now()
@@ -366,19 +366,22 @@ async def create_project(
         description=description,
         repo_path=repo_path,
         github_repo=github_repo,
+        agent_provider=agent_provider,
         created_at=now,
         updated_at=now,
     )
     await db.execute(
         """INSERT INTO projects
-           (id, name, description, repo_path, github_repo, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, name, description, repo_path, github_repo, agent_provider,
+            status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             project.id,
             project.name,
             project.description,
             project.repo_path,
             project.github_repo,
+            project.agent_provider,
             project.status,
             project.created_at,
             project.updated_at,
@@ -402,6 +405,20 @@ async def list_projects(db: aiosqlite.Connection) -> list[Project]:
     cursor = await db.execute("SELECT * FROM projects ORDER BY created_at DESC")
     rows = await cursor.fetchall()
     return [Project(**dict(r)) for r in rows]
+
+
+async def update_project_agent_provider(
+    db: aiosqlite.Connection,
+    project_id: str,
+    agent_provider: str,
+) -> None:
+    """Update the agent provider for a project."""
+    now = _now()
+    await db.execute(
+        "UPDATE projects SET agent_provider = ?, updated_at = ? WHERE id = ?",
+        (agent_provider, now, project_id),
+    )
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -543,9 +560,7 @@ async def list_sessions(
         clauses.append("session_type = ?")
         params.append(session_type)
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
-    cursor = await db.execute(
-        f"SELECT * FROM sessions{where} ORDER BY created_at DESC", params
-    )
+    cursor = await db.execute(f"SELECT * FROM sessions{where} ORDER BY created_at DESC", params)
     rows = await cursor.fetchall()
     return [_row_to_session(r) for r in rows]
 
@@ -669,11 +684,13 @@ async def create_task_graph(
 
 
 async def get_task_graph(
-    db: aiosqlite.Connection, task_graph_id: str,
+    db: aiosqlite.Connection,
+    task_graph_id: str,
 ) -> TaskGraph | None:
     """Fetch a single task_graph by id."""
     cursor = await db.execute(
-        "SELECT * FROM task_graphs WHERE id = ?", (task_graph_id,),
+        "SELECT * FROM task_graphs WHERE id = ?",
+        (task_graph_id,),
     )
     row = await cursor.fetchone()
     if row is None:
@@ -760,9 +777,7 @@ async def update_task_graph_status(
 
     allowed = _TASK_GRAPH_TRANSITIONS.get(existing.status, set())
     if new_status not in allowed:
-        raise ValueError(
-            f"Cannot transition from '{existing.status}' to '{new_status}'"
-        )
+        raise ValueError(f"Cannot transition from '{existing.status}' to '{new_status}'")
 
     await db.execute(
         "UPDATE task_graphs SET status = ?, updated_at = ? WHERE id = ?",
@@ -773,11 +788,13 @@ async def update_task_graph_status(
 
 
 async def delete_task_graph(
-    db: aiosqlite.Connection, task_graph_id: str,
+    db: aiosqlite.Connection,
+    task_graph_id: str,
 ) -> bool:
     """Hard-delete a task_graph row. Returns True if deleted."""
     cursor = await db.execute(
-        "DELETE FROM task_graphs WHERE id = ?", (task_graph_id,),
+        "DELETE FROM task_graphs WHERE id = ?",
+        (task_graph_id,),
     )
     await db.commit()
     return cursor.rowcount > 0

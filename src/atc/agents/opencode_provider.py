@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 from atc.agents.base import (
     OutputChunk,
     PromptResult,
+    ProviderCapabilities,
     ProviderError,
     SessionInfo,
     SessionStatus,
@@ -67,6 +68,81 @@ class OpenCodeProvider:
     def name(self) -> str:
         return "opencode"
 
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_streaming=True,
+            supports_tool_use=True,
+            context_window=200_000,
+            model="opencode",
+        )
+
+    async def ensure_server_running(self) -> None:
+        """Start ``opencode serve`` in a detached tmux session if not already running.
+
+        Checks if the server is reachable first. If not, starts it in a
+        dedicated tmux session named ``opencode-server``.
+        """
+        # Check if server is already responding
+        try:
+            await self._api_request("GET", "/session")
+            logger.debug("OpenCode server already running at %s", self._base_url)
+            return
+        except ProviderError:
+            pass
+
+        logger.info("Starting opencode serve at %s", self._base_url)
+
+        if shutil.which(_TMUX_CMD) is None:
+            raise ProviderError(self.name, "tmux is not installed or not on PATH")
+
+        server_session = f"{self._tmux_session}-opencode-server"
+
+        # Check if the tmux session already exists
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                _TMUX_CMD,
+                "has-session",
+                "-t",
+                server_session,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+            if proc.returncode == 0:
+                logger.info("tmux session %s already exists, waiting for server", server_session)
+            else:
+                # Start a new detached tmux session running opencode serve
+                serve_cmd = f"opencode serve --port {self._base_url.split(':')[-1]}"
+                start_proc = await asyncio.create_subprocess_exec(
+                    _TMUX_CMD,
+                    "new-session",
+                    "-d",
+                    "-s",
+                    server_session,
+                    serve_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await start_proc.communicate()
+                if start_proc.returncode != 0:
+                    err = stderr.decode().strip()
+                    raise ProviderError(self.name, f"Failed to start opencode serve: {err}")
+                logger.info("Started opencode serve in tmux session %s", server_session)
+        except OSError as exc:
+            raise ProviderError(self.name, f"tmux command failed: {exc}") from exc
+
+        # Wait for the server to become responsive (up to 15 seconds)
+        for _ in range(30):
+            await asyncio.sleep(0.5)
+            try:
+                await self._api_request("GET", "/session")
+                logger.info("OpenCode server is ready at %s", self._base_url)
+                return
+            except ProviderError:
+                continue
+
+        raise ProviderError(self.name, "OpenCode server did not start within 15 seconds")
+
     async def spawn_session(
         self,
         session_id: str,
@@ -76,6 +152,9 @@ class OpenCodeProvider:
     ) -> SessionInfo:
         if session_id in self._pane_ids:
             raise ProviderError(self.name, f"Session {session_id} already tracked")
+
+        # Ensure the OpenCode server is running before creating sessions
+        await self.ensure_server_running()
 
         # Create session via REST API
         body: dict[str, Any] = {"id": session_id}
@@ -206,7 +285,10 @@ class OpenCodeProvider:
         if pane_id:
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    _TMUX_CMD, "kill-pane", "-t", pane_id,
+                    _TMUX_CMD,
+                    "kill-pane",
+                    "-t",
+                    pane_id,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
