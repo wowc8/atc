@@ -101,3 +101,59 @@
   color: var(--color-text-muted);
   padding: var(--space-4) 0;
 }
+
+/* Compact / mini grid layout */
+.ace-list--compact .ace-list__empty {
+  padding: var(--space-2) 0;
+}
+
+.ace-list__mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.ace-list__mini-card {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ace-list__mini-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.ace-list__mini-name {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+}
+
+.ace-list__mini-terminal {
+  height: 150px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ace-list__mini-terminal .ace-terminal__view {
+  min-height: 100px;
+  border: none;
+  border-radius: 0;
+}
+
+.ace-list__mini-terminal .ace-terminal__input {
+  padding: var(--space-1) var(--space-2);
+}
+
+.ace-list__mini-terminal .ace-terminal__input input {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}

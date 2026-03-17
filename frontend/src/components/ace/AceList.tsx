@@ -10,12 +10,14 @@ interface AceListProps {
   projectId: string;
   sessions: Session[];
   onRefresh: () => void;
+  compact?: boolean;
 }
 
 export default function AceList({
   projectId,
   sessions,
   onRefresh,
+  compact = false,
 }: AceListProps) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -81,6 +83,52 @@ export default function AceList({
 
   function isRunning(s: Session) {
     return s.status === "working" || s.status === "waiting" || s.status === "connecting";
+  }
+
+  if (compact) {
+    return (
+      <div className="ace-list ace-list--compact" data-testid="ace-list">
+        <div className="ace-list__header">
+          <h3>Workers</h3>
+          <span className="ace-list__count">{sessions.length}</span>
+        </div>
+
+        {sessions.length === 0 ? (
+          <p className="ace-list__empty">No aces yet.</p>
+        ) : (
+          <div className="ace-list__mini-grid">
+            {sessions.map((session) => (
+              <div key={session.id} className="ace-list__mini-card">
+                <div className="ace-list__mini-header">
+                  <span className="ace-list__mini-name">{session.name}</span>
+                  <StatusBadge status={session.status} size="sm" />
+                </div>
+                <div className="ace-list__mini-terminal">
+                  <AceTerminal key={session.id} session={session} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form className="ace-list__create" onSubmit={handleCreate}>
+          <input
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="New ace name..."
+            disabled={creating}
+          />
+          <button
+            type="submit"
+            className="btn btn-sm btn-primary"
+            disabled={creating || !newName.trim()}
+          >
+            {creating ? "..." : "+ Add"}
+          </button>
+        </form>
+      </div>
+    );
   }
 
   return (

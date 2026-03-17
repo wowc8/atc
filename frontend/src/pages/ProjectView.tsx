@@ -1,16 +1,16 @@
 import { useParams } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import StatusBadge from "../components/common/StatusBadge";
+import TowerBanner from "../components/tower/TowerBanner";
 import LeaderConsole from "../components/leader/LeaderConsole";
 import TaskBoard from "../components/leader/TaskBoard";
-import ContextViewer from "../components/leader/ContextViewer";
 import AceList from "../components/ace/AceList";
 import "./ProjectView.css";
 
 export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const { state, fetchAll } = useAppContext();
-  const { projects, sessions, leaders, taskGraphs } = state;
+  const { projects, sessions, leaders, taskGraphs, brainStatus } = state;
 
   const project = projects.find((p) => p.id === id);
   const projectSessions = sessions.filter((s) => s.project_id === id);
@@ -40,10 +40,14 @@ export default function ProjectView() {
         )}
       </div>
 
+      {/* Tower Banner — full width, minimizable */}
+      <TowerBanner towerStatus={brainStatus} />
+
+      {/* Main 60/40 layout */}
       <div className="project-view__layout">
-        {/* Left panel — Tasks (top) + Workers (bottom) */}
+        {/* Left column — Tasks + Aces */}
         <aside className="project-view__left">
-          <div className="panel">
+          <div className="panel project-view__tasks">
             <TaskBoard
               projectId={project.id}
               taskGraphs={projectTaskGraphs}
@@ -51,27 +55,24 @@ export default function ProjectView() {
             />
           </div>
 
-          <div className="panel">
+          <div className="panel project-view__aces">
             <AceList
               projectId={project.id}
               sessions={projectSessions}
               onRefresh={fetchAll}
+              compact
             />
           </div>
         </aside>
 
-        {/* Right panel — Leader + Context */}
+        {/* Right column — Leader terminal full height */}
         <main className="project-view__right">
-          <div className="panel">
+          <div className="panel project-view__leader">
             <LeaderConsole
               projectId={project.id}
               leader={leader}
               onRefresh={fetchAll}
             />
-          </div>
-
-          <div className="panel">
-            <ContextViewer leader={leader} />
           </div>
         </main>
       </div>
