@@ -12,11 +12,15 @@ Routes:
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from atc.leader import leader as leader_ops
 from atc.state import db as db_ops
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -75,15 +79,26 @@ async def list_projects(request: Request) -> list[ProjectResponse]:
 @router.post("", response_model=ProjectResponse, status_code=201)
 async def create_project(body: CreateProjectRequest, request: Request) -> ProjectResponse:
     db = await _get_db(request)
-    project = await db_ops.create_project(
-        db,
-        body.name,
-        description=body.description,
-        repo_path=body.repo_path,
-        github_repo=body.github_repo,
-    )
+    try:
+        project = await db_ops.create_project(
+            db,
+            body.name,
+            description=body.description,
+            repo_path=body.repo_path,
+            github_repo=body.github_repo,
+        )
+    except Exception:
+        logger.exception("Failed to create project %r", body.name)
+        raise HTTPException(status_code=500, detail="Failed to create project") from None
+
     # Auto-create Leader for the project
-    await db_ops.create_leader(db, project.id)
+    try:
+        await db_ops.create_leader(db, project.id)
+    except Exception:
+        logger.exception("Failed to create leader for project %s", project.id)
+        # Project was created but leader failed — don't leave the user hanging
+        # Return the project anyway; leader can be created later.
+
     return ProjectResponse(**project.__dict__)
 
 
