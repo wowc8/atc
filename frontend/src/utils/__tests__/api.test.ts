@@ -88,4 +88,34 @@ describe("api client", () => {
     const result = await api.delete("/projects/1");
     expect(result).toBeUndefined();
   });
+
+  it("throws ApiError with timeout message on AbortError", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new DOMException("The operation was aborted.", "AbortError"),
+    );
+
+    await expect(api.get("/projects")).rejects.toThrow(ApiError);
+    try {
+      await api.get("/projects");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(0);
+      expect((e as ApiError).message).toContain("timed out");
+    }
+  });
+
+  it("throws ApiError with network message on fetch failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new TypeError("Failed to fetch"),
+    );
+
+    await expect(api.get("/projects")).rejects.toThrow(ApiError);
+    try {
+      await api.get("/projects");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).status).toBe(0);
+      expect((e as ApiError).message).toContain("Network error");
+    }
+  });
 });
