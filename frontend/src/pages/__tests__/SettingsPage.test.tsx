@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import SettingsPage from "../SettingsPage";
 import { renderWithProviders } from "../../test/helpers";
 
 beforeEach(() => {
+  localStorage.clear();
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify([]), { status: 200 }),
   );
@@ -41,5 +42,26 @@ describe("SettingsPage", () => {
     renderWithProviders(<SettingsPage />);
     const input = screen.getByLabelText("Backend URL") as HTMLInputElement;
     expect(input.value).toBe("http://127.0.0.1:8420");
+  });
+
+  it("shows GitHub Defaults section", () => {
+    renderWithProviders(<SettingsPage />);
+    expect(screen.getByText("GitHub Defaults")).toBeInTheDocument();
+    expect(screen.getByLabelText("Default Org / Username")).toBeInTheDocument();
+  });
+
+  it("persists GitHub org to localStorage", () => {
+    renderWithProviders(<SettingsPage />);
+    const input = screen.getByLabelText("Default Org / Username") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "my-org" } });
+    expect(localStorage.getItem("atc:github_default_org")).toBe("my-org");
+  });
+
+  it("clears localStorage when GitHub org is emptied", () => {
+    localStorage.setItem("atc:github_default_org", "old-org");
+    renderWithProviders(<SettingsPage />);
+    const input = screen.getByLabelText("Default Org / Username") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "" } });
+    expect(localStorage.getItem("atc:github_default_org")).toBeNull();
   });
 });

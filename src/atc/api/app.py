@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 
 from atc import __version__
+from atc.api.ws.hub import WsHub
 from atc.config import Settings, load_settings
 from atc.core.events import EventBus
-from atc.state.db import get_connection, run_migrations
+from atc.state.db import run_migrations
+from atc.terminal.pty_stream import PtyStreamPool
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +46,80 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db.row_factory = aiosqlite.Row
     app.state.db = db
 
-    # 4. Reconnect sessions that were active at last shutdown
+    # 4. Start WebSocket hub
+    ws_hub = WsHub()
+    app.state.ws_hub = ws_hub
+
+    # 5. Start PTY stream pool and wire to WsHub
+    pty_pool = PtyStreamPool(event_bus)
+    await pty_pool.start()
+    app.state.pty_pool = pty_pool
+
+    # Forward pty_output events to WebSocket clients
+    async def _on_pty_output(data: dict[str, Any]) -> None:
+        session_id = data.get("session_id", "")
+        raw = data.get("data", b"")
+        text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        await ws_hub.broadcast(f"terminal:{session_id}", text)
+
+    event_bus.subscribe("pty_output", _on_pty_output)
+
+    # Forward terminal input from WebSocket clients to PTY
+    async def _on_ws_input(channel: str, data: str) -> None:
+        # channel is "terminal:{session_id}"
+        session_id = channel.removeprefix("terminal:")
+        try:
+            await pty_pool.send_keys(session_id, data)
+        except ValueError:
+            logger.debug("No PTY reader for session %s (input dropped)", session_id)
+
+    ws_hub.on_input(_on_ws_input)
+
+    # Auto-start PTY readers when sessions are created with a tmux pane
+    async def _on_session_created(data: dict[str, Any]) -> None:
+        session_id = data.get("session_id", "")
+        if not session_id:
+            return
+        # Look up the session to get its tmux_pane (it may not be set yet at
+        # creation time; the pane is spawned right after the event).  We
+        # subscribe to status changes instead to catch the pane_id.
+        pass
+
+    async def _on_session_status_changed(data: dict[str, Any]) -> None:
+        session_id = data.get("session_id", "")
+        new_status = data.get("new_status", "")
+        if not session_id:
+            return
+
+        # When a session transitions to idle (pane just spawned), start the PTY reader
+        if new_status == "idle" and pty_pool.get_reader(session_id) is None:
+            from atc.state import db as db_ops
+
+            session = await db_ops.get_session(db, session_id)
+            if session and session.tmux_pane:
+                logger.info(
+                    "Auto-starting PTY reader for session %s (pane %s)",
+                    session_id, session.tmux_pane,
+                )
+                await pty_pool.add_session(session_id, session.tmux_pane)
+
+        # Broadcast status changes on the state channel for AppContext
+        await ws_hub.broadcast("state", {
+            "sessions_updated": True,
+            "session_id": session_id,
+            "new_status": new_status,
+        })
+
+    async def _on_session_destroyed(data: dict[str, Any]) -> None:
+        session_id = data.get("session_id", "")
+        if session_id:
+            await pty_pool.remove_session(session_id)
+
+    event_bus.subscribe("session_created", _on_session_created)
+    event_bus.subscribe("session_status_changed", _on_session_status_changed)
+    event_bus.subscribe("session_destroyed", _on_session_destroyed)
+
+    # 6. Reconnect sessions that were active at last shutdown
     from atc.session.reconnect import reconnect_all
 
     try:
@@ -57,6 +135,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Shutdown
     logger.info("ATC shutting down")
+    await pty_pool.stop()
     await event_bus.stop()
     await db.close()
 
@@ -75,7 +154,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     # Register routers
-    from atc.api.routers import aces, projects, settings as settings_router, tasks, tower, usage
+    from atc.api.routers import aces, projects, tasks, tower, usage
+    from atc.api.routers import settings as settings_router
 
     app.include_router(tower.router, prefix="/api/tower", tags=["tower"])
     app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
@@ -87,6 +167,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, object]:
         return {"ok": True, "version": __version__}
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(ws: WebSocket) -> None:
+        hub: WsHub = app.state.ws_hub
+        await hub.handle(ws)
 
     return app
 

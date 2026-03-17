@@ -2,9 +2,23 @@ import { useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import "./SettingsPage.css";
 
+const GITHUB_ORG_KEY = "atc:github_default_org";
+
 export default function SettingsPage() {
   const { state } = useAppContext();
   const [backendUrl] = useState("http://127.0.0.1:8420");
+  const [githubOrg, setGithubOrg] = useState(
+    () => localStorage.getItem(GITHUB_ORG_KEY) ?? "",
+  );
+
+  function handleGithubOrgChange(value: string) {
+    setGithubOrg(value);
+    if (value.trim()) {
+      localStorage.setItem(GITHUB_ORG_KEY, value.trim());
+    } else {
+      localStorage.removeItem(GITHUB_ORG_KEY);
+    }
+  }
 
   return (
     <div className="settings-page" data-testid="settings-page">
@@ -25,6 +39,23 @@ export default function SettingsPage() {
           <div className="settings-page__status">
             <span className="settings-page__dot settings-page__dot--connected" />
             Connected
+          </div>
+        </section>
+
+        <section className="panel settings-page__section">
+          <h2>GitHub Defaults</h2>
+          <div className="form-group">
+            <label htmlFor="github-org">Default Org / Username</label>
+            <input
+              id="github-org"
+              type="text"
+              value={githubOrg}
+              onChange={(e) => handleGithubOrgChange(e.target.value)}
+              placeholder="my-org"
+            />
+            <span className="form-hint">
+              Pre-fills the GitHub Repo field when creating new projects.
+            </span>
           </div>
         </section>
 
