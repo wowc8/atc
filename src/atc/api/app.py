@@ -110,16 +110,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if session and session.tmux_pane:
                 logger.info(
                     "Auto-starting PTY reader for session %s (pane %s)",
-                    session_id, session.tmux_pane,
+                    session_id,
+                    session.tmux_pane,
                 )
                 await pty_pool.add_session(session_id, session.tmux_pane)
 
         # Broadcast status changes on the state channel for AppContext
-        await ws_hub.broadcast("state", {
-            "sessions_updated": True,
-            "session_id": session_id,
-            "new_status": new_status,
-        })
+        await ws_hub.broadcast(
+            "state",
+            {
+                "sessions_updated": True,
+                "session_id": session_id,
+                "new_status": new_status,
+            },
+        )
 
     async def _on_session_destroyed(data: dict[str, Any]) -> None:
         session_id = data.get("session_id", "")
@@ -201,12 +205,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 def main() -> None:
     """Entry point for the ATC server."""
+    import socket
+
     settings = load_settings()
     logging.basicConfig(level=getattr(logging, settings.logging.level))
+
+    # Check if port is already in use before starting
+    host = settings.server.host
+    port = settings.server.port
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+    except OSError as exc:
+        logger.error(
+            "Port %d is already in use on %s: %s. "
+            "Kill the stale process (lsof -i :%d) or choose a different port.",
+            port,
+            host,
+            exc,
+            port,
+        )
+        raise SystemExit(1) from exc
+    finally:
+        sock.close()
+
     app = create_app(settings)
     uvicorn.run(
         app,
-        host=settings.server.host,
-        port=settings.server.port,
+        host=host,
+        port=port,
         reload=settings.server.reload,
     )

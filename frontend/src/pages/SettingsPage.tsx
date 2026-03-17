@@ -41,6 +41,7 @@ export default function SettingsPage() {
     useState<AgentProviderConfig | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providerSaving, setProviderSaving] = useState(false);
+  const [providerError, setProviderError] = useState("");
 
   useEffect(() => {
     api.get<AgentProviderConfig>("/settings/agent-provider").then(setProviderConfig).catch(() => {});
@@ -49,14 +50,17 @@ export default function SettingsPage() {
 
   async function handleProviderChange(newDefault: string) {
     setProviderSaving(true);
+    setProviderError("");
     try {
       const updated = await api.put<AgentProviderConfig>(
         "/settings/agent-provider",
         { default: newDefault },
       );
       setProviderConfig(updated);
-    } catch {
-      // silently fail — config read-only in worst case
+    } catch (e) {
+      setProviderError(
+        e instanceof Error ? e.message : "Failed to update agent provider",
+      );
     } finally {
       setProviderSaving(false);
     }
@@ -298,6 +302,14 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
+          {providerError && (
+            <p
+              className="settings-page__error"
+              data-testid="agent-provider-error"
+            >
+              {providerError}
+            </p>
+          )}
         </section>
 
         {/* Export Section */}
