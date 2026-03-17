@@ -65,7 +65,7 @@ Open http://localhost:5173 in any Windows browser.
 
 # Or run them separately:
 # Backend (port 8420)
-python -m uvicorn atc.api.app:create_app --factory --reload --port 8420
+python3 -m uvicorn atc.api.app:create_app --factory --reload --port 8420
 
 # Frontend (port 5173, proxies API to 8420)
 cd frontend && npm run dev

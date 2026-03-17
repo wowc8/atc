@@ -9,7 +9,7 @@ echo "Starting ATC in development mode..."
 
 # Start backend
 echo "→ Starting backend (uvicorn with reload)..."
-(cd "$ROOT_DIR" && python -m uvicorn atc.api.app:create_app --factory --reload --host 127.0.0.1 --port 8420) &
+(cd "$ROOT_DIR" && python3 -m uvicorn atc.api.app:create_app --factory --reload --host 127.0.0.1 --port 8420) &
 BACKEND_PID=$!
 
 # Start frontend

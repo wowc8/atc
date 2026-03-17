@@ -19,7 +19,7 @@ in isolated Claude Code sessions.
 ./scripts/dev.sh
 
 # Backend only
-python -m uvicorn atc.api.app:create_app --factory --reload --port 8420
+python3 -m uvicorn atc.api.app:create_app --factory --reload --port 8420
 
 # Frontend only
 cd frontend && npm run dev
