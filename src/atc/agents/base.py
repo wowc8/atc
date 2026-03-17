@@ -54,6 +54,16 @@ class OutputChunk:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Describes what a provider supports."""
+
+    supports_streaming: bool = False
+    supports_tool_use: bool = False
+    context_window: int = 0
+    model: str = ""
+
+
 @runtime_checkable
 class AgentProvider(Protocol):
     """Protocol defining the interface for agent CLI tool backends.
@@ -134,6 +144,10 @@ class AgentProvider(Protocol):
         Raises:
             ProviderError: If the stream cannot be established.
         """
+        ...
+
+    def get_capabilities(self) -> ProviderCapabilities:
+        """Return the capabilities of this provider."""
         ...
 
     async def stop_session(self, session_id: str) -> None:

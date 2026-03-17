@@ -10,6 +10,7 @@ from atc.agents.base import (
     AgentProvider,
     OutputChunk,
     PromptResult,
+    ProviderCapabilities,
     ProviderError,
     SessionInfo,
     SessionStatus,
@@ -91,6 +92,39 @@ class TestProviderError:
 # ---------------------------------------------------------------------------
 # Protocol compliance
 # ---------------------------------------------------------------------------
+
+
+class TestProviderCapabilities:
+    def test_capabilities_dataclass(self) -> None:
+        caps = ProviderCapabilities(
+            supports_streaming=True,
+            supports_tool_use=True,
+            context_window=200_000,
+            model="test",
+        )
+        assert caps.supports_streaming is True
+        assert caps.supports_tool_use is True
+        assert caps.context_window == 200_000
+        assert caps.model == "test"
+
+    def test_capabilities_defaults(self) -> None:
+        caps = ProviderCapabilities()
+        assert caps.supports_streaming is False
+        assert caps.context_window == 0
+
+    def test_claude_capabilities(self) -> None:
+        provider = ClaudeCodeProvider()
+        caps = provider.get_capabilities()
+        assert caps.supports_streaming is True
+        assert caps.supports_tool_use is True
+        assert caps.context_window == 200_000
+
+    def test_opencode_capabilities(self) -> None:
+        provider = OpenCodeProvider()
+        caps = provider.get_capabilities()
+        assert caps.supports_streaming is True
+        assert caps.supports_tool_use is True
+        assert caps.context_window == 200_000
 
 
 class TestProtocolCompliance:
@@ -336,11 +370,12 @@ class TestOpenCodeProvider:
         _mock_which: MagicMock,
         provider: OpenCodeProvider,
     ) -> None:
-        # First call: API request (curl for POST /session)
-        # Second call: tmux split-window
-        api_response = b'{"id": "w1", "status": "idle"}'
+        # First call: ensure_server_running API check (GET /session)
+        # Second call: API request (curl for POST /session)
+        # Third call: tmux split-window
         calls = [
-            _make_process(stdout=api_response),  # curl POST /session
+            _make_process(stdout=b'{"sessions": []}'),  # ensure_server GET /session
+            _make_process(stdout=b'{"id": "w1", "status": "idle"}'),  # POST /session
             _make_process(stdout=b"%50\n"),  # tmux split-window
         ]
         mock_exec.side_effect = calls
@@ -359,8 +394,9 @@ class TestOpenCodeProvider:
         provider: OpenCodeProvider,
     ) -> None:
         mock_exec.side_effect = [
-            _make_process(stdout=b'{}'),
-            _make_process(stdout=b"%50\n"),
+            _make_process(stdout=b'{"sessions": []}'),  # ensure_server
+            _make_process(stdout=b"{}"),  # POST /session
+            _make_process(stdout=b"%50\n"),  # tmux split-window
         ]
         await provider.spawn_session("w1")
 
@@ -377,8 +413,9 @@ class TestOpenCodeProvider:
     ) -> None:
         # Spawn
         mock_exec.side_effect = [
-            _make_process(stdout=b'{}'),
-            _make_process(stdout=b"%50\n"),
+            _make_process(stdout=b'{"sessions": []}'),  # ensure_server
+            _make_process(stdout=b"{}"),  # POST /session
+            _make_process(stdout=b"%50\n"),  # tmux split-window
         ]
         await provider.spawn_session("w1")
 
@@ -403,16 +440,15 @@ class TestOpenCodeProvider:
         provider: OpenCodeProvider,
     ) -> None:
         mock_exec.side_effect = [
-            _make_process(stdout=b'{}'),
+            _make_process(stdout=b'{"sessions": []}'),  # ensure_server
+            _make_process(stdout=b"{}"),
             _make_process(stdout=b"%50\n"),
         ]
         await provider.spawn_session("w1")
 
         # Reset side_effect so return_value works
         mock_exec.side_effect = None
-        mock_exec.return_value = _make_process(
-            stdout=b'{"id": "w1", "status": "busy"}'
-        )
+        mock_exec.return_value = _make_process(stdout=b'{"id": "w1", "status": "busy"}')
         info = await provider.get_status("w1")
         assert info.status == SessionStatus.BUSY
 
@@ -425,7 +461,8 @@ class TestOpenCodeProvider:
         provider: OpenCodeProvider,
     ) -> None:
         mock_exec.side_effect = [
-            _make_process(stdout=b'{}'),
+            _make_process(stdout=b'{"sessions": []}'),  # ensure_server
+            _make_process(stdout=b"{}"),
             _make_process(stdout=b"%50\n"),
         ]
         await provider.spawn_session("w1")
@@ -445,14 +482,15 @@ class TestOpenCodeProvider:
         provider: OpenCodeProvider,
     ) -> None:
         mock_exec.side_effect = [
-            _make_process(stdout=b'{}'),
+            _make_process(stdout=b'{"sessions": []}'),  # ensure_server
+            _make_process(stdout=b"{}"),
             _make_process(stdout=b"%50\n"),
         ]
         await provider.spawn_session("w1")
 
         # DELETE /session/w1 then kill-pane
         mock_exec.side_effect = [
-            _make_process(stdout=b'{}'),  # API delete
+            _make_process(stdout=b"{}"),  # API delete
             _make_process(),  # kill-pane
         ]
         await provider.stop_session("w1")
@@ -473,7 +511,8 @@ class TestOpenCodeProvider:
         provider: OpenCodeProvider,
     ) -> None:
         mock_exec.side_effect = [
-            _make_process(stdout=b'{}'),
+            _make_process(stdout=b'{"sessions": []}'),  # ensure_server
+            _make_process(stdout=b"{}"),
             _make_process(stdout=b"%50\n"),
         ]
         await provider.spawn_session("w1")
@@ -486,6 +525,42 @@ class TestOpenCodeProvider:
         sessions = await provider.list_sessions()
         assert len(sessions) == 1
         assert sessions[0].session_id == "w1"
+
+    @patch("asyncio.create_subprocess_exec")
+    async def test_ensure_server_running_already_up(
+        self,
+        mock_exec: AsyncMock,
+        provider: OpenCodeProvider,
+    ) -> None:
+        """Server already running — no tmux session needed."""
+        mock_exec.return_value = _make_process(stdout=b'{"sessions": []}')
+        await provider.ensure_server_running()
+        # Only one call to check the API, no tmux session creation
+        assert mock_exec.call_count == 1
+
+    @patch("shutil.which", return_value="/usr/bin/tmux")
+    @patch("asyncio.create_subprocess_exec")
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_ensure_server_running_starts_server(
+        self,
+        _mock_sleep: AsyncMock,
+        mock_exec: AsyncMock,
+        _mock_which: MagicMock,
+        provider: OpenCodeProvider,
+    ) -> None:
+        """Server not running — starts in tmux and waits for it."""
+        mock_exec.side_effect = [
+            # First: API check fails (server not running)
+            _make_process(returncode=1, stderr=b"Connection refused"),
+            # Second: has-session check (session doesn't exist)
+            _make_process(returncode=1, stderr=b"no session"),
+            # Third: new-session to start opencode serve
+            _make_process(returncode=0),
+            # Fourth: retry API check succeeds
+            _make_process(stdout=b'{"sessions": []}'),
+        ]
+        await provider.ensure_server_running()
+        assert mock_exec.call_count == 4
 
 
 # ---------------------------------------------------------------------------

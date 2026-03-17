@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from atc.agents.base import (
     OutputChunk,
     PromptResult,
+    ProviderCapabilities,
     ProviderError,
     SessionInfo,
     SessionStatus,
@@ -51,6 +52,14 @@ class ClaudeCodeProvider:
     @property
     def name(self) -> str:
         return "claude_code"
+
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_streaming=True,
+            supports_tool_use=True,
+            context_window=200_000,
+            model="claude",
+        )
 
     async def spawn_session(
         self,

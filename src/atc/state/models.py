@@ -15,6 +15,7 @@ class Project:
     description: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
+    agent_provider: str = "claude_code"
     created_at: str = ""
     updated_at: str = ""
 

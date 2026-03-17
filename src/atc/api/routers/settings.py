@@ -1,10 +1,13 @@
-"""Settings router — export/import backup endpoints.
+"""Settings router — export/import backup + agent provider config endpoints.
 
 Routes:
   POST /api/settings/export/{project_id}  → export single project as zip
   POST /api/settings/export-all           → export all projects as zip
   POST /api/settings/import               → import project from zip
   POST /api/settings/import-all           → import all from full backup zip
+  GET  /api/settings/agent-provider       → get current agent provider config
+  PUT  /api/settings/agent-provider       → update agent provider config
+  GET  /api/settings/providers            → list available providers
 """
 
 from __future__ import annotations
@@ -78,7 +81,8 @@ class ImportAllRequest(BaseModel):
 
 @router.post("/import")
 async def import_project_endpoint(
-    body: ImportRequest, request: Request,
+    body: ImportRequest,
+    request: Request,
 ) -> dict[str, object]:
     """Import a project from a base64-encoded zip.
 
@@ -93,7 +97,9 @@ async def import_project_endpoint(
 
     try:
         result = await import_project(
-            db, raw, target_project_id=body.target_project_id,
+            db,
+            raw,
+            target_project_id=body.target_project_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
@@ -103,7 +109,8 @@ async def import_project_endpoint(
 
 @router.post("/import-all")
 async def import_all_endpoint(
-    body: ImportAllRequest, request: Request,
+    body: ImportAllRequest,
+    request: Request,
 ) -> dict[str, object]:
     """Import all projects from a base64-encoded full backup zip."""
     db = await _get_db(request)
@@ -117,4 +124,117 @@ async def import_all_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
 
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Agent provider endpoints
+# ---------------------------------------------------------------------------
+
+
+class AgentProviderResponse(BaseModel):
+    """Current agent provider configuration."""
+
+    default: str
+    opencode_url: str
+    tmux_session: str
+    claude_command: str
+
+
+class AgentProviderUpdateRequest(BaseModel):
+    """Update agent provider settings."""
+
+    default: str | None = None
+    opencode_url: str | None = None
+    tmux_session: str | None = None
+    claude_command: str | None = None
+
+
+class ProviderInfo(BaseModel):
+    """Info about an available provider."""
+
+    name: str
+    supports_streaming: bool
+    supports_tool_use: bool
+    context_window: int
+    model: str
+
+
+@router.get("/agent-provider")
+async def get_agent_provider(request: Request) -> AgentProviderResponse:
+    """Return the current agent provider configuration."""
+    settings = request.app.state.settings
+    cfg = settings.agent_provider
+    return AgentProviderResponse(
+        default=cfg.default,
+        opencode_url=cfg.opencode_url,
+        tmux_session=cfg.tmux_session,
+        claude_command=cfg.claude_command,
+    )
+
+
+@router.put("/agent-provider")
+async def update_agent_provider(
+    body: AgentProviderUpdateRequest,
+    request: Request,
+) -> AgentProviderResponse:
+    """Update agent provider configuration (runtime only, not persisted to file)."""
+    from atc.agents.factory import list_providers
+
+    settings = request.app.state.settings
+    cfg = settings.agent_provider
+
+    if body.default is not None:
+        available = list_providers()
+        if body.default not in available:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown provider {body.default!r}. Available: {', '.join(available)}",
+            )
+        cfg.default = body.default
+    if body.opencode_url is not None:
+        cfg.opencode_url = body.opencode_url
+    if body.tmux_session is not None:
+        cfg.tmux_session = body.tmux_session
+    if body.claude_command is not None:
+        cfg.claude_command = body.claude_command
+
+    return AgentProviderResponse(
+        default=cfg.default,
+        opencode_url=cfg.opencode_url,
+        tmux_session=cfg.tmux_session,
+        claude_command=cfg.claude_command,
+    )
+
+
+@router.get("/providers")
+async def list_available_providers() -> list[ProviderInfo]:
+    """List all registered agent providers with their capabilities."""
+    from atc.agents.factory import create_provider, list_providers
+
+    result: list[ProviderInfo] = []
+    for name in list_providers():
+        try:
+            provider = create_provider(name)
+            caps = provider.get_capabilities()
+            result.append(
+                ProviderInfo(
+                    name=name,
+                    supports_streaming=caps.supports_streaming,
+                    supports_tool_use=caps.supports_tool_use,
+                    context_window=caps.context_window,
+                    model=caps.model,
+                )
+            )
+        except Exception:
+            logger.warning("Failed to instantiate provider %s for capabilities", name)
+            result.append(
+                ProviderInfo(
+                    name=name,
+                    supports_streaming=False,
+                    supports_tool_use=False,
+                    context_window=0,
+                    model="",
+                )
+            )
     return result

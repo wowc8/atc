@@ -1,6 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../utils/api";
+import type { AgentProviderConfig, ProviderInfo } from "../types";
 import "./SettingsPage.css";
 
 const GITHUB_ORG_KEY = "atc:github_default_org";
@@ -34,6 +35,32 @@ export default function SettingsPage() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
   const importAllFileRef = useRef<HTMLInputElement>(null);
+
+  // Agent provider state
+  const [providerConfig, setProviderConfig] =
+    useState<AgentProviderConfig | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providerSaving, setProviderSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<AgentProviderConfig>("/settings/agent-provider").then(setProviderConfig).catch(() => {});
+    api.get<ProviderInfo[]>("/settings/providers").then(setProviders).catch(() => {});
+  }, []);
+
+  async function handleProviderChange(newDefault: string) {
+    setProviderSaving(true);
+    try {
+      const updated = await api.put<AgentProviderConfig>(
+        "/settings/agent-provider",
+        { default: newDefault },
+      );
+      setProviderConfig(updated);
+    } catch {
+      // silently fail — config read-only in worst case
+    } finally {
+      setProviderSaving(false);
+    }
+  }
 
   // Restore confirm state
   const [restoreConfirm, setRestoreConfirm] = useState<{
@@ -201,6 +228,76 @@ export default function SettingsPage() {
             <span className="settings-page__label">Theme</span>
             <span className="settings-page__value">Dark</span>
           </div>
+        </section>
+
+        <section
+          className="panel settings-page__section"
+          data-testid="agent-provider-section"
+        >
+          <h2>Agent Provider</h2>
+          <p className="settings-page__description">
+            Select the default AI agent backend for new sessions.
+          </p>
+          <div className="form-group">
+            <label htmlFor="agent-provider-select">Default Provider</label>
+            <select
+              id="agent-provider-select"
+              data-testid="agent-provider-select"
+              value={providerConfig?.default ?? "claude_code"}
+              onChange={(e) => handleProviderChange(e.target.value)}
+              disabled={providerSaving}
+            >
+              {providers.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name === "claude_code"
+                    ? "Claude Code (tmux)"
+                    : p.name === "opencode"
+                      ? "OpenCode (REST API)"
+                      : p.name}
+                </option>
+              ))}
+              {providers.length === 0 && (
+                <>
+                  <option value="claude_code">Claude Code (tmux)</option>
+                  <option value="opencode">OpenCode (REST API)</option>
+                </>
+              )}
+            </select>
+          </div>
+          {providerConfig && (
+            <div className="settings-page__info-row">
+              <span className="settings-page__label">OpenCode URL</span>
+              <span className="settings-page__value">
+                {providerConfig.opencode_url}
+              </span>
+            </div>
+          )}
+          {providers
+            .filter((p) => p.name === providerConfig?.default)
+            .map((p) => (
+              <div key={p.name}>
+                <div className="settings-page__info-row">
+                  <span className="settings-page__label">Streaming</span>
+                  <span className="settings-page__value">
+                    {p.supports_streaming ? "Yes" : "No"}
+                  </span>
+                </div>
+                <div className="settings-page__info-row">
+                  <span className="settings-page__label">Tool Use</span>
+                  <span className="settings-page__value">
+                    {p.supports_tool_use ? "Yes" : "No"}
+                  </span>
+                </div>
+                <div className="settings-page__info-row">
+                  <span className="settings-page__label">Context Window</span>
+                  <span className="settings-page__value">
+                    {p.context_window > 0
+                      ? `${(p.context_window / 1000).toFixed(0)}k tokens`
+                      : "N/A"}
+                  </span>
+                </div>
+              </div>
+            ))}
         </section>
 
         {/* Export Section */}
