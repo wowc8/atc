@@ -28,13 +28,23 @@ def client(tmp_path: Path) -> TestClient:
         yield c
 
 
-@patch("atc.session.ace._tmux_run", new_callable=AsyncMock)
+def _smart_tmux_mock(*args: str) -> str:
+    """Mock _tmux_run that returns sensible values based on the tmux command."""
+    cmd = args[0] if args else ""
+    if cmd == "split-window":
+        return "%1"
+    if cmd == "display-message":
+        return "0"  # alternate_on = False (TUI not active)
+    if cmd == "capture-pane":
+        return "$ echo hello\nhello"
+    return ""
+
+
+@patch("atc.session.ace._tmux_run", new_callable=AsyncMock, side_effect=_smart_tmux_mock)
 class TestAceLifecycle:
     """Full ace lifecycle through the REST API."""
 
     def test_create_ace(self, mock_tmux: AsyncMock, client: TestClient) -> None:
-        mock_tmux.return_value = "%1"
-
         # First create a project
         resp = client.post("/api/projects", json={"name": "test-project"})
         assert resp.status_code == 201
