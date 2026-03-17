@@ -5,7 +5,9 @@ Routes:
   POST   /api/projects/{project_id}/aces       → spawn new ace
   POST   /api/aces/{session_id}/start          → start session
   POST   /api/aces/{session_id}/stop           → stop session
+  PATCH  /api/aces/{session_id}/status         → update session status (from hooks)
   POST   /api/aces/{session_id}/message        → send message to ace
+  POST   /api/aces/{session_id}/notify         → receive notification from hooks
   DELETE /api/aces/{session_id}                → delete session
 """
 
@@ -38,7 +40,15 @@ class StartAceRequest(BaseModel):
     instruction: str | None = None
 
 
+class StatusUpdateRequest(BaseModel):
+    status: str
+
+
 class MessageRequest(BaseModel):
+    message: str
+
+
+class NotifyRequest(BaseModel):
     message: str
 
 
@@ -146,6 +156,77 @@ async def stop_ace(session_id: str, request: Request) -> dict[str, str]:
     except InvalidTransitionError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
     return {"status": "stopped"}
+
+
+@router.patch("/aces/{session_id}/status")
+async def update_ace_status(
+    session_id: str, body: StatusUpdateRequest, request: Request,
+) -> dict[str, str]:
+    """Update session status — called by PostToolUse and Stop hooks."""
+    from atc.session.state_machine import SessionStatus, transition
+
+    db = await _get_db(request)
+    event_bus = await _get_event_bus(request)
+
+    session = await db_ops.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    try:
+        target = SessionStatus(body.status)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid status: {body.status}"
+        ) from None
+
+    current = SessionStatus(session.status)
+    if current == target:
+        return {"status": target.value}
+
+    try:
+        await transition(session.id, current, target, event_bus)
+        await db_ops.update_session_status(db, session.id, target.value)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    return {"status": target.value}
+
+
+@router.post("/aces/{session_id}/notify")
+async def notify_ace(
+    session_id: str, body: NotifyRequest, request: Request,
+) -> dict[str, str]:
+    """Receive a notification from an agent's Notification hook."""
+    import logging
+    import uuid
+    from datetime import UTC, datetime
+
+    db = await _get_db(request)
+
+    session = await db_ops.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    now = datetime.now(UTC).isoformat()
+    await db.execute(
+        """INSERT INTO notifications (id, project_id, level, message, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (str(uuid.uuid4()), session.project_id, "info", body.message, now),
+    )
+    await db.commit()
+
+    # Broadcast to WebSocket clients
+    ws_hub = getattr(request.app.state, "ws_hub", None)
+    if ws_hub is not None:
+        await ws_hub.broadcast("notifications", {
+            "session_id": session_id,
+            "message": body.message,
+        })
+
+    logger = logging.getLogger(__name__)
+    logger.info("Notification from %s: %s", session_id, body.message)
+
+    return {"status": "received"}
 
 
 @router.post("/aces/{session_id}/message")

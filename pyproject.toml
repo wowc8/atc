@@ -30,6 +30,7 @@ dev = [
 
 [project.scripts]
 atc-server = "atc.api.app:main"
+atc = "atc.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/atc"]
