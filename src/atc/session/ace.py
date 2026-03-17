@@ -74,9 +74,16 @@ async def _ensure_tmux_session(session_name: str) -> None:
         await _tmux_run("new-session", "-d", "-s", session_name)
 
 
-async def _spawn_pane(session_name: str, command: str | None = None) -> str:
+async def _spawn_pane(
+    session_name: str,
+    command: str | None = None,
+    *,
+    working_dir: str | None = None,
+) -> str:
     """Split a new pane in *session_name* and return its pane id (e.g. ``%5``)."""
     args = ["split-window", "-t", session_name, "-d", "-P", "-F", "#{pane_id}"]
+    if working_dir:
+        args.extend(["-c", working_dir])
     if command:
         args.extend([command])
     pane_id = await _tmux_run(*args)
@@ -229,11 +236,18 @@ async def create_ace(
     task_id: str | None = None,
     host: str | None = None,
     event_bus: EventBus | None = None,
+    working_dir: str | None = None,
+    launch_command: str | None = None,
 ) -> str:
     """Create an ace session (DB-first). Returns the session id.
 
     The session is created with status ``connecting`` and a tmux pane is
     spawned.  On success the status moves to ``idle``; on failure to ``error``.
+
+    Args:
+        working_dir: Working directory for the tmux pane (e.g. the repo path).
+        launch_command: Shell command to run in the pane (e.g. ``claude``).
+            When provided, the pane launches this command instead of a bare shell.
     """
     # Step 1: DB row first — guarantees the UI always sees every entity
     session = await db_ops.create_session(
@@ -256,7 +270,11 @@ async def create_ace(
     # Step 3: spawn tmux pane
     try:
         await _ensure_tmux_session(ATC_TMUX_SESSION)
-        pane_id = await _spawn_pane(ATC_TMUX_SESSION)
+        pane_id = await _spawn_pane(
+            ATC_TMUX_SESSION,
+            launch_command,
+            working_dir=working_dir,
+        )
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         # Step 4a: success → idle

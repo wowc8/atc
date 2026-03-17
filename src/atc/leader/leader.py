@@ -4,13 +4,18 @@ A Leader is one per project.  It uses the same session infrastructure as aces
 but has session_type ``manager``.  The Leader row in the ``leaders`` table
 tracks the goal and context package; the underlying tmux pane lives in the
 ``sessions`` table.
+
+The start flow deploys config files (CLAUDE.md, hooks) via ``deploy.py``
+before spawning the tmux pane so that Claude Code picks up the Leader's
+instructions automatically.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
 from atc.session.ace import (
     ATC_TMUX_SESSION,
     _ensure_tmux_session,
@@ -28,6 +33,29 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The command used to launch a Claude Code session in each tmux pane.
+_CLAUDE_LAUNCH_CMD = "claude --dangerously-skip-permissions"
+
+
+def _build_manager_deploy_spec(
+    leader_id: str,
+    project_name: str,
+    goal: str,
+    *,
+    repo_path: str | None = None,
+    github_repo: str | None = None,
+    context_entries: list[dict[str, Any]] | None = None,
+) -> ManagerDeploySpec:
+    """Build a ManagerDeploySpec from project metadata."""
+    return ManagerDeploySpec(
+        leader_id=leader_id,
+        project_name=project_name,
+        goal=goal,
+        repo_path=repo_path,
+        github_repo=github_repo,
+        context_entries=context_entries or [],
+    )
+
 
 async def start_leader(
     conn: aiosqlite.Connection,
@@ -35,11 +63,18 @@ async def start_leader(
     *,
     goal: str | None = None,
     event_bus: EventBus | None = None,
+    context_package: dict[str, Any] | None = None,
 ) -> str:
     """Start the Leader session for a project.
 
-    Creates a session of type ``manager``, spawns its tmux pane, and links
+    Creates a session of type ``manager``, deploys config files via
+    ``deploy.py``, spawns a tmux pane running ``claude``, and links
     it to the leader row.  Returns the session id.
+
+    Args:
+        context_package: The assembled context package from Tower.
+            Used to populate the ManagerDeploySpec with project metadata
+            and context entries.
     """
     leader = await db_ops.get_leader_by_project(conn, project_id)
     if leader is None:
@@ -73,8 +108,32 @@ async def start_leader(
         )
 
     try:
+        # Deploy config files (CLAUDE.md, hooks, settings.json) before launch
+        ctx = context_package or {}
+        spec = _build_manager_deploy_spec(
+            leader_id=leader.id,
+            project_name=ctx.get("project_name") or (project.name if project else ""),
+            goal=goal or leader.goal or "",
+            repo_path=ctx.get("repo_path") or (project.repo_path if project else None),
+            github_repo=ctx.get("github_repo") or (project.github_repo if project else None),
+            context_entries=ctx.get("context_entries"),
+        )
+        deployed = deploy_manager_files(spec)
+        logger.info(
+            "Deployed manager config for leader %s → %s",
+            leader.id,
+            deployed.root,
+        )
+
+        # Spawn tmux pane in the repo working directory, running claude
+        working_dir = spec.repo_path or str(deployed.root)
+
         await _ensure_tmux_session(ATC_TMUX_SESSION)
-        pane_id = await _spawn_pane(ATC_TMUX_SESSION)
+        pane_id = await _spawn_pane(
+            ATC_TMUX_SESSION,
+            _CLAUDE_LAUNCH_CMD,
+            working_dir=working_dir,
+        )
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)

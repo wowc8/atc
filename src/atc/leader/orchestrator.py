@@ -18,11 +18,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import aiosqlite
 
     from atc.core.events import EventBus
@@ -38,6 +41,7 @@ class AceAssignment:
     task_graph_id: str
     task_title: str
     status: str = "assigned"  # assigned|working|done|failed
+    deployed_root: Path | None = None  # staging dir for cleanup
 
 
 @dataclass
@@ -62,7 +66,8 @@ class LeaderOrchestrator:
         assignments created.
         """
         task_graphs = await db_ops.list_task_graphs(
-            self.conn, project_id=self.project_id,
+            self.conn,
+            project_id=self.project_id,
         )
 
         ready = get_ready_tasks(task_graphs)
@@ -71,8 +76,7 @@ class LeaderOrchestrator:
 
         # Count currently active Aces
         active_count = sum(
-            1 for a in self.assignments.values()
-            if a.status in ("assigned", "working")
+            1 for a in self.assignments.values() if a.status in ("assigned", "working")
         )
         available_slots = max(0, self._max_concurrent_aces - active_count)
 
@@ -102,16 +106,48 @@ class LeaderOrchestrator:
         title: str,
         description: str | None,
     ) -> AceAssignment | None:
-        """Spawn a single Ace session and assign it to a task graph entry."""
+        """Spawn a single Ace session and assign it to a task graph entry.
+
+        Deploys config files (CLAUDE.md, hooks) via ``deploy_ace_files``
+        before launching the tmux pane so Claude Code reads the task
+        instructions automatically.
+        """
         ace_name = f"ace-{title[:30]}"
 
         try:
+            # Look up project metadata for the deploy spec
+            project = await db_ops.get_project(self.conn, self.project_id)
+            project_name = project.name if project else ""
+            repo_path = project.repo_path if project else None
+            github_repo = project.github_repo if project else None
+
+            # Generate a stable session id up-front so deploy can use it
+            import uuid
+
+            session_id_preview = str(uuid.uuid4())
+
+            # Deploy config files before launching the session
+            spec = AceDeploySpec(
+                session_id=session_id_preview,
+                project_name=project_name,
+                task_title=title,
+                task_description=description,
+                repo_path=repo_path,
+                github_repo=github_repo,
+            )
+            deployed = deploy_ace_files(spec)
+            logger.info("Deployed ace config for task '%s' → %s", title, deployed.root)
+
+            working_dir = repo_path or str(deployed.root)
+
             session_id = await create_ace(
                 self.conn,
                 self.project_id,
                 ace_name,
                 task_id=task_graph_id,
                 event_bus=self.event_bus,
+                working_dir=working_dir,
+                launch_command="claude --dangerously-skip-permissions",
             )
         except Exception:
             logger.exception(
@@ -123,12 +159,16 @@ class LeaderOrchestrator:
 
         # Link the task_graph entry to this Ace
         await db_ops.update_task_graph(
-            self.conn, task_graph_id, assigned_ace_id=session_id,
+            self.conn,
+            task_graph_id,
+            assigned_ace_id=session_id,
         )
 
         # Transition the task to in_progress
         await db_ops.update_task_graph_status(
-            self.conn, task_graph_id, "in_progress",
+            self.conn,
+            task_graph_id,
+            "in_progress",
         )
 
         assignment = AceAssignment(
@@ -136,6 +176,7 @@ class LeaderOrchestrator:
             task_graph_id=task_graph_id,
             task_title=title,
             status="assigned",
+            deployed_root=deployed.root,
         )
         self.assignments[task_graph_id] = assignment
 
@@ -184,7 +225,9 @@ class LeaderOrchestrator:
 
         # Update task graph status
         await db_ops.update_task_graph_status(
-            self.conn, task_graph_id, "done",
+            self.conn,
+            task_graph_id,
+            "done",
         )
 
         if assignment is not None:
@@ -203,6 +246,11 @@ class LeaderOrchestrator:
                     assignment.ace_session_id,
                     assignment.task_title,
                 )
+
+            # Clean up deployed config files
+            if assignment.deployed_root:
+                with contextlib.suppress(Exception):
+                    cleanup_deployed_files(assignment.deployed_root)
 
         if self.event_bus:
             await self.event_bus.publish(
@@ -226,7 +274,9 @@ class LeaderOrchestrator:
         # Transition back to todo so it can be retried
         with contextlib.suppress(ValueError):
             await db_ops.update_task_graph_status(
-                self.conn, task_graph_id, "todo",
+                self.conn,
+                task_graph_id,
+                "todo",
             )
 
         if assignment is not None:
@@ -243,6 +293,12 @@ class LeaderOrchestrator:
                     assignment.ace_session_id,
                     assignment.task_title,
                 )
+
+            # Clean up deployed config files
+            if assignment.deployed_root:
+                with contextlib.suppress(Exception):
+                    cleanup_deployed_files(assignment.deployed_root)
+
             # Remove assignment so the task can be re-assigned
             del self.assignments[task_graph_id]
 
@@ -260,7 +316,8 @@ class LeaderOrchestrator:
     async def get_progress(self) -> dict[str, Any]:
         """Return current progress summary for the Leader's task graph."""
         task_graphs = await db_ops.list_task_graphs(
-            self.conn, project_id=self.project_id,
+            self.conn,
+            project_id=self.project_id,
         )
 
         status = get_completion_status(task_graphs)
@@ -314,7 +371,8 @@ class LeaderOrchestrator:
                         assignment.task_title,
                     )
                     await self.mark_task_failed(
-                        tg_id, reason="Ace session entered error state",
+                        tg_id,
+                        reason="Ace session entered error state",
                     )
                 elif new_status == "disconnected":
                     logger.warning(
@@ -323,6 +381,7 @@ class LeaderOrchestrator:
                         assignment.task_title,
                     )
                     await self.mark_task_failed(
-                        tg_id, reason="Ace session disconnected",
+                        tg_id,
+                        reason="Ace session disconnected",
                     )
                 break

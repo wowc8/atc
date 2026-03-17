@@ -158,6 +158,7 @@ class TowerController:
                 project_id,
                 goal=goal,
                 event_bus=self._event_bus,
+                context_package=context_package,
             )
             self._current_session_id = session_id
 
