@@ -19,6 +19,7 @@ import type {
   UsageSummary,
   GitHubSummary,
   TowerStatus,
+  TowerDetail,
 } from "../types";
 import { useWebSocket, type WsMessage } from "../hooks/useWebSocket";
 import { api } from "../utils/api";
@@ -34,6 +35,12 @@ const initialState: AppState = {
   taskGraphs: {},
   budgets: {},
   brainStatus: { status: "idle", message: "", active_projects: 0 },
+  towerDetail: {
+    state: "idle",
+    current_goal: null,
+    current_project_id: null,
+    current_session_id: null,
+  },
   notifications: [],
   failureLogs: [],
   usage: { today_cost: 0, month_cost: 0, today_tokens: 0, month_tokens: 0 },
@@ -54,6 +61,7 @@ type Action =
   | { type: "SET_TASK_GRAPHS"; payload: Record<string, TaskGraph[]> }
   | { type: "SET_BUDGETS"; payload: Record<string, Budget> }
   | { type: "SET_BRAIN_STATUS"; payload: TowerStatus }
+  | { type: "SET_TOWER_DETAIL"; payload: Partial<TowerDetail> }
   | { type: "SET_NOTIFICATIONS"; payload: Notification[] }
   | { type: "SET_USAGE"; payload: UsageSummary }
   | { type: "SET_GITHUB"; payload: Record<string, GitHubSummary> }
@@ -83,6 +91,11 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, budgets: action.payload };
     case "SET_BRAIN_STATUS":
       return { ...state, brainStatus: action.payload };
+    case "SET_TOWER_DETAIL":
+      return {
+        ...state,
+        towerDetail: { ...state.towerDetail, ...action.payload },
+      };
     case "SET_NOTIFICATIONS":
       return { ...state, notifications: action.payload };
     case "SET_USAGE":
@@ -189,6 +202,23 @@ export function AppProvider({ children }: AppProviderProps) {
       // Fetch failure logs
       const failureLogs = await api.get<FailureLog[]>("/failure-logs?limit=200");
       dispatch({ type: "SET_FAILURE_LOGS", payload: failureLogs });
+
+      // Fetch tower status for panel state
+      const towerStatus = await api.get<{
+        state: string;
+        current_goal: string | null;
+        current_project_id: string | null;
+        current_session_id: string | null;
+      }>("/tower/status");
+      dispatch({
+        type: "SET_TOWER_DETAIL",
+        payload: {
+          state: towerStatus.state,
+          current_goal: towerStatus.current_goal,
+          current_project_id: towerStatus.current_project_id,
+          current_session_id: towerStatus.current_session_id,
+        },
+      });
     } catch {
       /* backend may not be running yet — silent fail */
     }
@@ -198,6 +228,25 @@ export function AppProvider({ children }: AppProviderProps) {
     if (msg.channel === "state") {
       const data = msg.data as Partial<AppState>;
       dispatch({ type: "SET_STATE", payload: data });
+    } else if (msg.channel === "tower") {
+      const data = msg.data as Record<string, unknown>;
+      if (data.type === "state_changed") {
+        dispatch({
+          type: "SET_TOWER_DETAIL",
+          payload: {
+            state: data.new_state as string,
+            current_goal: (data.goal as string) ?? null,
+            current_project_id: (data.project_id as string) ?? null,
+          },
+        });
+      } else if (data.type === "leader_status") {
+        dispatch({
+          type: "SET_TOWER_DETAIL",
+          payload: {
+            current_session_id: (data.session_id as string) ?? null,
+          },
+        });
+      }
     } else if (msg.channel === "failure_logs") {
       const data = msg.data as Record<string, unknown>;
       if (data.new) {
@@ -210,7 +259,7 @@ export function AppProvider({ children }: AppProviderProps) {
   }, []);
 
   useWebSocket({
-    channels: ["state", "failure_logs"],
+    channels: ["state", "failure_logs", "tower"],
     onMessage: handleWsMessage,
   });
 

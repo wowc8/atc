@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AppProvider } from "./context/AppContext";
 import TowerBar from "./components/tower/TowerBar";
+import TowerPanel from "./components/tower/TowerPanel";
 import Dashboard from "./pages/Dashboard";
 import ProjectView from "./pages/ProjectView";
 import SettingsPage from "./pages/SettingsPage";
@@ -10,9 +11,10 @@ function Layout() {
   return (
     <>
       <TowerBar />
-      <main style={{ flex: 1, overflow: "auto" }}>
+      <main style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
         <Outlet />
       </main>
+      <TowerPanel />
     </>
   );
 }
