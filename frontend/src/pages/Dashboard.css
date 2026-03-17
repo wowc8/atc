@@ -83,6 +83,7 @@
   transition: border-color var(--transition-fast),
     box-shadow var(--transition-fast);
   font-family: var(--font-sans);
+  color: var(--color-text);
   width: 100%;
 }
 
