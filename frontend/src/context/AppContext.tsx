@@ -87,7 +87,8 @@ type Action =
   | { type: "RESOLVE_FAILURE_LOG"; payload: string }
   | { type: "SET_TOWER_PROGRESS"; payload: TowerProgress }
   | { type: "SET_HEARTBEATS"; payload: Record<string, SessionHeartbeat> }
-  | { type: "UPDATE_HEARTBEAT"; payload: SessionHeartbeat };
+  | { type: "UPDATE_HEARTBEAT"; payload: SessionHeartbeat }
+  | { type: "UPDATE_SESSION_STATUS"; payload: { session_id: string; status: string } };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -159,6 +160,15 @@ function reducer(state: AppState, action: Action): AppState {
           ...state.heartbeats,
           [action.payload.session_id]: action.payload,
         },
+      };
+    case "UPDATE_SESSION_STATUS":
+      return {
+        ...state,
+        sessions: state.sessions.map((s) =>
+          s.id === action.payload.session_id
+            ? { ...s, status: action.payload.status as Session["status"] }
+            : s,
+        ),
       };
   }
 }
@@ -263,8 +273,16 @@ export function AppProvider({ children }: AppProviderProps) {
 
   const handleWsMessage = useCallback((msg: WsMessage) => {
     if (msg.channel === "state") {
-      const data = msg.data as Partial<AppState>;
-      dispatch({ type: "SET_STATE", payload: data });
+      const data = msg.data as Record<string, unknown>;
+      // Handle individual session status updates from the backend
+      if (data.sessions_updated && typeof data.session_id === "string" && typeof data.new_status === "string") {
+        dispatch({
+          type: "UPDATE_SESSION_STATUS",
+          payload: { session_id: data.session_id, status: data.new_status },
+        });
+      } else {
+        dispatch({ type: "SET_STATE", payload: data as Partial<AppState> });
+      }
     } else if (msg.channel === "tower") {
       const data = msg.data as Record<string, unknown>;
       if (data.type === "state_changed") {

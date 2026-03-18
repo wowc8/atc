@@ -1,21 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "../../utils/api";
 import { useTerminal } from "../../hooks/useTerminal";
 import { useAppContext } from "../../context/AppContext";
 import StatusBadge from "../common/StatusBadge";
 import ConfirmPopover from "../common/ConfirmPopover";
-import type { Leader } from "../../types";
+import type { Leader, Project } from "../../types";
 import "./LeaderConsole.css";
 
 interface LeaderConsoleProps {
   projectId: string;
   leader: Leader | undefined;
+  project?: Project;
   onRefresh: () => Promise<void> | void;
 }
 
 export default function LeaderConsole({
   projectId,
   leader,
+  project,
   onRefresh,
 }: LeaderConsoleProps) {
   const { state, dispatch } = useAppContext();
@@ -23,9 +25,14 @@ export default function LeaderConsole({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const autoStarted = useRef(false);
+
+  const isClaudeCode = project?.agent_provider === "claude_code";
 
   const isRunning =
     leader?.status === "planning" || leader?.status === "managing";
+  const isIdle =
+    !leader || leader.status === "idle" || leader.status === undefined;
 
   const terminalChannel = leader?.session_id
     ? `terminal:${leader.session_id}`
@@ -33,20 +40,49 @@ export default function LeaderConsole({
 
   const { attachRef } = useTerminal({
     channel: terminalChannel,
-    enabled: isRunning && !!terminalChannel,
+    enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
+
+  // Auto-start for claude_code provider when viewing a project
+  useEffect(() => {
+    if (isClaudeCode && isIdle && !loading && !autoStarted.current && leader) {
+      autoStarted.current = true;
+      void handleStart();
+    }
+  }, [isClaudeCode, isIdle, loading, leader]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
     setLoading(true);
     setError(null);
     try {
-      await api.post(`/projects/${projectId}/leader/start`, {
-        goal: goal.trim() || null,
-      });
+      const res = await api.post<{ session_id?: string }>(
+        `/projects/${projectId}/leader/start`,
+        { goal: goal.trim() || null },
+      );
       setGoal("");
+      // Update session_id immediately so the terminal can subscribe
+      if (res.session_id) {
+        dispatch({
+          type: "SET_LEADERS",
+          payload: {
+            ...state.leaders,
+            [projectId]: {
+              ...(leader ?? {
+                id: "",
+                project_id: projectId,
+                created_at: "",
+                updated_at: "",
+              }),
+              status: "managing",
+              session_id: res.session_id,
+            } as Leader,
+          },
+        });
+      }
       await onRefresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to start leader";
+      const msg =
+        err instanceof Error ? err.message : "Failed to start leader";
       setError(msg);
       console.error("Failed to start leader:", err);
     } finally {
@@ -122,7 +158,7 @@ export default function LeaderConsole({
         </div>
       )}
 
-      {!isRunning && (
+      {!isRunning && !isClaudeCode && (
         <div className="leader-console__start-form">
           <div className="form-group">
             <label htmlFor="leader-goal">Goal (optional)</label>
@@ -140,11 +176,15 @@ export default function LeaderConsole({
         </div>
       )}
 
+      {!isRunning && isClaudeCode && loading && (
+        <div className="leader-console__loading">Starting terminal...</div>
+      )}
+
       {leader?.goal && (
         <p className="leader-console__goal">{leader.goal}</p>
       )}
 
-      {isRunning && (
+      {(isRunning || (isClaudeCode && !!terminalChannel)) && (
         <>
           <div className="leader-console__terminal" ref={attachRef} />
 

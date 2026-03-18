@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAppContext } from "../../context/AppContext";
 import { useTerminal } from "../../hooks/useTerminal";
 import { api } from "../../utils/api";
@@ -7,15 +7,13 @@ import "./TowerConsole.css";
 
 /**
  * Full interactive terminal panel for the Tower Claude session.
- * Identical in UX to LeaderConsole — the user chats with Tower
- * directly via a real terminal, and Tower relays instructions
- * to Leaders across projects.
  *
- * Idle: Start button + optional goal input.
+ * For claude_code provider: auto-starts as an open terminal on app load.
+ * For other providers: shows goal form with Start button.
  * Running: Full PTY terminal + message input bar.
  */
 export default function TowerConsole() {
-  const { state } = useAppContext();
+  const { state, dispatch } = useAppContext();
   const { towerDetail, towerProgress, brainStatus, projects } = state;
 
   const [goal, setGoal] = useState("");
@@ -23,6 +21,7 @@ export default function TowerConsole() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const messageInputRef = useRef<HTMLInputElement>(null);
+  const autoStarted = useRef(false);
 
   const isRunning =
     towerDetail.state === "planning" || towerDetail.state === "managing";
@@ -31,30 +30,48 @@ export default function TowerConsole() {
     towerDetail.state === "complete" ||
     towerDetail.state === "error";
 
+  // Check if the default project uses claude_code provider
+  const activeProject = projects.find((p) => p.status === "active");
+  const isClaudeCode = activeProject?.agent_provider === "claude_code";
+
   const terminalChannel = towerDetail.current_session_id
     ? `terminal:${towerDetail.current_session_id}`
     : undefined;
 
   const { attachRef } = useTerminal({
     channel: terminalChannel,
-    enabled: isRunning && !!terminalChannel,
+    enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
 
   // Default to first active project
   if (!projectId && projects.length > 0) {
-    const active = projects.find((p) => p.status === "active");
-    if (active) setProjectId(active.id);
+    if (activeProject) setProjectId(activeProject.id);
   }
+
+  // Auto-start for claude_code provider on app load
+  useEffect(() => {
+    if (isClaudeCode && isIdle && !loading && !autoStarted.current && projectId) {
+      autoStarted.current = true;
+      void handleStart();
+    }
+  }, [isClaudeCode, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
     if (!projectId) return;
     setLoading(true);
     try {
-      await api.post("/tower/goal", {
+      const res = await api.post<{ session_id?: string }>("/tower/goal", {
         project_id: projectId,
         goal: goal.trim() || null,
       });
       setGoal("");
+      // Update session_id immediately so the terminal can subscribe
+      if (res.session_id) {
+        dispatch({
+          type: "SET_TOWER_DETAIL",
+          payload: { current_session_id: res.session_id },
+        });
+      }
     } catch (err) {
       console.error("Failed to start Tower:", err);
     } finally {
@@ -141,8 +158,8 @@ export default function TowerConsole() {
         </div>
       </div>
 
-      {/* Idle: goal form */}
-      {isIdle && (
+      {/* Idle: goal form (only for non-claude_code providers) */}
+      {isIdle && !isClaudeCode && (
         <div className="tower-console__start-form">
           <div className="form-group">
             <label htmlFor="tower-project">Project</label>
@@ -181,9 +198,17 @@ export default function TowerConsole() {
         </div>
       )}
 
+      {/* Claude Code auto-starting indicator */}
+      {isIdle && isClaudeCode && loading && (
+        <div className="tower-console__loading">Starting terminal...</div>
+      )}
+
       {/* Current goal display */}
       {towerDetail.current_goal && (
-        <p className="tower-console__goal" data-testid="tower-console-current-goal">
+        <p
+          className="tower-console__goal"
+          data-testid="tower-console-current-goal"
+        >
           {towerDetail.current_goal}
         </p>
       )}
@@ -193,13 +218,16 @@ export default function TowerConsole() {
         <div className="tower-console__error">
           Tower encountered an error.
           {towerDetail.current_goal && (
-            <> Goal: <strong>{towerDetail.current_goal}</strong></>
+            <>
+              {" "}
+              Goal: <strong>{towerDetail.current_goal}</strong>
+            </>
           )}
         </div>
       )}
 
       {/* Running: terminal + message input */}
-      {isRunning && (
+      {(isRunning || (isClaudeCode && !!terminalChannel)) && (
         <>
           <div
             className="tower-console__terminal"
@@ -207,10 +235,7 @@ export default function TowerConsole() {
             data-testid="tower-console-terminal"
           />
 
-          <form
-            className="tower-console__input"
-            onSubmit={handleSendMessage}
-          >
+          <form className="tower-console__input" onSubmit={handleSendMessage}>
             <input
               ref={messageInputRef}
               type="text"

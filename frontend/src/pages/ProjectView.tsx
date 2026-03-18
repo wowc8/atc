@@ -67,6 +67,7 @@ export default function ProjectView() {
             <LeaderConsole
               projectId={project.id}
               leader={leader}
+              project={project}
               onRefresh={fetchAll}
             />
           </div>

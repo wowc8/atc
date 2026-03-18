@@ -174,6 +174,22 @@ class TowerController:
             )
             self._current_session_id = session_id
 
+            # Broadcast leader session info to frontend so the terminal
+            # panel can subscribe to the PTY WebSocket channel immediately.
+            # The initial connecting→idle transition fires BEFORE
+            # _current_session_id is set, so _on_session_status_changed
+            # misses it.  This explicit broadcast closes that gap.
+            if self._ws_hub is not None:
+                await self._ws_hub.broadcast(
+                    "tower",
+                    {
+                        "type": "leader_status",
+                        "session_id": session_id,
+                        "status": "idle",
+                        "project_id": project_id,
+                    },
+                )
+
             await self._event_bus.publish(
                 "tower_goal_submitted",
                 {
