@@ -84,10 +84,20 @@ class TestTowerState:
         tower._state = TowerState.MANAGING
         tower._current_goal = "test"
         tower._current_project_id = "proj-1"
+        tower._leader_output_lines = ["line1", "line2"]
         await tower.reset()
         assert tower.state == TowerState.IDLE
         assert tower.current_goal is None
         assert tower.current_project_id is None
+        assert tower._leader_output_lines == []
+
+    async def test_get_status_includes_output_line_count(self, tower: TowerController) -> None:
+        status = tower.get_status()
+        assert status["output_line_count"] == 0
+
+        tower._leader_output_lines = ["a", "b", "c"]
+        status = tower.get_status()
+        assert status["output_line_count"] == 3
 
 
 @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="session-123")
@@ -134,9 +144,7 @@ class TestSubmitGoal:
         tower = TowerController(db, event_bus)
 
         states: list[str] = []
-        event_bus.subscribe(
-            "tower_state_changed", lambda d: states.append(d["new_state"])
-        )
+        event_bus.subscribe("tower_state_changed", lambda d: states.append(d["new_state"]))
 
         await tower.submit_goal(project.id, "Test goal")
 
@@ -285,3 +293,294 @@ class TestWebSocketBroadcast:
         states_broadcast = [c[0][1]["new_state"] for c in calls if "new_state" in c[0][1]]
         assert "planning" in states_broadcast
         assert "managing" in states_broadcast
+
+
+@patch(
+    "atc.tower.controller.send_leader_message",
+    new_callable=AsyncMock,
+)
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+@pytest.mark.asyncio
+class TestSendMessage:
+    async def test_send_message_success(
+        self, mock_start: AsyncMock, mock_send: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Test goal")
+        await tower.send_message("Do the thing")
+
+        mock_send.assert_called_once_with(
+            db,
+            project.id,
+            "Do the thing",
+            event_bus=event_bus,
+        )
+
+    async def test_send_message_not_managing_raises(
+        self, mock_start: AsyncMock, mock_send: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        tower = TowerController(db, event_bus)
+        with pytest.raises(ValueError, match="not managing"):
+            await tower.send_message("Hello")
+
+    async def test_send_message_broadcasts_to_ws(
+        self, mock_start: AsyncMock, mock_send: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        ws_hub = AsyncMock()
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus, ws_hub=ws_hub)
+
+        await tower.submit_goal(project.id, "Test goal")
+        ws_hub.broadcast.reset_mock()
+
+        await tower.send_message("Do something")
+
+        # Find the message_sent broadcast
+        msg_calls = [
+            c
+            for c in ws_hub.broadcast.call_args_list
+            if c[0][0] == "tower" and c[0][1].get("type") == "message_sent"
+        ]
+        assert len(msg_calls) == 1
+        assert msg_calls[0][0][1]["message"] == "Do something"
+
+
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+@pytest.mark.asyncio
+class TestGetProgress:
+    async def test_progress_no_active_goal(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        tower = TowerController(db, event_bus)
+        progress = await tower.get_progress()
+        assert progress["total"] == 0
+        assert progress["all_done"] is False
+
+    async def test_progress_with_tasks(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        import uuid
+
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Build it")
+
+        # Insert some task_graph rows
+        for status in ["done", "done", "in_progress", "todo"]:
+            await db.execute(
+                "INSERT INTO task_graphs (id, project_id, title, status, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))",
+                (str(uuid.uuid4()), project.id, f"Task-{status}", status),
+            )
+        await db.commit()
+
+        progress = await tower.get_progress()
+        assert progress["total"] == 4
+        assert progress["done"] == 2
+        assert progress["in_progress"] == 1
+        assert progress["todo"] == 1
+        assert progress["progress_pct"] == 50
+        assert progress["all_done"] is False
+
+    async def test_progress_all_done(self, mock_start: AsyncMock, db, event_bus: EventBus) -> None:
+        import uuid
+
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Build it")
+
+        # Insert all-done tasks
+        for _ in range(3):
+            await db.execute(
+                "INSERT INTO task_graphs (id, project_id, title, status, "
+                "created_at, updated_at) VALUES "
+                "(?, ?, ?, 'done', datetime('now'), datetime('now'))",
+                (str(uuid.uuid4()), project.id, "Done task"),
+            )
+        await db.commit()
+
+        progress = await tower.get_progress()
+        assert progress["all_done"] is True
+        assert progress["progress_pct"] == 100
+
+    async def test_progress_broadcasts_to_ws(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        ws_hub = AsyncMock()
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus, ws_hub=ws_hub)
+
+        await tower.submit_goal(project.id, "Build it")
+        ws_hub.broadcast.reset_mock()
+
+        await tower.get_progress()
+
+        progress_calls = [
+            c
+            for c in ws_hub.broadcast.call_args_list
+            if c[0][0] == "tower" and c[0][1].get("type") == "progress"
+        ]
+        assert len(progress_calls) == 1
+
+
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+@pytest.mark.asyncio
+class TestLeaderOutput:
+    async def test_captures_leader_output(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Test goal")
+
+        # Simulate PTY output from leader session
+        await event_bus.publish(
+            "pty_output",
+            {"session_id": "sess-1", "data": b"Working on task 1\n"},
+        )
+
+        assert len(tower._leader_output_lines) == 1
+        assert "Working on task 1" in tower._leader_output_lines[0]
+
+    async def test_ignores_other_session_output(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Test goal")
+
+        # Output from a different session should be ignored
+        await event_bus.publish(
+            "pty_output",
+            {"session_id": "other-session", "data": b"Not for Tower\n"},
+        )
+
+        assert len(tower._leader_output_lines) == 0
+
+    async def test_output_ring_buffer(self, mock_start: AsyncMock, db, event_bus: EventBus) -> None:
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+        tower._max_output_lines = 5
+
+        await tower.submit_goal(project.id, "Test goal")
+
+        # Send more lines than the buffer size
+        for i in range(10):
+            await event_bus.publish(
+                "pty_output",
+                {"session_id": "sess-1", "data": f"Line {i}\n".encode()},
+            )
+
+        assert len(tower._leader_output_lines) == 5
+        assert "Line 9" in tower._leader_output_lines[-1]
+
+    async def test_output_broadcasts_activity_to_ws(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        ws_hub = AsyncMock()
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus, ws_hub=ws_hub)
+
+        await tower.submit_goal(project.id, "Test goal")
+        ws_hub.broadcast.reset_mock()
+
+        await event_bus.publish(
+            "pty_output",
+            {"session_id": "sess-1", "data": b"Thinking about it...\n"},
+        )
+
+        activity_calls = [
+            c
+            for c in ws_hub.broadcast.call_args_list
+            if c[0][0] == "tower" and c[0][1].get("type") == "leader_activity"
+        ]
+        assert len(activity_calls) == 1
+        assert "Thinking about it" in activity_calls[0][0][1]["preview"]
+
+    async def test_output_handles_string_data(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Test goal")
+
+        # String data (not bytes) should also work
+        await event_bus.publish(
+            "pty_output",
+            {"session_id": "sess-1", "data": "String output\n"},
+        )
+
+        assert len(tower._leader_output_lines) == 1
+
+    async def test_mark_complete_clears_output(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Test goal")
+
+        await event_bus.publish(
+            "pty_output",
+            {"session_id": "sess-1", "data": b"Some output\n"},
+        )
+        assert len(tower._leader_output_lines) > 0
+
+        await tower.mark_complete()
+        assert tower._leader_output_lines == []
+
+    async def test_cancel_clears_output(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        with patch("atc.tower.controller.stop_leader", new_callable=AsyncMock):
+            project = await create_project(db, "test-proj")
+            await create_leader(db, project.id)
+            tower = TowerController(db, event_bus)
+
+            await tower.submit_goal(project.id, "Test goal")
+            tower._leader_output_lines = ["line1", "line2"]
+
+            await tower.cancel_goal()
+            assert tower._leader_output_lines == []
+
+    async def test_empty_output_not_broadcast(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        ws_hub = AsyncMock()
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus, ws_hub=ws_hub)
+
+        await tower.submit_goal(project.id, "Test goal")
+        ws_hub.broadcast.reset_mock()
+
+        # Empty/whitespace-only output should not trigger broadcast
+        await event_bus.publish(
+            "pty_output",
+            {"session_id": "sess-1", "data": b"   \n  \n"},
+        )
+
+        activity_calls = [
+            c
+            for c in ws_hub.broadcast.call_args_list
+            if c[0][0] == "tower" and c[0][1].get("type") == "leader_activity"
+        ]
+        assert len(activity_calls) == 0
