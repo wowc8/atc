@@ -140,16 +140,19 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
 
     launch_cmd = get_launch_command(project.agent_provider)
 
-    session_id = await ace_ops.create_ace(
-        db,
-        project_id,
-        body.name,
-        task_id=body.task_id,
-        host=body.host,
-        event_bus=event_bus,
-        working_dir=working_dir,
-        launch_command=launch_cmd,
-    )
+    try:
+        session_id = await ace_ops.create_ace(
+            db,
+            project_id,
+            body.name,
+            task_id=body.task_id,
+            host=body.host,
+            event_bus=event_bus,
+            working_dir=working_dir,
+            launch_command=launch_cmd,
+        )
+    except RuntimeError as exc:
+        raise CreationFailedError(str(exc)) from None
     session = await db_ops.get_session(db, session_id)
     if session is None:
         raise CreationFailedError(f"Session creation failed for project {project_id}")

@@ -141,7 +141,7 @@ async def start_leader(
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
         await db_ops.update_session_status(conn, session.id, SessionStatus.IDLE.value)
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to spawn leader pane for project %s", project_id)
         await db_ops.update_session_status(conn, session.id, SessionStatus.ERROR.value)
         if event_bus:
@@ -153,7 +153,7 @@ async def start_leader(
                     "new_status": SessionStatus.ERROR.value,
                 },
             )
-        return session.id
+        raise RuntimeError(str(exc)) from exc
 
     # Link session to leader row
     await conn.execute(

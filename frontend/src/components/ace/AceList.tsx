@@ -26,6 +26,7 @@ export default function AceList({
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedSession = sessions.find((s) => s.id === selectedId);
 
@@ -33,6 +34,7 @@ export default function AceList({
     e.preventDefault();
     if (!newName.trim()) return;
     setCreating(true);
+    setError(null);
     try {
       const created = await api.post<Session>(`/projects/${projectId}/aces`, {
         name: newName.trim(),
@@ -41,6 +43,8 @@ export default function AceList({
       setSelectedId(created.id);
       onRefresh();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to create ace";
+      setError(msg);
       console.error("Failed to create ace:", err);
     } finally {
       setCreating(false);
@@ -96,6 +100,12 @@ export default function AceList({
           <span className="ace-list__count">{sessions.length}</span>
         </div>
 
+        {error && (
+          <div className="ace-list__error" role="alert">
+            {error}
+          </div>
+        )}
+
         {sessions.length === 0 ? (
           <p className="ace-list__empty">No aces yet.</p>
         ) : (
@@ -141,6 +151,12 @@ export default function AceList({
         <h3>Aces</h3>
         <span className="ace-list__count">{sessions.length}</span>
       </div>
+
+      {error && (
+        <div className="ace-list__error" role="alert">
+          {error}
+        </div>
+      )}
 
       {/* Create new ace */}
       <form className="ace-list__create" onSubmit={handleCreate}>

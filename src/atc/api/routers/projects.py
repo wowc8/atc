@@ -17,6 +17,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from atc.core.errors import CreationFailedError
 from atc.leader import leader as leader_ops
 from atc.state import db as db_ops
 
@@ -167,7 +168,12 @@ async def start_leader(
 ) -> dict[str, str]:
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
-    session_id = await leader_ops.start_leader(db, project_id, goal=body.goal, event_bus=event_bus)
+    try:
+        session_id = await leader_ops.start_leader(
+            db, project_id, goal=body.goal, event_bus=event_bus,
+        )
+    except RuntimeError as exc:
+        raise CreationFailedError(str(exc)) from None
     return {"status": "started", "session_id": session_id}
 
 
