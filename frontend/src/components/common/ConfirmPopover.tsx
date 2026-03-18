@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import "./ConfirmPopover.css";
 
 interface ConfirmPopoverProps {
@@ -19,12 +19,47 @@ export default function ConfirmPopover({
   variant = "default",
 }: ConfirmPopoverProps) {
   const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  const updatePosition = useCallback(() => {
+    const trigger = wrapperRef.current;
+    const popover = popoverRef.current;
+    if (!trigger || !popover) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const popRect = popover.getBoundingClientRect();
+
+    // Try to position above the trigger, centered
+    let top = rect.top - popRect.height - 8;
+    let left = rect.left + rect.width / 2 - popRect.width / 2;
+
+    // If clipped at top, position below instead
+    if (top < 8) {
+      top = rect.bottom + 8;
+    }
+
+    // Keep within horizontal bounds
+    if (left < 8) left = 8;
+    if (left + popRect.width > window.innerWidth - 8) {
+      left = window.innerWidth - popRect.width - 8;
+    }
+
+    popover.style.top = `${top}px`;
+    popover.style.left = `${left}px`;
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(updatePosition);
+  }, [open, updatePosition]);
 
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(e: MouseEvent) {
       if (
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node) &&
         popoverRef.current &&
         !popoverRef.current.contains(e.target as Node)
       ) {
@@ -45,10 +80,10 @@ export default function ConfirmPopover({
   }, [open]);
 
   return (
-    <div className="confirm-popover-wrapper" ref={popoverRef}>
+    <div className="confirm-popover-wrapper" ref={wrapperRef}>
       <div onClick={() => setOpen(true)}>{children}</div>
       {open && (
-        <div className="confirm-popover" data-testid="confirm-popover">
+        <div className="confirm-popover" ref={popoverRef} data-testid="confirm-popover">
           <p className="confirm-popover__message">{message}</p>
           <div className="confirm-popover__actions">
             <button

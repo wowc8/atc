@@ -89,7 +89,7 @@ export default function AceList({
     return (
       <div className="ace-list ace-list--compact" data-testid="ace-list">
         <div className="ace-list__header">
-          <h3>Workers</h3>
+          <h3>Aces</h3>
           <span className="ace-list__count">{sessions.length}</span>
         </div>
 

@@ -137,11 +137,11 @@ describe("AceList", () => {
     expect(list).toHaveClass("ace-list--compact");
   });
 
-  it("shows Workers heading in compact mode", () => {
+  it("shows Aces heading in compact mode", () => {
     renderWithProviders(
       <AceList projectId="proj-1" sessions={baseSessions} onRefresh={vi.fn()} compact />,
     );
-    expect(screen.getByText("Workers")).toBeInTheDocument();
+    expect(screen.getByText("Aces")).toBeInTheDocument();
   });
 
   it("shows Aces heading in default mode", () => {
