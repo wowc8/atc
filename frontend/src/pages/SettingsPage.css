@@ -65,6 +65,20 @@
   text-transform: capitalize;
 }
 
+/* About / Updates */
+
+.settings-page__update-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.settings-page__up-to-date {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
 /* Export / Import sections */
 
 .settings-page__description {

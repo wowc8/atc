@@ -1,8 +1,12 @@
 import { useState, useRef, useEffect } from "react";
+import { useOutletContext } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../utils/api";
 import type { AgentProviderConfig, ProviderInfo } from "../types";
+import type { UseUpdaterReturn } from "../hooks/useUpdater";
 import "./SettingsPage.css";
+
+const APP_VERSION = __APP_VERSION__;
 
 const GITHUB_ORG_KEY = "atc:github_default_org";
 
@@ -19,6 +23,7 @@ interface ImportResult {
 
 export default function SettingsPage() {
   const { state } = useAppContext();
+  const updater = useOutletContext<UseUpdaterReturn | null>() ?? null;
   const [backendUrl] = useState("http://127.0.0.1:8420");
   const [githubOrg, setGithubOrg] = useState(
     () => localStorage.getItem(GITHUB_ORG_KEY) ?? "",
@@ -191,6 +196,46 @@ export default function SettingsPage() {
             <span className="settings-page__dot settings-page__dot--connected" />
             Connected
           </div>
+        </section>
+
+        <section
+          className="panel settings-page__section"
+          data-testid="about-section"
+        >
+          <h2>About</h2>
+          <div className="settings-page__info-row">
+            <span className="settings-page__label">Version</span>
+            <span className="settings-page__value" data-testid="app-version">
+              v{APP_VERSION}
+            </span>
+          </div>
+          {updater && (
+            <div className="settings-page__update-actions">
+              <button
+                className="btn"
+                onClick={() => updater.checkForUpdates()}
+                disabled={updater.status === "checking" || updater.status === "downloading"}
+                data-testid="check-updates-btn"
+              >
+                {updater.status === "checking" ? "Checking..." : "Check for Updates"}
+              </button>
+              {updater.status === "available" && updater.updateInfo && (
+                <span className="settings-page__success" data-testid="update-available">
+                  v{updater.updateInfo.version} available!
+                </span>
+              )}
+              {updater.status === "idle" && (
+                <span className="settings-page__up-to-date" data-testid="up-to-date">
+                  Up to date
+                </span>
+              )}
+              {updater.error && (
+                <span className="settings-page__error" data-testid="update-error">
+                  {updater.error}
+                </span>
+              )}
+            </div>
+          )}
         </section>
 
         <section className="panel settings-page__section">
