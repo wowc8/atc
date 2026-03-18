@@ -17,18 +17,8 @@ A hierarchical AI orchestration platform that manages multiple Claude Code sessi
 
 git clone <repo-url>
 cd atc
-
-# Backend
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-pre-commit install
-
-# Frontend
-cd frontend && npm install && cd ..
-
-# Run
-./scripts/dev.sh
+make setup
+make dev
 ```
 
 Open http://127.0.0.1:5173
@@ -40,10 +30,8 @@ See [docs/setup/windows-wsl2.md](docs/setup/windows-wsl2.md) for detailed instru
 ```bash
 # Inside WSL2 (Ubuntu)
 cd ~ && git clone <repo-url> && cd atc
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cd frontend && npm install && cd ..
-./scripts/dev.sh
+make setup
+make dev
 ```
 
 Open http://localhost:5173 in any Windows browser.
@@ -52,7 +40,7 @@ Open http://localhost:5173 in any Windows browser.
 
 | Dependency | macOS | Linux | WSL2 |
 |---|---|---|---|
-| Python 3.12+ | `brew install python@3.12` | `apt install python3.12` | `apt install python3.12` |
+| Python 3.12+ | `brew install python` | `apt install python3` | `apt install python3` |
 | Node.js 20+ | `brew install node` | `apt install nodejs` | `apt install nodejs` |
 | tmux | `brew install tmux` | `apt install tmux` | pre-installed |
 | gh CLI | `brew install gh` | `apt install gh` | `apt install gh` |

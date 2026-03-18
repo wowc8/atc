@@ -8,7 +8,7 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 setup: ## Create venv, install all deps, set up pre-commit
-	python3.12 -m venv $(VENV)
+	python3 -m venv $(VENV)
 	$(PIP) install -e ".[dev]"
 	cd frontend && npm install
 	$(VENV)/bin/pre-commit install
