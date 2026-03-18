@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAppContext } from "../../context/AppContext";
 import { api } from "../../utils/api";
+import { sendReport } from "../../utils/sentry";
 import type { FailureLog } from "../../types";
 import "./LogViewer.css";
 
@@ -44,12 +45,31 @@ function LevelBadge({ level }: { level: string }) {
 function LogEntry({ entry }: { entry: FailureLog }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [reported, setReported] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const { dispatch } = useAppContext();
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(formatClaudeContext(entry));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSendReport = async () => {
+    setReporting(true);
+    const result = await sendReport(
+      `[${entry.level}] ${entry.category}: ${entry.message}`,
+      {
+        failure_log_id: entry.id,
+        category: entry.category,
+        project_id: entry.project_id,
+        entity_type: entry.entity_type,
+        stack_trace: entry.stack_trace,
+        source: "log_viewer",
+      },
+    );
+    setReported(result.sent);
+    setReporting(false);
   };
 
   const handleResolve = async () => {
@@ -104,6 +124,14 @@ function LogEntry({ entry }: { entry: FailureLog }) {
               title="Copy formatted error context for pasting into Claude"
             >
               {copied ? "Copied!" : "Copy for Claude"}
+            </button>
+            <button
+              className="log-entry__report-btn"
+              onClick={handleSendReport}
+              disabled={reported || reporting}
+              data-testid="send-report-btn"
+            >
+              {reported ? "Reported" : reporting ? "Sending..." : "Send Report"}
             </button>
             {!entry.resolved && (
               <button

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../utils/api";
+import { hasConsent, setConsent, sendReport } from "../utils/sentry";
 import type { AgentProviderConfig, ProviderInfo } from "../types";
 import type { UseUpdaterReturn } from "../hooks/useUpdater";
 import "./SettingsPage.css";
@@ -48,9 +49,27 @@ export default function SettingsPage() {
   const [providerSaving, setProviderSaving] = useState(false);
   const [providerError, setProviderError] = useState("");
 
+  // Sentry / crash reporting state
+  const [sentryConsent, setSentryConsent] = useState(hasConsent);
+  const [sentryStatus, setSentryStatus] = useState<{
+    enabled: boolean;
+    initialized: boolean;
+    environment: string;
+  } | null>(null);
+  const [reportSending, setReportSending] = useState(false);
+  const [reportResult, setReportResult] = useState<"idle" | "sent" | "error">(
+    "idle",
+  );
+
   useEffect(() => {
     api.get<AgentProviderConfig>("/settings/agent-provider").then(setProviderConfig).catch(() => {});
     api.get<ProviderInfo[]>("/settings/providers").then(setProviders).catch(() => {});
+    api
+      .get<{ enabled: boolean; initialized: boolean; environment: string }>(
+        "/settings/sentry",
+      )
+      .then(setSentryStatus)
+      .catch(() => {});
   }, []);
 
   async function handleProviderChange(newDefault: string) {
@@ -69,6 +88,22 @@ export default function SettingsPage() {
     } finally {
       setProviderSaving(false);
     }
+  }
+
+  function handleConsentChange(value: boolean) {
+    setConsent(value);
+    setSentryConsent(value);
+  }
+
+  async function handleSendReport() {
+    setReportSending(true);
+    setReportResult("idle");
+    const result = await sendReport(
+      "User-initiated crash report from Settings",
+      { source: "settings_page" },
+    );
+    setReportResult(result.sent ? "sent" : "error");
+    setReportSending(false);
   }
 
   // Restore confirm state
@@ -355,6 +390,75 @@ export default function SettingsPage() {
               {providerError}
             </p>
           )}
+        </section>
+
+        {/* Crash Reporting Section */}
+        <section
+          className="panel settings-page__section"
+          data-testid="sentry-section"
+        >
+          <h2>Crash Reporting</h2>
+          <p className="settings-page__description">
+            Help improve ATC by sending anonymous crash reports. No personal
+            data is included — all PII is stripped before sending.
+          </p>
+
+          <div className="settings-page__consent-row">
+            <label className="settings-page__toggle-label">
+              <input
+                type="checkbox"
+                checked={sentryConsent}
+                onChange={(e) => handleConsentChange(e.target.checked)}
+                data-testid="sentry-consent-toggle"
+              />
+              <span>Enable crash reporting</span>
+            </label>
+          </div>
+
+          {sentryStatus && (
+            <>
+              <div className="settings-page__info-row">
+                <span className="settings-page__label">Backend Sentry</span>
+                <span className="settings-page__value">
+                  {sentryStatus.initialized ? "Active" : "Inactive"}
+                </span>
+              </div>
+              <div className="settings-page__info-row">
+                <span className="settings-page__label">Environment</span>
+                <span className="settings-page__value">
+                  {sentryStatus.environment}
+                </span>
+              </div>
+            </>
+          )}
+
+          <div className="settings-page__report-actions">
+            <button
+              className="btn"
+              onClick={handleSendReport}
+              disabled={reportSending}
+              data-testid="send-report-btn"
+            >
+              {reportSending ? "Sending..." : "Send Report"}
+            </button>
+            {reportResult === "sent" && (
+              <span
+                className="settings-page__success"
+                data-testid="report-success"
+              >
+                Report sent successfully.
+              </span>
+            )}
+            {reportResult === "error" && (
+              <span
+                className="settings-page__error"
+                data-testid="report-error"
+              >
+                Failed to send report. Sentry may not be configured on the
+                backend.
+              </span>
+            )}
+          </div>
         </section>
 
         {/* Export Section */}

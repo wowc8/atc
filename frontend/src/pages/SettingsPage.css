@@ -156,6 +156,34 @@
   color: var(--color-status-red, #ef4444);
 }
 
+/* Crash Reporting section */
+
+.settings-page__consent-row {
+  margin-bottom: var(--space-4);
+}
+
+.settings-page__toggle-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.settings-page__toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.settings-page__report-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
 /* Restore confirmation dialog */
 
 .settings-page__overlay {

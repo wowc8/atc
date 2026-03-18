@@ -1,4 +1,4 @@
-"""Settings router — export/import backup + agent provider config endpoints.
+"""Settings router — export/import backup + agent provider config + sentry endpoints.
 
 Routes:
   POST /api/settings/export/{project_id}  → export single project as zip
@@ -8,6 +8,8 @@ Routes:
   GET  /api/settings/agent-provider       → get current agent provider config
   PUT  /api/settings/agent-provider       → update agent provider config
   GET  /api/settings/providers            → list available providers
+  GET  /api/settings/sentry              → get sentry status
+  POST /api/settings/sentry/send-report  → manually send an error report
 """
 
 from __future__ import annotations
@@ -238,3 +240,66 @@ async def list_available_providers() -> list[ProviderInfo]:
                 )
             )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Sentry endpoints
+# ---------------------------------------------------------------------------
+
+
+class SentryStatusResponse(BaseModel):
+    """Current Sentry configuration status."""
+
+    enabled: bool
+    initialized: bool
+    environment: str
+
+
+class SendReportRequest(BaseModel):
+    """User-initiated error report."""
+
+    message: str
+    context: dict[str, object] | None = None
+
+
+class SendReportResponse(BaseModel):
+    """Result of sending an error report."""
+
+    sent: bool
+    event_id: str | None = None
+
+
+@router.get("/sentry")
+async def get_sentry_status(request: Request) -> SentryStatusResponse:
+    """Return the current Sentry status."""
+    settings = request.app.state.settings
+    cfg = settings.sentry
+
+    initialized = False
+    try:
+        import sentry_sdk
+
+        initialized = sentry_sdk.is_initialized()
+    except ImportError:
+        pass
+
+    return SentryStatusResponse(
+        enabled=cfg.enabled,
+        initialized=initialized,
+        environment=cfg.environment,
+    )
+
+
+@router.post("/sentry/send-report")
+async def send_sentry_report(
+    body: SendReportRequest,
+    request: Request,
+) -> SendReportResponse:
+    """Manually send a user-initiated error report to Sentry."""
+    from atc.core.sentry import capture_message
+
+    extra = dict(body.context) if body.context else {}
+    extra["source"] = "user_report"
+
+    event_id = capture_message(body.message, level="error", **extra)
+    return SendReportResponse(sent=event_id is not None, event_id=event_id)
