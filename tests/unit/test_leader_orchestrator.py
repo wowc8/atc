@@ -15,7 +15,6 @@ from atc.state.db import (
     create_task_graph,
     get_connection,
     get_task_graph,
-    list_task_graphs,
     run_migrations,
 )
 
@@ -63,21 +62,28 @@ def orchestrator(db, event_bus, project_with_leader) -> LeaderOrchestrator:
 @pytest.mark.asyncio
 class TestSpawnAces:
     async def test_spawns_for_ready_tasks(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
-        project, _ = await create_project(db, "p2"), None
+        await create_project(db, "p2")
         # Use orchestrator's project_id
-        tg = await create_task_graph(db, orchestrator.project_id, "Login page")
+        await create_task_graph(db, orchestrator.project_id, "Login page")
 
         assignments = await orchestrator.spawn_aces_for_ready_tasks()
 
         assert len(assignments) == 1
         assert assignments[0].task_title == "Login page"
         assert assignments[0].ace_session_id == "ace-session-1"
+        assert assignments[0].assignment_id != ""  # idempotency key set
         mock_create.assert_called_once()
 
     async def test_uses_project_agent_provider(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         """Ace sessions must use the project's configured agent_provider."""
         # Set project to use opencode
@@ -96,7 +102,10 @@ class TestSpawnAces:
         assert call_kwargs.kwargs.get("launch_command") == "opencode"
 
     async def test_default_provider_uses_claude(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         """Default agent_provider (claude_code) uses the Claude launch command."""
         await create_task_graph(db, orchestrator.project_id, "Task B")
@@ -107,11 +116,16 @@ class TestSpawnAces:
         assert call_kwargs.kwargs.get("launch_command") == "claude --dangerously-skip-permissions"
 
     async def test_skips_tasks_with_unmet_deps(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg1 = await create_task_graph(db, orchestrator.project_id, "Task A")
-        tg2 = await create_task_graph(
-            db, orchestrator.project_id, "Task B",
+        await create_task_graph(
+            db,
+            orchestrator.project_id,
+            "Task B",
             dependencies=[tg1.id],
         )
 
@@ -122,7 +136,10 @@ class TestSpawnAces:
         assert assignments[0].task_title == "Task A"
 
     async def test_respects_max_concurrent_limit(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         orchestrator._max_concurrent_aces = 2
 
@@ -134,13 +151,19 @@ class TestSpawnAces:
         assert len(assignments) == 2
 
     async def test_no_tasks_returns_empty(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         assignments = await orchestrator.spawn_aces_for_ready_tasks()
         assert assignments == []
 
     async def test_skip_already_assigned(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
 
@@ -155,7 +178,10 @@ class TestSpawnAces:
         assert len(assignments) == 0
 
     async def test_marks_task_in_progress(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
 
@@ -166,7 +192,10 @@ class TestSpawnAces:
         assert updated.status == "in_progress"
 
     async def test_assigns_ace_to_task_graph(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
 
@@ -177,10 +206,13 @@ class TestSpawnAces:
         assert updated.assigned_ace_id == "ace-session-1"
 
     async def test_publishes_ace_spawned_event(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
         event_bus: EventBus,
     ) -> None:
-        tg = await create_task_graph(db, orchestrator.project_id, "Task A")
+        await create_task_graph(db, orchestrator.project_id, "Task A")
 
         captured: list[dict] = []
         event_bus.subscribe("leader_ace_spawned", lambda d: captured.append(d))
@@ -190,9 +222,13 @@ class TestSpawnAces:
         assert len(captured) == 1
         assert captured[0]["task_title"] == "Task A"
         assert captured[0]["session_id"] == "ace-session-1"
+        assert "assignment_id" in captured[0]
 
     async def test_spawn_failure_does_not_crash(
-        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         mock_create.side_effect = RuntimeError("tmux failed")
         await create_task_graph(db, orchestrator.project_id, "Task A")
@@ -200,6 +236,23 @@ class TestSpawnAces:
         # Should not raise
         assignments = await orchestrator.spawn_aces_for_ready_tasks()
         assert len(assignments) == 0
+
+    async def test_idempotent_spawn_same_task(
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """Spawning the same task twice with the same leader is idempotent."""
+        await create_task_graph(db, orchestrator.project_id, "Task A")
+
+        # First spawn
+        assignments1 = await orchestrator.spawn_aces_for_ready_tasks()
+        assert len(assignments1) == 1
+
+        # Second call -- task is already in self.assignments, so skipped
+        assignments2 = await orchestrator.spawn_aces_for_ready_tasks()
+        assert len(assignments2) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -211,14 +264,21 @@ class TestSpawnAces:
 @pytest.mark.asyncio
 class TestSendInstruction:
     async def test_sends_instruction(
-        self, mock_start: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_start: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
 
         # Manually create session row for the Ace
         from atc.state import db as db_ops
+
         session = await db_ops.create_session(
-            db, orchestrator.project_id, "ace", "ace-task-a",
+            db,
+            orchestrator.project_id,
+            "ace",
+            "ace-task-a",
         )
 
         orchestrator.assignments[tg.id] = AceAssignment(
@@ -230,14 +290,18 @@ class TestSendInstruction:
         await orchestrator.send_instruction_to_ace(tg.id, "Build the login page")
 
         mock_start.assert_called_once_with(
-            db, session.id,
+            db,
+            session.id,
             instruction="Build the login page",
             event_bus=orchestrator.event_bus,
         )
         assert orchestrator.assignments[tg.id].status == "working"
 
     async def test_instruction_to_unknown_task_raises(
-        self, mock_start: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_start: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         with pytest.raises(ValueError, match="No Ace assigned"):
             await orchestrator.send_instruction_to_ace("nonexistent", "Do something")
@@ -252,12 +316,17 @@ class TestSendInstruction:
 @pytest.mark.asyncio
 class TestMarkTaskDone:
     async def test_marks_done_and_destroys_ace(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
         event_bus: EventBus,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
-        # Transition to in_progress first (required for done transition)
+        # Transition through the state machine: todo -> assigned -> in_progress
         from atc.state import db as db_ops
+
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
         await db_ops.update_task_graph_status(db, tg.id, "in_progress")
 
         orchestrator.assignments[tg.id] = AceAssignment(
@@ -280,10 +349,15 @@ class TestMarkTaskDone:
         assert len(captured) == 1
 
     async def test_done_without_assignment(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
         from atc.state import db as db_ops
+
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
         await db_ops.update_task_graph_status(db, tg.id, "in_progress")
 
         # Should not crash even without assignment
@@ -304,11 +378,16 @@ class TestMarkTaskDone:
 @pytest.mark.asyncio
 class TestMarkTaskFailed:
     async def test_resets_to_todo_and_destroys_ace(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
         event_bus: EventBus,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
         from atc.state import db as db_ops
+
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
         await db_ops.update_task_graph_status(db, tg.id, "in_progress")
 
         orchestrator.assignments[tg.id] = AceAssignment(
@@ -325,7 +404,7 @@ class TestMarkTaskFailed:
 
         updated = await get_task_graph(db, tg.id)
         assert updated is not None
-        assert updated.status == "todo"  # Reset for retry
+        assert updated.status == "todo"  # Reset for retry (via error -> todo)
         assert tg.id not in orchestrator.assignments  # Assignment removed
         mock_destroy.assert_called_once()
         assert len(captured) == 1
@@ -342,13 +421,16 @@ class TestGetProgress:
     async def test_progress_with_tasks(self, db, orchestrator: LeaderOrchestrator) -> None:
         tg1 = await create_task_graph(db, orchestrator.project_id, "Done Task")
         from atc.state import db as db_ops
+
+        await db_ops.update_task_graph_status(db, tg1.id, "assigned")
         await db_ops.update_task_graph_status(db, tg1.id, "in_progress")
         await db_ops.update_task_graph_status(db, tg1.id, "done")
 
         tg2 = await create_task_graph(db, orchestrator.project_id, "In Progress")
+        await db_ops.update_task_graph_status(db, tg2.id, "assigned")
         await db_ops.update_task_graph_status(db, tg2.id, "in_progress")
 
-        tg3 = await create_task_graph(db, orchestrator.project_id, "Todo Task")
+        await create_task_graph(db, orchestrator.project_id, "Todo Task")
 
         progress = await orchestrator.get_progress()
 
@@ -375,19 +457,28 @@ class TestGetProgress:
 @pytest.mark.asyncio
 class TestCleanup:
     async def test_destroys_active_aces(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         orchestrator.assignments["tg-1"] = AceAssignment(
-            ace_session_id="ace-1", task_graph_id="tg-1",
-            task_title="Task 1", status="working",
+            ace_session_id="ace-1",
+            task_graph_id="tg-1",
+            task_title="Task 1",
+            status="working",
         )
         orchestrator.assignments["tg-2"] = AceAssignment(
-            ace_session_id="ace-2", task_graph_id="tg-2",
-            task_title="Task 2", status="assigned",
+            ace_session_id="ace-2",
+            task_graph_id="tg-2",
+            task_title="Task 2",
+            status="assigned",
         )
         orchestrator.assignments["tg-3"] = AceAssignment(
-            ace_session_id="ace-3", task_graph_id="tg-3",
-            task_title="Task 3", status="done",
+            ace_session_id="ace-3",
+            task_graph_id="tg-3",
+            task_title="Task 3",
+            status="done",
         )
 
         await orchestrator.cleanup()
@@ -397,7 +488,10 @@ class TestCleanup:
         assert len(orchestrator.assignments) == 0
 
     async def test_cleanup_with_no_assignments(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         await orchestrator.cleanup()
         mock_destroy.assert_not_called()
@@ -412,21 +506,30 @@ class TestCleanup:
 @pytest.mark.asyncio
 class TestSessionMonitoring:
     async def test_ace_error_triggers_task_failure(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
         from atc.state import db as db_ops
+
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
         await db_ops.update_task_graph_status(db, tg.id, "in_progress")
 
         orchestrator.assignments[tg.id] = AceAssignment(
-            ace_session_id="ace-1", task_graph_id=tg.id,
-            task_title="Task A", status="working",
+            ace_session_id="ace-1",
+            task_graph_id=tg.id,
+            task_title="Task A",
+            status="working",
         )
 
-        await orchestrator.on_session_status_changed({
-            "session_id": "ace-1",
-            "new_status": "error",
-        })
+        await orchestrator.on_session_status_changed(
+            {
+                "session_id": "ace-1",
+                "new_status": "error",
+            }
+        )
 
         assert tg.id not in orchestrator.assignments
         updated = await get_task_graph(db, tg.id)
@@ -434,57 +537,80 @@ class TestSessionMonitoring:
         assert updated.status == "todo"
 
     async def test_ace_disconnected_triggers_task_failure(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
         from atc.state import db as db_ops
+
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
         await db_ops.update_task_graph_status(db, tg.id, "in_progress")
 
         orchestrator.assignments[tg.id] = AceAssignment(
-            ace_session_id="ace-1", task_graph_id=tg.id,
-            task_title="Task A", status="working",
+            ace_session_id="ace-1",
+            task_graph_id=tg.id,
+            task_title="Task A",
+            status="working",
         )
 
-        await orchestrator.on_session_status_changed({
-            "session_id": "ace-1",
-            "new_status": "disconnected",
-        })
+        await orchestrator.on_session_status_changed(
+            {
+                "session_id": "ace-1",
+                "new_status": "disconnected",
+            }
+        )
 
         assert tg.id not in orchestrator.assignments
 
     async def test_unrelated_session_ignored(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
 
         orchestrator.assignments[tg.id] = AceAssignment(
-            ace_session_id="ace-1", task_graph_id=tg.id,
-            task_title="Task A", status="working",
+            ace_session_id="ace-1",
+            task_graph_id=tg.id,
+            task_title="Task A",
+            status="working",
         )
 
-        await orchestrator.on_session_status_changed({
-            "session_id": "other-session",
-            "new_status": "error",
-        })
+        await orchestrator.on_session_status_changed(
+            {
+                "session_id": "other-session",
+                "new_status": "error",
+            }
+        )
 
         # Assignment should be unchanged
         assert tg.id in orchestrator.assignments
         assert orchestrator.assignments[tg.id].status == "working"
 
     async def test_non_error_status_ignored(
-        self, mock_destroy: AsyncMock, db, orchestrator: LeaderOrchestrator,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
     ) -> None:
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
 
         orchestrator.assignments[tg.id] = AceAssignment(
-            ace_session_id="ace-1", task_graph_id=tg.id,
-            task_title="Task A", status="working",
+            ace_session_id="ace-1",
+            task_graph_id=tg.id,
+            task_title="Task A",
+            status="working",
         )
 
-        await orchestrator.on_session_status_changed({
-            "session_id": "ace-1",
-            "new_status": "waiting",
-        })
+        await orchestrator.on_session_status_changed(
+            {
+                "session_id": "ace-1",
+                "new_status": "waiting",
+            }
+        )
 
         # Should not trigger failure
         assert tg.id in orchestrator.assignments

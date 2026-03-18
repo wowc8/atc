@@ -91,7 +91,8 @@ def _to_response(tg: Any) -> TaskGraphResponse:
     response_model=list[TaskGraphResponse],
 )
 async def list_task_graphs(
-    project_id: str, request: Request,
+    project_id: str,
+    request: Request,
 ) -> list[TaskGraphResponse]:
     db = await _get_db(request)
     project = await db_ops.get_project(db, project_id)
@@ -107,7 +108,9 @@ async def list_task_graphs(
     status_code=201,
 )
 async def create_task_graph(
-    project_id: str, body: CreateTaskGraphRequest, request: Request,
+    project_id: str,
+    body: CreateTaskGraphRequest,
+    request: Request,
 ) -> TaskGraphResponse:
     db = await _get_db(request)
     project = await db_ops.get_project(db, project_id)
@@ -133,13 +136,15 @@ async def create_task_graph(
     response_model=TaskGraphResponse,
 )
 async def get_task_graph(
-    task_graph_id: str, request: Request,
+    task_graph_id: str,
+    request: Request,
 ) -> TaskGraphResponse:
     db = await _get_db(request)
     tg = await db_ops.get_task_graph(db, task_graph_id)
     if tg is None:
         raise HTTPException(
-            status_code=404, detail=f"TaskGraph {task_graph_id} not found",
+            status_code=404,
+            detail=f"TaskGraph {task_graph_id} not found",
         )
     return _to_response(tg)
 
@@ -149,7 +154,9 @@ async def get_task_graph(
     response_model=TaskGraphResponse,
 )
 async def update_task_graph(
-    task_graph_id: str, body: UpdateTaskGraphRequest, request: Request,
+    task_graph_id: str,
+    body: UpdateTaskGraphRequest,
+    request: Request,
 ) -> TaskGraphResponse:
     db = await _get_db(request)
 
@@ -167,7 +174,8 @@ async def update_task_graph(
     tg = await db_ops.update_task_graph(db, task_graph_id, **kwargs)
     if tg is None:
         raise HTTPException(
-            status_code=404, detail=f"TaskGraph {task_graph_id} not found",
+            status_code=404,
+            detail=f"TaskGraph {task_graph_id} not found",
         )
     return _to_response(tg)
 
@@ -177,7 +185,9 @@ async def update_task_graph(
     response_model=TaskGraphResponse,
 )
 async def transition_task_graph_status(
-    task_graph_id: str, body: StatusTransitionRequest, request: Request,
+    task_graph_id: str,
+    body: StatusTransitionRequest,
+    request: Request,
 ) -> TaskGraphResponse:
     db = await _get_db(request)
     try:
@@ -186,18 +196,123 @@ async def transition_task_graph_status(
         raise HTTPException(status_code=422, detail=str(e)) from None
     if tg is None:
         raise HTTPException(
-            status_code=404, detail=f"TaskGraph {task_graph_id} not found",
+            status_code=404,
+            detail=f"TaskGraph {task_graph_id} not found",
         )
     return _to_response(tg)
 
 
 @router.delete("/task-graphs/{task_graph_id}", status_code=204)
 async def delete_task_graph(
-    task_graph_id: str, request: Request,
+    task_graph_id: str,
+    request: Request,
 ) -> None:
     db = await _get_db(request)
     deleted = await db_ops.delete_task_graph(db, task_graph_id)
     if not deleted:
         raise HTTPException(
-            status_code=404, detail=f"TaskGraph {task_graph_id} not found",
+            status_code=404,
+            detail=f"TaskGraph {task_graph_id} not found",
         )
+
+
+# ---------------------------------------------------------------------------
+# Task Assignment routes (idempotent assignments)
+# ---------------------------------------------------------------------------
+
+
+class AssignTaskRequest(BaseModel):
+    ace_session_id: str
+    assignment_id: str
+
+
+class TaskAssignmentResponse(BaseModel):
+    id: str
+    task_graph_id: str
+    ace_session_id: str
+    assignment_id: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class AssignmentStatusRequest(BaseModel):
+    status: str
+
+
+def _to_assignment_response(a: Any) -> TaskAssignmentResponse:
+    return TaskAssignmentResponse(
+        id=a.id,
+        task_graph_id=a.task_graph_id,
+        ace_session_id=a.ace_session_id,
+        assignment_id=a.assignment_id,
+        status=a.status,
+        created_at=a.created_at,
+        updated_at=a.updated_at,
+    )
+
+
+@router.post(
+    "/task-graphs/{task_graph_id}/assign",
+    response_model=TaskAssignmentResponse,
+)
+async def assign_task(
+    task_graph_id: str,
+    body: AssignTaskRequest,
+    request: Request,
+) -> TaskAssignmentResponse:
+    """Idempotently assign an Ace to a task graph entry.
+
+    Returns 200 with the assignment record.  If the same assignment_id
+    was already used, the existing record is returned (no-op).
+    """
+    db = await _get_db(request)
+    try:
+        assignment, _created = await db_ops.assign_task(
+            db,
+            task_graph_id,
+            body.ace_session_id,
+            body.assignment_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    return _to_assignment_response(assignment)
+
+
+@router.get(
+    "/task-graphs/{task_graph_id}/assignments",
+    response_model=list[TaskAssignmentResponse],
+)
+async def list_task_assignments(
+    task_graph_id: str,
+    request: Request,
+) -> list[TaskAssignmentResponse]:
+    db = await _get_db(request)
+    items = await db_ops.list_task_assignments(db, task_graph_id=task_graph_id)
+    return [_to_assignment_response(a) for a in items]
+
+
+@router.patch(
+    "/task-assignments/{assignment_id}/status",
+    response_model=TaskAssignmentResponse,
+)
+async def transition_assignment_status(
+    assignment_id: str,
+    body: AssignmentStatusRequest,
+    request: Request,
+) -> TaskAssignmentResponse:
+    db = await _get_db(request)
+    try:
+        assignment = await db_ops.update_task_assignment_status(
+            db,
+            assignment_id,
+            body.status,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    if assignment is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Assignment {assignment_id} not found",
+        )
+    return _to_assignment_response(assignment)

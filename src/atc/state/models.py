@@ -187,6 +187,23 @@ class TaskGraph:
 
 
 @dataclass
+class TaskAssignment:
+    """Tracks a single assignment of an Ace session to a task graph entry.
+
+    The ``assignment_id`` is a caller-supplied idempotency key.  Inserting
+    a duplicate ``assignment_id`` is a no-op.
+    """
+
+    id: str
+    task_graph_id: str
+    ace_session_id: str
+    assignment_id: str
+    status: str = "assigned"  # assigned|working|done|failed
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
 class SessionHeartbeat:
     session_id: str
     health: str  # alive|stale|stopped
