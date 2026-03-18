@@ -15,7 +15,7 @@ import "./TowerConsole.css";
  * Running: Full PTY terminal + message input bar.
  */
 export default function TowerConsole() {
-  const { state } = useAppContext();
+  const { state, dispatch } = useAppContext();
   const { towerDetail, towerProgress, brainStatus, projects } = state;
 
   const [goal, setGoal] = useState("");
@@ -50,11 +50,18 @@ export default function TowerConsole() {
     if (!projectId) return;
     setLoading(true);
     try {
-      await api.post("/tower/goal", {
+      const res = await api.post<{ session_id?: string }>("/tower/goal", {
         project_id: projectId,
         goal: goal.trim() || null,
       });
       setGoal("");
+      // Update session_id immediately so the terminal can subscribe
+      if (res.session_id) {
+        dispatch({
+          type: "SET_TOWER_DETAIL",
+          payload: { current_session_id: res.session_id },
+        });
+      }
     } catch (err) {
       console.error("Failed to start Tower:", err);
     } finally {
@@ -183,7 +190,10 @@ export default function TowerConsole() {
 
       {/* Current goal display */}
       {towerDetail.current_goal && (
-        <p className="tower-console__goal" data-testid="tower-console-current-goal">
+        <p
+          className="tower-console__goal"
+          data-testid="tower-console-current-goal"
+        >
           {towerDetail.current_goal}
         </p>
       )}
@@ -193,7 +203,10 @@ export default function TowerConsole() {
         <div className="tower-console__error">
           Tower encountered an error.
           {towerDetail.current_goal && (
-            <> Goal: <strong>{towerDetail.current_goal}</strong></>
+            <>
+              {" "}
+              Goal: <strong>{towerDetail.current_goal}</strong>
+            </>
           )}
         </div>
       )}
@@ -207,10 +220,7 @@ export default function TowerConsole() {
             data-testid="tower-console-terminal"
           />
 
-          <form
-            className="tower-console__input"
-            onSubmit={handleSendMessage}
-          >
+          <form className="tower-console__input" onSubmit={handleSendMessage}>
             <input
               ref={messageInputRef}
               type="text"
