@@ -43,6 +43,13 @@ class CostTrackerConfig(BaseModel):
     poll_interval_seconds: int = 30
 
 
+class HeartbeatConfig(BaseModel):
+    enabled: bool = True
+    interval_seconds: int = 30
+    check_interval_seconds: int = 60
+    stale_threshold_seconds: int = 120
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -66,6 +73,7 @@ class Settings(BaseSettings):
     github: GitHubConfig = GitHubConfig()
     budget: BudgetConfig = BudgetConfig()
     cost_tracker: CostTrackerConfig = CostTrackerConfig()
+    heartbeat: HeartbeatConfig = HeartbeatConfig()
     logging: LoggingConfig = LoggingConfig()
     agent_provider: AgentProviderConfig = AgentProviderConfig()
 

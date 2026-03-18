@@ -11,6 +11,7 @@ import type {
   Project,
   Leader,
   Session,
+  SessionHeartbeat,
   Notification,
   FailureLog,
   Task,
@@ -56,6 +57,7 @@ const initialState: AppState = {
   failureLogs: [],
   usage: { today_cost: 0, month_cost: 0, today_tokens: 0, month_tokens: 0 },
   github: {},
+  heartbeats: {},
   selectedProjectId: null,
   selectedSessionId: null,
 };
@@ -83,7 +85,9 @@ type Action =
   | { type: "SET_FAILURE_LOGS"; payload: FailureLog[] }
   | { type: "ADD_FAILURE_LOG"; payload: FailureLog }
   | { type: "RESOLVE_FAILURE_LOG"; payload: string }
-  | { type: "SET_TOWER_PROGRESS"; payload: TowerProgress };
+  | { type: "SET_TOWER_PROGRESS"; payload: TowerProgress }
+  | { type: "SET_HEARTBEATS"; payload: Record<string, SessionHeartbeat> }
+  | { type: "UPDATE_HEARTBEAT"; payload: SessionHeartbeat };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -146,6 +150,16 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_TOWER_PROGRESS":
       return { ...state, towerProgress: action.payload };
+    case "SET_HEARTBEATS":
+      return { ...state, heartbeats: action.payload };
+    case "UPDATE_HEARTBEAT":
+      return {
+        ...state,
+        heartbeats: {
+          ...state.heartbeats,
+          [action.payload.session_id]: action.payload,
+        },
+      };
   }
 }
 
@@ -212,6 +226,14 @@ export function AppProvider({ children }: AppProviderProps) {
         if (r.status === "fulfilled") taskGraphs[projects[i]!.id] = r.value;
       }
       dispatch({ type: "SET_TASK_GRAPHS", payload: taskGraphs });
+
+      // Fetch heartbeats
+      const heartbeatList = await api.get<SessionHeartbeat[]>("/heartbeat");
+      const heartbeats: Record<string, SessionHeartbeat> = {};
+      for (const hb of heartbeatList) {
+        heartbeats[hb.session_id] = hb;
+      }
+      dispatch({ type: "SET_HEARTBEATS", payload: heartbeats });
 
       // Fetch failure logs
       const failureLogs = await api.get<FailureLog[]>("/failure-logs?limit=200");
@@ -282,6 +304,24 @@ export function AppProvider({ children }: AppProviderProps) {
           },
         });
       }
+    } else if (msg.channel === "heartbeat") {
+      const data = msg.data as {
+        session_id: string;
+        health: "alive" | "stale" | "stopped";
+        last_heartbeat_at?: string;
+      };
+      if (data.session_id) {
+        dispatch({
+          type: "UPDATE_HEARTBEAT",
+          payload: {
+            session_id: data.session_id,
+            health: data.health,
+            last_heartbeat_at: data.last_heartbeat_at ?? new Date().toISOString(),
+            registered_at: "",
+            updated_at: new Date().toISOString(),
+          },
+        });
+      }
     } else if (msg.channel === "failure_logs") {
       const data = msg.data as Record<string, unknown>;
       if (data.new) {
@@ -294,7 +334,7 @@ export function AppProvider({ children }: AppProviderProps) {
   }, []);
 
   useWebSocket({
-    channels: ["state", "failure_logs", "tower"],
+    channels: ["state", "failure_logs", "tower", "heartbeat"],
     onMessage: handleWsMessage,
   });
 
