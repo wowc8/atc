@@ -117,9 +117,11 @@ export default function TowerBar() {
           </button>
 
           <button
-            className="tower-bar__icon-btn"
+            className={`tower-bar__icon-btn ${isActive("/settings") ? "active" : ""}`}
             data-testid="settings-button"
-            onClick={() => navigate("/settings")}
+            onClick={() =>
+              isActive("/settings") ? navigate("/dashboard") : navigate("/settings")
+            }
             title="Settings"
           >
             <SettingsIcon />
