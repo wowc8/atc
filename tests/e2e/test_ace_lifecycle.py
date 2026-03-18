@@ -31,7 +31,7 @@ def client(tmp_path: Path) -> TestClient:
 def _smart_tmux_mock(*args: str) -> str:
     """Mock _tmux_run that returns sensible values based on the tmux command."""
     cmd = args[0] if args else ""
-    if cmd == "split-window":
+    if cmd == "new-window":
         return "%1"
     if cmd == "display-message":
         return "0"  # alternate_on = False (TUI not active)

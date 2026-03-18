@@ -385,11 +385,11 @@ class TestOpenCodeProvider:
     ) -> None:
         # First call: ensure_server_running API check (GET /session)
         # Second call: API request (curl for POST /session)
-        # Third call: tmux split-window
+        # Third call: tmux new-window
         calls = [
             _make_process(stdout=b'{"sessions": []}'),  # ensure_server GET /session
             _make_process(stdout=b'{"id": "w1", "status": "idle"}'),  # POST /session
-            _make_process(stdout=b"%50\n"),  # tmux split-window
+            _make_process(stdout=b"%50\n"),  # tmux new-window
         ]
         mock_exec.side_effect = calls
 
@@ -409,7 +409,7 @@ class TestOpenCodeProvider:
         mock_exec.side_effect = [
             _make_process(stdout=b'{"sessions": []}'),  # ensure_server
             _make_process(stdout=b"{}"),  # POST /session
-            _make_process(stdout=b"%50\n"),  # tmux split-window
+            _make_process(stdout=b"%50\n"),  # tmux new-window
         ]
         await provider.spawn_session("w1")
 
@@ -428,7 +428,7 @@ class TestOpenCodeProvider:
         mock_exec.side_effect = [
             _make_process(stdout=b'{"sessions": []}'),  # ensure_server
             _make_process(stdout=b"{}"),  # POST /session
-            _make_process(stdout=b"%50\n"),  # tmux split-window
+            _make_process(stdout=b"%50\n"),  # tmux new-window
         ]
         await provider.spawn_session("w1")
 
