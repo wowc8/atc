@@ -72,6 +72,7 @@ class AgentProviderConfig(BaseModel):
     opencode_password: str | None = None
     tmux_session: str = "atc"
     claude_command: str = "claude"
+    plugin_dirs: list[str] = []
 
 
 class Settings(BaseSettings):

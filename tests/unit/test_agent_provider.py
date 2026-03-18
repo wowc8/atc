@@ -2,27 +2,38 @@
 
 from __future__ import annotations
 
+import textwrap
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from atc.agents.base import (
     AgentProvider,
+    CostModel,
     OutputChunk,
     PromptResult,
     ProviderCapabilities,
     ProviderError,
+    ProviderMetadata,
     SessionInfo,
     SessionStatus,
 )
 from atc.agents.claude_provider import ClaudeCodeProvider
 from atc.agents.factory import (
     _LAUNCH_COMMANDS,
+    _METADATA,
     _REGISTRY,
+    _SCANNED_DIRS,
     create_provider,
     get_launch_command,
     get_provider_class,
+    get_provider_info,
     list_providers,
+    load_plugins,
     register_provider,
 )
 from atc.agents.opencode_provider import OpenCodeProvider
@@ -166,7 +177,7 @@ class TestFactory:
             def name(self) -> str:
                 return "custom"
 
-        register_provider("custom", CustomProvider)  # type: ignore[arg-type]
+        register_provider("custom", CustomProvider)
         assert "custom" in list_providers()
         assert get_provider_class("custom") is CustomProvider
 
@@ -629,3 +640,151 @@ class TestGetLaunchCommand:
     def test_launch_commands_registry_has_both(self) -> None:
         assert "claude_code" in _LAUNCH_COMMANDS
         assert "opencode" in _LAUNCH_COMMANDS
+
+
+class TestCostModel:
+    def test_defaults(self) -> None:
+        cost = CostModel()
+        assert cost.input_cost_per_token == 0.0
+        assert cost.currency == "USD"
+
+    def test_custom(self) -> None:
+        cost = CostModel(input_cost_per_token=0.003, output_cost_per_token=0.015, currency="EUR")
+        assert cost.input_cost_per_token == 0.003
+        assert cost.currency == "EUR"
+
+    def test_frozen(self) -> None:
+        cost = CostModel()
+        with pytest.raises(AttributeError):
+            cost.currency = "GBP"  # type: ignore[misc]
+
+
+class TestProviderMetadataDataclass:
+    def test_defaults(self) -> None:
+        meta = ProviderMetadata(name="test")
+        assert meta.version == "0.0.0"
+        assert meta.author == ""
+
+    def test_custom(self) -> None:
+        meta = ProviderMetadata(name="x", version="2.1.0", description="A provider", author="Me")
+        assert meta.version == "2.1.0"
+
+
+class TestCapabilitiesWithCostModel:
+    def test_none_by_default(self) -> None:
+        assert ProviderCapabilities().cost_model is None
+
+    def test_attached(self) -> None:
+        caps = ProviderCapabilities(cost_model=CostModel(input_cost_per_token=0.01))
+        assert caps.cost_model is not None
+        assert caps.cost_model.input_cost_per_token == 0.01
+
+
+class TestProviderInfoAndMetadata:
+    def test_builtin_metadata(self) -> None:
+        info = get_provider_info("claude_code")
+        assert info is not None
+        assert info.version == "1.0.0"
+
+    def test_opencode_metadata(self) -> None:
+        assert get_provider_info("opencode") is not None
+
+    def test_unknown_returns_none(self) -> None:
+        assert get_provider_info("nope") is None
+
+    def test_register_with_metadata(self) -> None:
+        class F:
+            @property
+            def name(self) -> str:
+                return "f"
+
+        meta = ProviderMetadata(name="f", version="0.5.0")
+        register_provider("f", F, metadata=meta)
+        assert get_provider_info("f") is meta
+        del _REGISTRY["f"]
+        del _METADATA["f"]
+
+    def test_register_with_launch_command(self) -> None:
+        class G:
+            @property
+            def name(self) -> str:
+                return "g"
+
+        register_provider("g", G, launch_command="g-agent")
+        assert get_launch_command("g") == "g-agent"
+        del _REGISTRY["g"]
+        del _LAUNCH_COMMANDS["g"]
+
+
+class TestPluginLoading:
+    def test_nonexistent_dir(self, tmp_path: Path) -> None:
+        assert load_plugins(tmp_path / "nope") == []
+
+    def test_valid_plugin(self, tmp_path: Path) -> None:
+        code = textwrap.dedent("""
+            from atc.agents.base import (
+                ProviderCapabilities, ProviderMetadata,
+                SessionInfo, SessionStatus,
+            )
+            PROVIDER_NAME = "tp"
+            PROVIDER_METADATA = ProviderMetadata(name="tp", version="0.2.0")
+            LAUNCH_COMMAND = "tp-cmd"
+            class P:
+                @property
+                def name(self): return "tp"
+                def get_capabilities(self): return ProviderCapabilities()
+                async def spawn_session(self, sid, **kw):
+                    return SessionInfo(session_id=sid, status=SessionStatus.IDLE)
+                async def send_prompt(self, sid, p): pass
+                async def get_status(self, sid): pass
+                async def stream_output(self, sid): yield
+                async def stop_session(self, sid): pass
+                async def list_sessions(self): return []
+            PROVIDER_CLASS = P
+        """).strip()
+        (tmp_path / "tp.py").write_text(code)
+        loaded = load_plugins(tmp_path)
+        assert "tp" in loaded
+        info = get_provider_info("tp")
+        assert info is not None
+        assert info.version == "0.2.0"
+        assert get_launch_command("tp") == "tp-cmd"
+        del _REGISTRY["tp"]
+        del _METADATA["tp"]
+        del _LAUNCH_COMMANDS["tp"]
+        _SCANNED_DIRS.discard(str(tmp_path.resolve()))
+
+    def test_skip_underscore(self, tmp_path: Path) -> None:
+        (tmp_path / "_x.py").write_text("PROVIDER_NAME='x'\nPROVIDER_CLASS=int")
+        assert load_plugins(tmp_path) == []
+        _SCANNED_DIRS.discard(str(tmp_path.resolve()))
+
+    def test_skip_incomplete(self, tmp_path: Path) -> None:
+        (tmp_path / "inc.py").write_text("x = 1")
+        assert load_plugins(tmp_path) == []
+        _SCANNED_DIRS.discard(str(tmp_path.resolve()))
+
+    def test_skip_already_scanned(self, tmp_path: Path) -> None:
+        (tmp_path / "d.py").write_text("PROVIDER_NAME='d2'\nclass D: pass\nPROVIDER_CLASS=D")
+        assert "d2" in load_plugins(tmp_path)
+        assert load_plugins(tmp_path) == []
+        del _REGISTRY["d2"]
+        _SCANNED_DIRS.discard(str(tmp_path.resolve()))
+
+    def test_broken_plugin(self, tmp_path: Path) -> None:
+        (tmp_path / "bad.py").write_text("raise RuntimeError('boom')")
+        assert load_plugins(tmp_path) == []
+        _SCANNED_DIRS.discard(str(tmp_path.resolve()))
+
+
+class TestConfigPluginDirs:
+    def test_default_empty(self) -> None:
+        from atc.config import AgentProviderConfig
+
+        assert AgentProviderConfig().plugin_dirs == []
+
+    def test_configurable(self) -> None:
+        from atc.config import AgentProviderConfig
+
+        cfg = AgentProviderConfig(plugin_dirs=["/a", "/b"])
+        assert len(cfg.plugin_dirs) == 2

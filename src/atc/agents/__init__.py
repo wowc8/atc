@@ -10,28 +10,36 @@ Public API::
 
 from atc.agents.base import (
     AgentProvider,
+    CostModel,
     OutputChunk,
     PromptResult,
     ProviderCapabilities,
     ProviderError,
+    ProviderMetadata,
     SessionInfo,
     SessionStatus,
 )
 from atc.agents.factory import (
     create_provider,
+    get_provider_info,
     list_providers,
+    load_plugins,
     register_provider,
 )
 
 __all__ = [
     "AgentProvider",
+    "CostModel",
     "OutputChunk",
     "PromptResult",
     "ProviderCapabilities",
     "ProviderError",
+    "ProviderMetadata",
     "SessionInfo",
     "SessionStatus",
     "create_provider",
+    "get_provider_info",
     "list_providers",
+    "load_plugins",
     "register_provider",
 ]
