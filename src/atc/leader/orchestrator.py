@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
+from atc.agents.factory import get_launch_command
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
@@ -140,6 +141,10 @@ class LeaderOrchestrator:
 
             working_dir = repo_path or str(deployed.root)
 
+            launch_cmd = get_launch_command(
+                project.agent_provider if project else "claude_code",
+            )
+
             session_id = await create_ace(
                 self.conn,
                 self.project_id,
@@ -147,7 +152,7 @@ class LeaderOrchestrator:
                 task_id=task_graph_id,
                 event_bus=self.event_bus,
                 working_dir=working_dir,
-                launch_command="claude --dangerously-skip-permissions",
+                launch_command=launch_cmd,
             )
         except Exception:
             logger.exception(

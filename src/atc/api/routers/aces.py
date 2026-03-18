@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from atc.agents.deploy import AceDeploySpec, deploy_ace_files
+from atc.agents.factory import get_launch_command
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
 from atc.state import db as db_ops
@@ -136,6 +137,8 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
     deployed = deploy_ace_files(spec)
     working_dir = project.repo_path or str(deployed.root)
 
+    launch_cmd = get_launch_command(project.agent_provider)
+
     session_id = await ace_ops.create_ace(
         db,
         project_id,
@@ -144,7 +147,7 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
         host=body.host,
         event_bus=event_bus,
         working_dir=working_dir,
-        launch_command="claude --dangerously-skip-permissions",
+        launch_command=launch_cmd,
     )
     session = await db_ops.get_session(db, session_id)
     if session is None:

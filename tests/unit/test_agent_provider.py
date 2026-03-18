@@ -17,8 +17,10 @@ from atc.agents.base import (
 )
 from atc.agents.claude_provider import ClaudeCodeProvider
 from atc.agents.factory import (
+    _LAUNCH_COMMANDS,
     _REGISTRY,
     create_provider,
+    get_launch_command,
     get_provider_class,
     list_providers,
     register_provider,
@@ -604,3 +606,26 @@ class TestConfigIntegration:
             claude_command=cfg.claude_command,
         )
         assert provider.name == "claude_code"
+
+
+# ---------------------------------------------------------------------------
+# get_launch_command
+# ---------------------------------------------------------------------------
+
+
+class TestGetLaunchCommand:
+    def test_claude_code_returns_claude_cmd(self) -> None:
+        cmd = get_launch_command("claude_code")
+        assert cmd == "claude --dangerously-skip-permissions"
+
+    def test_opencode_returns_opencode_cmd(self) -> None:
+        cmd = get_launch_command("opencode")
+        assert cmd == "opencode"
+
+    def test_unknown_falls_back_to_claude(self) -> None:
+        cmd = get_launch_command("unknown_provider")
+        assert cmd == "claude --dangerously-skip-permissions"
+
+    def test_launch_commands_registry_has_both(self) -> None:
+        assert "claude_code" in _LAUNCH_COMMANDS
+        assert "opencode" in _LAUNCH_COMMANDS

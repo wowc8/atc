@@ -66,6 +66,24 @@ def get_provider_class(name: str) -> ProviderConstructor | None:
     return _REGISTRY.get(name)
 
 
+# Default launch commands per provider
+_LAUNCH_COMMANDS: dict[str, str] = {
+    "claude_code": "claude --dangerously-skip-permissions",
+    "opencode": "opencode",
+}
+
+
+def get_launch_command(provider_name: str) -> str:
+    """Return the shell launch command for a given provider name.
+
+    Falls back to ``claude --dangerously-skip-permissions`` for unknown
+    providers so existing behaviour is preserved.
+    """
+    return _LAUNCH_COMMANDS.get(
+        provider_name, _LAUNCH_COMMANDS["claude_code"]
+    )
+
+
 def _register_builtins() -> None:
     """Register the built-in providers (claude_code, opencode)."""
     from atc.agents.claude_provider import ClaudeCodeProvider
