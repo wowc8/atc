@@ -1,7 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import StatusBadge from "../components/common/StatusBadge";
-import TowerBanner from "../components/tower/TowerBanner";
 import LeaderConsole from "../components/leader/LeaderConsole";
 import TaskBoard from "../components/leader/TaskBoard";
 import AceList from "../components/ace/AceList";
@@ -10,7 +9,7 @@ import "./ProjectView.css";
 export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const { state, fetchAll } = useAppContext();
-  const { projects, sessions, leaders, taskGraphs, brainStatus } = state;
+  const { projects, sessions, leaders, taskGraphs } = state;
 
   const project = projects.find((p) => p.id === id);
   const projectSessions = sessions.filter((s) => s.project_id === id);
@@ -39,9 +38,6 @@ export default function ProjectView() {
           <p className="project-view__desc">{project.description}</p>
         )}
       </div>
-
-      {/* Tower Banner — full width, minimizable */}
-      <TowerBanner towerStatus={brainStatus} />
 
       {/* Main 60/40 layout */}
       <div className="project-view__layout">

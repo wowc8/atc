@@ -52,11 +52,11 @@ describe("ProjectView", () => {
     expect(screen.getByText("Project not found.")).toBeInTheDocument();
   });
 
-  it("renders tower banner", () => {
+  it("renders without tower banner (Tower is in shell Layout)", () => {
     renderProjectView();
-    // Tower banner is always rendered (even for not-found view shows project-view wrapper)
-    // For a valid project, tower banner should be present
+    // TowerBanner was removed — Tower panel lives in the shell Layout now
     expect(screen.getByTestId("project-view")).toBeInTheDocument();
+    expect(screen.queryByTestId("tower-banner")).not.toBeInTheDocument();
   });
 
   it("contains the task board section", () => {
