@@ -7,11 +7,13 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import JSONResponse
 
 from atc import __version__
 from atc.api.ws.hub import WsHub
 from atc.config import Settings, load_settings
+from atc.core.errors import ATCError
 from atc.core.events import EventBus
 from atc.state.db import run_migrations
 from atc.terminal.pty_stream import PtyStreamPool
@@ -167,6 +169,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+
+    # Register domain error handler — serializes ATCError subclasses to JSON
+    @app.exception_handler(ATCError)
+    async def _atc_error_handler(request: Request, exc: ATCError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
     # Register routers
     from atc.api.routers import (

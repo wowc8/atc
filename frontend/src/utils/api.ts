@@ -9,12 +9,39 @@ const BASE = "/api";
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
+  /** Machine-readable error code from the backend (e.g. ``session_stale``). */
+  public code: string | null;
+  /** Extra context from the backend (e.g. ``retry_after``). */
+  public extra: Record<string, unknown>;
+
   constructor(
     public status: number,
     message: string,
+    code: string | null = null,
+    extra: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
+    this.code = code;
+    this.extra = extra;
+  }
+}
+
+/** Try to parse a structured ATC error body and throw an enriched ApiError. */
+function throwIfStructured(status: number, text: string): void {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed?.error?.code) {
+      throw new ApiError(
+        status,
+        parsed.error.message ?? text,
+        parsed.error.code,
+        parsed.error.extra ?? {},
+      );
+    }
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    // Not structured JSON — caller will throw a plain ApiError
   }
 }
 
@@ -36,6 +63,7 @@ async function request<T>(
     });
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText);
+      throwIfStructured(res.status, text);
       throw new ApiError(res.status, text);
     }
     if (res.status === 204) return undefined as T;
@@ -83,6 +111,7 @@ export const api = {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText);
+      throwIfStructured(res.status, text);
       throw new ApiError(res.status, text);
     }
     return res.blob();
