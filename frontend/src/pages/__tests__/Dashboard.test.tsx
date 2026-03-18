@@ -3,14 +3,6 @@ import { screen } from "@testing-library/react";
 import Dashboard from "../Dashboard";
 import { renderWithProviders } from "../../test/helpers";
 
-// Mock useTerminal since TowerConsole uses it
-vi.mock("../../hooks/useTerminal", () => ({
-  useTerminal: () => ({
-    attachRef: vi.fn(),
-    fit: vi.fn(),
-  }),
-}));
-
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify([]), { status: 200 }),
@@ -51,8 +43,8 @@ describe("Dashboard", () => {
     expect(screen.getByText("Projects")).toBeInTheDocument();
   });
 
-  it("renders TowerConsole in the dashboard", () => {
+  it("does not render TowerConsole inline (Tower is now persistent in layout)", () => {
     renderWithProviders(<Dashboard />);
-    expect(screen.getByTestId("tower-console")).toBeInTheDocument();
+    expect(screen.queryByTestId("tower-console")).not.toBeInTheDocument();
   });
 });

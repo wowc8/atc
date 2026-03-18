@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
 import { useTerminal } from "../../hooks/useTerminal";
 import { api } from "../../utils/api";
@@ -8,24 +9,26 @@ import "./TowerPanel.css";
  * Persistent bottom panel for Tower — lives in the shell layout,
  * persists across all pages. Think VS Code integrated terminal.
  *
- * Minimized: single-line ticker showing latest Tower activity.
- * Expanded + idle: goal input form.
- * Expanded + running: full PTY terminal + message input bar.
+ * Context-aware: automatically infers the active project from the
+ * current route (e.g. /projects/:id). No project dropdown needed.
  *
- * The message input bar allows the user to send instructions to the
- * Leader through Tower. This is the top of the chain of command —
- * Tower is the user's interface to the entire hierarchy.
+ * Minimized: single-line ticker showing latest Tower activity.
+ * Expanded + idle: terminal-style input at bottom.
+ * Expanded + running: full PTY terminal + message input bar.
  */
 export default function TowerPanel() {
   const { state } = useAppContext();
   const { towerDetail, towerProgress, brainStatus, projects } = state;
 
+  const location = useLocation();
+  const routeProjectId = useRouteProjectId();
+
   const [expanded, setExpanded] = useState(false);
-  const [goal, setGoal] = useState("");
-  const [projectId, setProjectId] = useState("");
+  const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
 
   const isRunning =
@@ -47,7 +50,6 @@ export default function TowerPanel() {
   // Re-fit terminal when panel expands
   useEffect(() => {
     if (expanded && isRunning) {
-      // Delay to let CSS transition finish
       const timer = setTimeout(() => fit(), 200);
       return () => clearTimeout(timer);
     }
@@ -60,32 +62,43 @@ export default function TowerPanel() {
     }
   }, [isRunning]);
 
-  // Default to first active project
+  // Focus input when expanded and idle
   useEffect(() => {
-    if (!projectId && projects.length > 0) {
-      const active = projects.find((p) => p.status === "active");
-      if (active) setProjectId(active.id);
+    if (expanded && isIdle) {
+      inputRef.current?.focus();
     }
-  }, [projectId, projects]);
+  }, [expanded, isIdle]);
+
+  // Derive the active project from the route
+  const contextProject = routeProjectId
+    ? projects.find((p) => p.id === routeProjectId)
+    : null;
+
+  // Determine which project ID to use: route context, or first active project
+  const resolvedProjectId =
+    routeProjectId ??
+    (projects.find((p) => p.status === "active")?.id || "");
+
+  const contextLabel = deriveContextLabel(location.pathname, contextProject?.name);
 
   const handleSubmitGoal = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!goal.trim() || !projectId) return;
+      if (!input.trim() || !resolvedProjectId) return;
       setSubmitting(true);
       try {
         await api.post("/tower/goal", {
-          project_id: projectId,
-          goal: goal.trim(),
+          project_id: resolvedProjectId,
+          goal: input.trim(),
         });
-        setGoal("");
+        setInput("");
       } catch (err) {
         console.error("Failed to set tower goal:", err);
       } finally {
         setSubmitting(false);
       }
     },
-    [goal, projectId],
+    [input, resolvedProjectId],
   );
 
   const handleCancel = useCallback(async () => {
@@ -133,7 +146,7 @@ export default function TowerPanel() {
       className={`tower-panel ${expanded ? "tower-panel--expanded" : ""}`}
       data-testid="tower-panel"
     >
-      {/* Minimized bar — always visible */}
+      {/* Minimized bar -- always visible */}
       <div className="tower-panel__bar">
         <button
           className="tower-panel__toggle"
@@ -148,6 +161,14 @@ export default function TowerPanel() {
         </button>
 
         <TowerStateDot state={towerDetail.state} />
+
+        <span
+          className="tower-panel__context"
+          title={contextLabel}
+          data-testid="tower-panel-context"
+        >
+          {contextLabel}
+        </span>
 
         <span className="tower-panel__ticker" title={tickerText}>
           {tickerText}
@@ -186,86 +207,80 @@ export default function TowerPanel() {
       {/* Expanded content */}
       {expanded && (
         <div className="tower-panel__content" data-testid="tower-panel-content">
-          {isIdle && (
-            <form
-              className="tower-panel__goal-form"
-              onSubmit={handleSubmitGoal}
-            >
-              <select
-                className="tower-panel__project-select"
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                data-testid="tower-panel-project"
-              >
-                <option value="" disabled>
-                  Select project...
-                </option>
-                {projects
-                  .filter((p) => p.status === "active")
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
-              <input
-                type="text"
-                className="tower-panel__goal-input"
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                placeholder="Describe a goal for Tower..."
-                data-testid="tower-panel-goal"
-              />
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={submitting || !goal.trim() || !projectId}
-                data-testid="tower-panel-start"
-              >
-                {submitting ? "Starting..." : "Start"}
-              </button>
-            </form>
-          )}
-
+          {/* Terminal area -- always present when running */}
           {isRunning && (
-            <>
-              <div
-                className="tower-panel__terminal"
-                ref={attachRef}
-                data-testid="tower-panel-terminal"
-              />
-              <form
-                className="tower-panel__message-form"
-                onSubmit={handleSendMessage}
-                data-testid="tower-panel-message-form"
-              >
-                <input
-                  ref={messageInputRef}
-                  type="text"
-                  className="tower-panel__message-input"
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Send instruction to Leader..."
-                  disabled={sending}
-                  data-testid="tower-panel-message"
-                />
-                <button
-                  type="submit"
-                  className="btn btn-primary btn-sm"
-                  disabled={sending || !message.trim()}
-                  data-testid="tower-panel-send"
-                >
-                  {sending ? "Sending..." : "Send"}
-                </button>
-              </form>
-            </>
+            <div
+              className="tower-panel__terminal"
+              ref={attachRef}
+              data-testid="tower-panel-terminal"
+            />
           )}
 
+          {/* Error state */}
           {towerDetail.state === "error" && towerDetail.current_goal && (
             <div className="tower-panel__error">
               Tower encountered an error while processing:{" "}
               <strong>{towerDetail.current_goal}</strong>
             </div>
+          )}
+
+          {/* Input bar -- always at the bottom */}
+          {isRunning ? (
+            <form
+              className="tower-panel__input-bar"
+              onSubmit={handleSendMessage}
+              data-testid="tower-panel-message-form"
+            >
+              <span className="tower-panel__prompt">&gt;</span>
+              <input
+                ref={messageInputRef}
+                type="text"
+                className="tower-panel__input"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Send message to Tower..."
+                disabled={sending}
+                data-testid="tower-panel-message"
+              />
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={sending || !message.trim()}
+                data-testid="tower-panel-send"
+              >
+                {sending ? "..." : "Send"}
+              </button>
+            </form>
+          ) : (
+            <form
+              className="tower-panel__input-bar"
+              onSubmit={handleSubmitGoal}
+              data-testid="tower-panel-goal-form"
+            >
+              <span className="tower-panel__prompt">&gt;</span>
+              <input
+                ref={inputRef}
+                type="text"
+                className="tower-panel__input"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={
+                  resolvedProjectId
+                    ? "Describe a goal for Tower..."
+                    : "No active projects"
+                }
+                disabled={submitting || !resolvedProjectId}
+                data-testid="tower-panel-goal"
+              />
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={submitting || !input.trim() || !resolvedProjectId}
+                data-testid="tower-panel-start"
+              >
+                {submitting ? "..." : "Start"}
+              </button>
+            </form>
           )}
         </div>
       )}
@@ -288,4 +303,31 @@ function TowerStateDot({ state }: { state: string }) {
       title={`Tower: ${state}`}
     />
   );
+}
+
+/** Extract project ID from /projects/:id route */
+function useRouteProjectId(): string | undefined {
+  const location = useLocation();
+  const match = location.pathname.match(/^\/projects\/([^/]+)/);
+  return match?.[1];
+}
+
+/** Derive a human-readable context label from the current route */
+function deriveContextLabel(
+  pathname: string,
+  projectName: string | undefined,
+): string {
+  if (pathname.startsWith("/projects/") && projectName) {
+    return projectName;
+  }
+  if (pathname === "/dashboard" || pathname === "/") {
+    return "Dashboard";
+  }
+  if (pathname === "/settings") {
+    return "Settings";
+  }
+  if (pathname === "/usage") {
+    return "Usage";
+  }
+  return "ATC";
 }

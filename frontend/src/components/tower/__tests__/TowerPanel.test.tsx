@@ -42,14 +42,26 @@ describe("TowerPanel", () => {
     expect(screen.getByTestId("tower-panel-content")).toBeInTheDocument();
   });
 
-  it("shows goal form when expanded and idle", async () => {
+  it("shows terminal-style goal input when expanded and idle", async () => {
     const user = userEvent.setup();
     renderWithProviders(<TowerPanel />);
 
     await user.click(screen.getByTestId("tower-panel-toggle"));
     expect(screen.getByTestId("tower-panel-goal")).toBeInTheDocument();
-    expect(screen.getByTestId("tower-panel-project")).toBeInTheDocument();
     expect(screen.getByTestId("tower-panel-start")).toBeInTheDocument();
+  });
+
+  it("does not show a project dropdown", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TowerPanel />);
+
+    await user.click(screen.getByTestId("tower-panel-toggle"));
+    expect(screen.queryByTestId("tower-panel-project")).not.toBeInTheDocument();
+  });
+
+  it("shows context label in the bar", () => {
+    renderWithProviders(<TowerPanel />);
+    expect(screen.getByTestId("tower-panel-context")).toBeInTheDocument();
   });
 
   it("shows Idle in ticker when no goal is set", () => {
@@ -77,5 +89,13 @@ describe("TowerPanel", () => {
     // Collapse
     await user.click(screen.getByTestId("tower-panel-toggle"));
     expect(screen.queryByTestId("tower-panel-content")).not.toBeInTheDocument();
+  });
+
+  it("shows prompt character in input bar", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TowerPanel />);
+
+    await user.click(screen.getByTestId("tower-panel-toggle"));
+    expect(screen.getByText(">")).toBeInTheDocument();
   });
 });
