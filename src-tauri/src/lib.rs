@@ -1,6 +1,17 @@
-// Tauri 2 desktop shell: sidecar spawn, health poll, port conflict resolution.
-// Stub — implementation follows in later tasks.
+// Tauri 2 desktop shell with auto-updater via tauri-plugin-updater.
 
-fn main() {
-    println!("ATC Tauri shell — not yet implemented");
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

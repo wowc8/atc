@@ -5,5 +5,16 @@
   "identifier": "com.atc.app",
   "build": {
     "frontendDist": "../frontend/dist"
+  },
+  "bundle": {
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/wowc8/atc/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

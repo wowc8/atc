@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "rea
 import { AppProvider } from "./context/AppContext";
 import TowerBar from "./components/tower/TowerBar";
 import TowerPanel from "./components/tower/TowerPanel";
+import UpdateBanner from "./components/common/UpdateBanner";
+import { useUpdater } from "./hooks/useUpdater";
 import Dashboard from "./pages/Dashboard";
 import ProjectView from "./pages/ProjectView";
 import SettingsPage from "./pages/SettingsPage";
@@ -13,12 +15,23 @@ const HIDE_TOWER_PATHS = ["/settings", "/usage"];
 function Layout() {
   const { pathname } = useLocation();
   const showTower = !HIDE_TOWER_PATHS.includes(pathname);
+  const updater = useUpdater();
 
   return (
     <>
+      {(updater.status === "available" || updater.status === "downloading") &&
+        updater.updateInfo && (
+          <UpdateBanner
+            updateInfo={updater.updateInfo}
+            status={updater.status}
+            progress={updater.progress}
+            onInstall={updater.downloadAndInstall}
+            onDismiss={updater.dismissUpdate}
+          />
+        )}
       <TowerBar />
       <main style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        <Outlet />
+        <Outlet context={updater} />
       </main>
       {showTower && <TowerPanel />}
     </>
