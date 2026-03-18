@@ -47,6 +47,7 @@ function TestConsumer() {
                 description: null,
                 repo_path: null,
                 github_repo: null,
+                agent_provider: "claude_code",
                 status: "active",
                 created_at: "2024-01-01T00:00:00Z",
                 updated_at: "2024-01-01T00:00:00Z",

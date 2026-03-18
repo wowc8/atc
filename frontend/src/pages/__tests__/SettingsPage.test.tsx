@@ -106,7 +106,7 @@ describe("SettingsPage", () => {
     });
     // Verify no calls to export endpoints
     const exportCalls = fetchSpy.mock.calls.filter(
-      (call) =>
+      (call: unknown[]) =>
         typeof call[0] === "string" &&
         (call[0].includes("/settings/export") ||
           call[0].includes("/settings/export-all")),
