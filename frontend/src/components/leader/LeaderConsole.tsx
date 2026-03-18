@@ -22,6 +22,7 @@ export default function LeaderConsole({
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const isRunning =
     leader?.status === "planning" || leader?.status === "managing";
@@ -37,6 +38,7 @@ export default function LeaderConsole({
 
   async function handleStart() {
     setLoading(true);
+    setError(null);
     try {
       await api.post(`/projects/${projectId}/leader/start`, {
         goal: goal.trim() || null,
@@ -44,6 +46,8 @@ export default function LeaderConsole({
       setGoal("");
       await onRefresh();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to start leader";
+      setError(msg);
       console.error("Failed to start leader:", err);
     } finally {
       setLoading(false);
@@ -111,6 +115,12 @@ export default function LeaderConsole({
           )}
         </div>
       </div>
+
+      {error && (
+        <div className="leader-console__error" role="alert">
+          {error}
+        </div>
+      )}
 
       {!isRunning && (
         <div className="leader-console__start-form">

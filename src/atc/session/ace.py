@@ -280,7 +280,7 @@ async def create_ace(
         # Step 4a: success → idle
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
         await db_ops.update_session_status(conn, session.id, SessionStatus.IDLE.value)
-    except Exception:
+    except Exception as exc:
         # Step 4b: failure → error
         logger.exception("Failed to spawn tmux pane for session %s", session.id)
         await db_ops.update_session_status(conn, session.id, SessionStatus.ERROR.value)
@@ -293,6 +293,7 @@ async def create_ace(
                     "new_status": SessionStatus.ERROR.value,
                 },
             )
+        raise RuntimeError(str(exc)) from exc
 
     return session.id
 

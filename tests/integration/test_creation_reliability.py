@@ -116,13 +116,13 @@ class TestDBFirstCreation:
             "atc.session.ace._spawn_pane",
             new_callable=AsyncMock,
             side_effect=RuntimeError("tmux not available"),
-        ):
-            session_id = await create_ace(conn, project.id, "test-ace", event_bus=event_bus)
+        ), pytest.raises(RuntimeError, match="tmux not available"):
+            await create_ace(conn, project.id, "test-ace", event_bus=event_bus)
 
         # Session must exist with error status — no ghost session
-        session = await db_ops.get_session(conn, session_id)
-        assert session is not None
-        assert session.status == SessionStatus.ERROR.value
+        sessions = await db_ops.list_sessions(conn, project_id=project.id, session_type="ace")
+        assert len(sessions) == 1
+        assert sessions[0].status == SessionStatus.ERROR.value
 
     @pytest.mark.asyncio
     @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
