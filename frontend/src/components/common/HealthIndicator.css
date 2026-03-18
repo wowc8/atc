@@ -1,0 +1,29 @@
+.health-indicator {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+}
+
+.health-indicator__dot {
+  display: inline-block;
+  border-radius: 50%;
+}
+
+.health-indicator--sm .health-indicator__dot {
+  width: 6px;
+  height: 6px;
+}
+
+.health-indicator--md .health-indicator__dot {
+  width: 8px;
+  height: 8px;
+}
+
+.health-indicator__dot--pulse {
+  animation: health-pulse 2s ease-in-out infinite;
+}
+
+@keyframes health-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

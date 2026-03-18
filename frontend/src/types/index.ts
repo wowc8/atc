@@ -165,6 +165,14 @@ export interface FailureLog {
   created_at: string;
 }
 
+export interface SessionHeartbeat {
+  session_id: string;
+  health: "alive" | "stale" | "stopped";
+  last_heartbeat_at: string;
+  registered_at: string;
+  updated_at: string;
+}
+
 export interface AppState {
   projects: Project[];
   leaders: Record<string, Leader>;
@@ -179,6 +187,7 @@ export interface AppState {
   failureLogs: FailureLog[];
   usage: UsageSummary;
   github: Record<string, GitHubSummary>;
+  heartbeats: Record<string, SessionHeartbeat>;
   selectedProjectId: string | null;
   selectedSessionId: string | null;
 }

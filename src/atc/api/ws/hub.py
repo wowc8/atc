@@ -33,6 +33,7 @@ class WsHub:
     def __init__(self) -> None:
         self._clients: dict[WebSocket, set[str]] = {}
         self._input_callback: Any | None = None
+        self._heartbeat_callback: Any | None = None
 
     @property
     def client_count(self) -> int:
@@ -44,6 +45,13 @@ class WsHub:
         Callback signature: ``async def cb(channel: str, data: str) -> None``
         """
         self._input_callback = callback
+
+    def on_heartbeat(self, callback: Any) -> None:
+        """Register a callback for heartbeat pings from agents.
+
+        Callback signature: ``async def cb(session_id: str) -> None``
+        """
+        self._heartbeat_callback = callback
 
     async def connect(self, ws: WebSocket) -> None:
         """Accept a new WebSocket connection."""
@@ -96,6 +104,13 @@ class WsHub:
 
                 if channel == "subscribe" and isinstance(data, list):
                     self.subscribe(ws, data)
+                elif channel == "heartbeat" and isinstance(data, dict) and self._heartbeat_callback:
+                    session_id = data.get("session_id", "")
+                    if session_id:
+                        try:
+                            await self._heartbeat_callback(session_id)
+                        except Exception:
+                            logger.exception("Heartbeat callback error for %s", session_id)
                 elif (
                     channel
                     and channel.startswith("terminal:")

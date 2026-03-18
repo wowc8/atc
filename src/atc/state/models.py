@@ -187,6 +187,15 @@ class TaskGraph:
 
 
 @dataclass
+class SessionHeartbeat:
+    session_id: str
+    health: str  # alive|stale|stopped
+    last_heartbeat_at: str
+    registered_at: str
+    updated_at: str
+
+
+@dataclass
 class ContextEntry:
     id: str
     project_id: str

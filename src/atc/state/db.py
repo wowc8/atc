@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
-from atc.state.models import Leader, Project, Session, TaskGraph
+from atc.state.models import Leader, Project, Session, SessionHeartbeat, TaskGraph
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator
@@ -319,6 +319,14 @@ CREATE TABLE IF NOT EXISTS task_graphs (
     dependencies    TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_heartbeats (
+    session_id          TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    health              TEXT NOT NULL DEFAULT 'alive',
+    last_heartbeat_at   TEXT NOT NULL,
+    registered_at       TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS context_entries (
@@ -795,6 +803,106 @@ async def delete_task_graph(
     cursor = await db.execute(
         "DELETE FROM task_graphs WHERE id = ?",
         (task_graph_id,),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat CRUD
+# ---------------------------------------------------------------------------
+
+
+async def register_heartbeat(
+    db: aiosqlite.Connection,
+    session_id: str,
+) -> SessionHeartbeat:
+    """Register a session for heartbeat tracking (upsert)."""
+    now = _now()
+    await db.execute(
+        """INSERT INTO session_heartbeats
+           (session_id, health, last_heartbeat_at, registered_at, updated_at)
+           VALUES (?, 'alive', ?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET
+             health = 'alive',
+             last_heartbeat_at = excluded.last_heartbeat_at,
+             updated_at = excluded.updated_at""",
+        (session_id, now, now, now),
+    )
+    await db.commit()
+    return SessionHeartbeat(
+        session_id=session_id,
+        health="alive",
+        last_heartbeat_at=now,
+        registered_at=now,
+        updated_at=now,
+    )
+
+
+async def record_heartbeat(
+    db: aiosqlite.Connection,
+    session_id: str,
+) -> bool:
+    """Record a heartbeat ping. Returns True if session was registered."""
+    now = _now()
+    cursor = await db.execute(
+        """UPDATE session_heartbeats
+           SET last_heartbeat_at = ?, health = 'alive', updated_at = ?
+           WHERE session_id = ?""",
+        (now, now, session_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def get_heartbeat(
+    db: aiosqlite.Connection,
+    session_id: str,
+) -> SessionHeartbeat | None:
+    """Fetch heartbeat record for a session."""
+    cursor = await db.execute(
+        "SELECT * FROM session_heartbeats WHERE session_id = ?",
+        (session_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return SessionHeartbeat(**dict(row))
+
+
+async def list_heartbeats(
+    db: aiosqlite.Connection,
+) -> list[SessionHeartbeat]:
+    """Return all heartbeat records."""
+    cursor = await db.execute(
+        "SELECT * FROM session_heartbeats ORDER BY last_heartbeat_at DESC",
+    )
+    rows = await cursor.fetchall()
+    return [SessionHeartbeat(**dict(r)) for r in rows]
+
+
+async def update_heartbeat_health(
+    db: aiosqlite.Connection,
+    session_id: str,
+    health: str,
+) -> None:
+    """Update the health status of a heartbeat record."""
+    now = _now()
+    await db.execute(
+        "UPDATE session_heartbeats SET health = ?, updated_at = ? WHERE session_id = ?",
+        (health, now, session_id),
+    )
+    await db.commit()
+
+
+async def deregister_heartbeat(
+    db: aiosqlite.Connection,
+    session_id: str,
+) -> bool:
+    """Remove heartbeat tracking for a session. Returns True if removed."""
+    cursor = await db.execute(
+        "DELETE FROM session_heartbeats WHERE session_id = ?",
+        (session_id,),
     )
     await db.commit()
     return cursor.rowcount > 0

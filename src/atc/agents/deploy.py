@@ -365,6 +365,9 @@ _POST_TOOL_USE_BODY = """
 curl -sf -X PATCH "$ATC_API/api/aces/$SESSION_ID/status" \
   -H "Content-Type: application/json" \
   -d '{{"status": "working"}}' >/dev/null 2>&1 || true
+
+# Send heartbeat
+curl -sf -X POST "$ATC_API/api/heartbeat/$SESSION_ID" >/dev/null 2>&1 || true
 """
 
 _STOP_HOOK_BODY = """

@@ -134,7 +134,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     event_bus.subscribe("session_status_changed", _on_session_status_changed)
     event_bus.subscribe("session_destroyed", _on_session_destroyed)
 
-    # 6. Reconnect sessions that were active at last shutdown
+    # 6. Start heartbeat monitor
+    from atc.core.heartbeat import HeartbeatMonitor
+
+    hb_cfg = settings.heartbeat
+    heartbeat_monitor = HeartbeatMonitor(
+        db,
+        event_bus,
+        ws_hub=ws_hub,
+        check_interval=hb_cfg.check_interval_seconds,
+        stale_threshold=hb_cfg.stale_threshold_seconds,
+    )
+    if hb_cfg.enabled:
+        await heartbeat_monitor.start()
+    app.state.heartbeat_monitor = heartbeat_monitor
+
+    # Auto-register heartbeat when sessions are created
+    async def _on_session_created_hb(data: dict[str, Any]) -> None:
+        session_id = data.get("session_id", "")
+        if session_id:
+            await heartbeat_monitor.register(session_id)
+
+    # Auto-deregister heartbeat when sessions are destroyed (clean shutdown)
+    async def _on_session_destroyed_hb(data: dict[str, Any]) -> None:
+        session_id = data.get("session_id", "")
+        if session_id:
+            await heartbeat_monitor.deregister(session_id)
+
+    event_bus.subscribe("session_created", _on_session_created_hb)
+    event_bus.subscribe("session_destroyed", _on_session_destroyed_hb)
+
+    # Wire WebSocket heartbeat piggyback
+    async def _on_ws_heartbeat(session_id: str) -> None:
+        await heartbeat_monitor.handle_heartbeat(session_id)
+
+    ws_hub.on_heartbeat(_on_ws_heartbeat)
+
+    # 7. Reconnect sessions that were active at last shutdown
     from atc.session.reconnect import reconnect_all
 
     try:
@@ -150,6 +186,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Shutdown
     logger.info("ATC shutting down")
+    await heartbeat_monitor.stop()
     await pty_pool.stop()
     await event_bus.stop()
     await db.close()
@@ -172,6 +209,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from atc.api.routers import (
         aces,
         failure_logs,
+        heartbeat,
         leader,
         projects,
         task_graphs,
@@ -190,6 +228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(usage.router, prefix="/api/usage", tags=["usage"])
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
     app.include_router(failure_logs.router, prefix="/api", tags=["failure_logs"])
+    app.include_router(heartbeat.router, prefix="/api", tags=["heartbeat"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:

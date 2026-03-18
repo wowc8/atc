@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { api } from "../../utils/api";
 import StatusBadge from "../common/StatusBadge";
+import HealthIndicator from "../common/HealthIndicator";
 import ConfirmPopover from "../common/ConfirmPopover";
 import AceTerminal from "./AceTerminal";
+import { useAppContext } from "../../context/AppContext";
 import type { Session } from "../../types";
 import "./AceList.css";
 
@@ -19,6 +21,7 @@ export default function AceList({
   onRefresh,
   compact = false,
 }: AceListProps) {
+  const { state } = useAppContext();
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -102,6 +105,7 @@ export default function AceList({
                 <div className="ace-list__mini-header">
                   <span className="ace-list__mini-name">{session.name}</span>
                   <StatusBadge status={session.status} size="sm" />
+                  <HealthIndicator health={state.heartbeats[session.id]?.health} />
                 </div>
                 <div className="ace-list__mini-terminal">
                   <AceTerminal key={session.id} session={session} />
@@ -170,6 +174,7 @@ export default function AceList({
               >
                 <span>{session.name}</span>
                 <StatusBadge status={session.status} size="sm" />
+                <HealthIndicator health={state.heartbeats[session.id]?.health} />
               </button>
               <div className="ace-list__tab-actions">
                 {!isRunning(session) ? (
