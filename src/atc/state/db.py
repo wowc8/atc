@@ -25,6 +25,7 @@ from atc.state.models import (
     Project,
     Session,
     SessionHeartbeat,
+    TaskAssignment,
     TaskGraph,
 )
 
@@ -377,6 +378,21 @@ CREATE TABLE IF NOT EXISTS feature_flags (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_flags_key ON feature_flags(key);
+
+CREATE TABLE IF NOT EXISTS task_assignments (
+    id              TEXT PRIMARY KEY,
+    task_graph_id   TEXT NOT NULL REFERENCES task_graphs(id) ON DELETE CASCADE,
+    ace_session_id  TEXT NOT NULL,
+    assignment_id   TEXT NOT NULL UNIQUE,
+    status          TEXT NOT NULL DEFAULT 'assigned',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_assignments_task_graph
+    ON task_assignments(task_graph_id);
+CREATE INDEX IF NOT EXISTS idx_task_assignments_ace_session
+    ON task_assignments(ace_session_id);
 """
 
 
@@ -665,12 +681,15 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
 # TaskGraph CRUD
 # ---------------------------------------------------------------------------
 
-_VALID_TASK_GRAPH_STATUSES = {"todo", "in_progress", "done"}
+_VALID_TASK_GRAPH_STATUSES = {"todo", "assigned", "in_progress", "review", "done", "error"}
 
 _TASK_GRAPH_TRANSITIONS: dict[str, set[str]] = {
-    "todo": {"in_progress", "done"},
-    "in_progress": {"todo", "done"},
-    "done": {"todo", "in_progress"},
+    "todo": {"assigned"},
+    "assigned": {"in_progress", "todo", "error"},
+    "in_progress": {"review", "done", "error"},
+    "review": {"done", "in_progress", "error"},
+    "done": {"todo"},  # re-open for retry
+    "error": {"todo"},  # retry from scratch
 }
 
 
@@ -842,6 +861,195 @@ async def delete_task_graph(
     )
     await db.commit()
     return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# TaskAssignment CRUD (idempotent assignments)
+# ---------------------------------------------------------------------------
+
+_VALID_ASSIGNMENT_STATUSES = {"assigned", "working", "done", "failed"}
+
+_ASSIGNMENT_TRANSITIONS: dict[str, set[str]] = {
+    "assigned": {"working", "failed"},
+    "working": {"done", "failed"},
+    "done": set(),
+    "failed": set(),
+}
+
+
+def _row_to_task_assignment(row: aiosqlite.Row) -> TaskAssignment:
+    d = dict(row)
+    return TaskAssignment(**d)
+
+
+async def assign_task(
+    db: aiosqlite.Connection,
+    task_graph_id: str,
+    ace_session_id: str,
+    assignment_id: str,
+) -> tuple[TaskAssignment, bool]:
+    """Idempotently assign an Ace to a task graph entry.
+
+    If an assignment with the same ``assignment_id`` already exists, returns
+    the existing record and ``False`` (no-op).  Otherwise creates the
+    assignment, transitions the task to ``assigned``, and returns the new
+    record with ``True``.
+
+    Raises ``ValueError`` if the task is not in a state that allows
+    assignment (i.e. not ``todo``).
+    """
+    # Check for existing assignment with same idempotency key
+    cursor = await db.execute(
+        "SELECT * FROM task_assignments WHERE assignment_id = ?",
+        (assignment_id,),
+    )
+    existing_row = await cursor.fetchone()
+    if existing_row is not None:
+        return _row_to_task_assignment(existing_row), False
+
+    # Validate the task exists and is in assignable state
+    task = await get_task_graph(db, task_graph_id)
+    if task is None:
+        raise ValueError(f"TaskGraph {task_graph_id} not found")
+
+    if task.status != "todo":
+        raise ValueError(
+            f"Cannot assign task in '{task.status}' state "
+            f"(must be 'todo'); task_graph_id={task_graph_id}"
+        )
+
+    # Check for an existing active assignment on this task (prevent double-assign)
+    cursor = await db.execute(
+        "SELECT * FROM task_assignments"
+        " WHERE task_graph_id = ? AND status IN ('assigned', 'working')",
+        (task_graph_id,),
+    )
+    active_row = await cursor.fetchone()
+    if active_row is not None:
+        active = _row_to_task_assignment(active_row)
+        if active.ace_session_id == ace_session_id:
+            # Same ace re-assigned — idempotent no-op
+            return active, False
+        raise ValueError(
+            f"Task {task_graph_id} already has an active assignment to ace {active.ace_session_id}"
+        )
+
+    now = _now()
+    assignment = TaskAssignment(
+        id=_uuid(),
+        task_graph_id=task_graph_id,
+        ace_session_id=ace_session_id,
+        assignment_id=assignment_id,
+        status="assigned",
+        created_at=now,
+        updated_at=now,
+    )
+
+    await db.execute(
+        """INSERT INTO task_assignments
+           (id, task_graph_id, ace_session_id, assignment_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            assignment.id,
+            assignment.task_graph_id,
+            assignment.ace_session_id,
+            assignment.assignment_id,
+            assignment.status,
+            assignment.created_at,
+            assignment.updated_at,
+        ),
+    )
+
+    # Transition the task_graph to 'assigned'
+    await db.execute(
+        "UPDATE task_graphs SET status = ?, assigned_ace_id = ?, updated_at = ? WHERE id = ?",
+        ("assigned", ace_session_id, now, task_graph_id),
+    )
+
+    await db.commit()
+    return assignment, True
+
+
+async def get_task_assignment(
+    db: aiosqlite.Connection,
+    assignment_id: str,
+) -> TaskAssignment | None:
+    """Fetch a task assignment by its idempotency key."""
+    cursor = await db.execute(
+        "SELECT * FROM task_assignments WHERE assignment_id = ?",
+        (assignment_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _row_to_task_assignment(row)
+
+
+async def get_task_assignment_by_id(
+    db: aiosqlite.Connection,
+    record_id: str,
+) -> TaskAssignment | None:
+    """Fetch a task assignment by its primary key."""
+    cursor = await db.execute(
+        "SELECT * FROM task_assignments WHERE id = ?",
+        (record_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _row_to_task_assignment(row)
+
+
+async def list_task_assignments(
+    db: aiosqlite.Connection,
+    *,
+    task_graph_id: str | None = None,
+    ace_session_id: str | None = None,
+) -> list[TaskAssignment]:
+    """List task assignments, optionally filtered."""
+    conditions: list[str] = []
+    params: list[str] = []
+
+    if task_graph_id is not None:
+        conditions.append("task_graph_id = ?")
+        params.append(task_graph_id)
+    if ace_session_id is not None:
+        conditions.append("ace_session_id = ?")
+        params.append(ace_session_id)
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    cursor = await db.execute(
+        f"SELECT * FROM task_assignments{where} ORDER BY created_at DESC",
+        params,
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_task_assignment(r) for r in rows]
+
+
+async def update_task_assignment_status(
+    db: aiosqlite.Connection,
+    assignment_id: str,
+    new_status: str,
+) -> TaskAssignment | None:
+    """Transition a task assignment's status with validation."""
+    if new_status not in _VALID_ASSIGNMENT_STATUSES:
+        raise ValueError(f"Invalid assignment status: {new_status}")
+
+    existing = await get_task_assignment(db, assignment_id)
+    if existing is None:
+        return None
+
+    allowed = _ASSIGNMENT_TRANSITIONS.get(existing.status, set())
+    if new_status not in allowed:
+        raise ValueError(f"Cannot transition assignment from '{existing.status}' to '{new_status}'")
+
+    now = _now()
+    await db.execute(
+        "UPDATE task_assignments SET status = ?, updated_at = ? WHERE assignment_id = ?",
+        (new_status, now, assignment_id),
+    )
+    await db.commit()
+    return await get_task_assignment(db, assignment_id)
 
 
 # ---------------------------------------------------------------------------

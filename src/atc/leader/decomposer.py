@@ -132,7 +132,9 @@ async def decompose_goal(
 
         if dep_ids:
             updated = await db_ops.update_task_graph(
-                conn, tg.id, dependencies=dep_ids,
+                conn,
+                tg.id,
+                dependencies=dep_ids,
             )
             if updated is not None:
                 # Replace the entry in created list with updated version
@@ -196,14 +198,16 @@ def get_completion_status(task_graphs: list[TaskGraph]) -> dict[str, Any]:
         }
 
     done = sum(1 for tg in task_graphs if tg.status == "done")
-    in_progress = sum(1 for tg in task_graphs if tg.status == "in_progress")
+    in_progress = sum(1 for tg in task_graphs if tg.status in ("assigned", "in_progress", "review"))
     todo = sum(1 for tg in task_graphs if tg.status == "todo")
+    error = sum(1 for tg in task_graphs if tg.status == "error")
 
     return {
         "total": total,
         "done": done,
         "in_progress": in_progress,
         "todo": todo,
+        "error": error,
         "all_done": done == total,
         "progress_pct": round((done / total) * 100),
     }

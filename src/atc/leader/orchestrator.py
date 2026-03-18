@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -41,6 +42,7 @@ class AceAssignment:
     ace_session_id: str
     task_graph_id: str
     task_title: str
+    assignment_id: str = ""  # idempotency key for assign_task
     status: str = "assigned"  # assigned|working|done|failed
     deployed_root: Path | None = None  # staging dir for cleanup
 
@@ -109,11 +111,20 @@ class LeaderOrchestrator:
     ) -> AceAssignment | None:
         """Spawn a single Ace session and assign it to a task graph entry.
 
+        Uses ``assign_task`` for idempotent, state-machine-guarded
+        assignment.  If the same ``assignment_id`` is used twice the
+        second call is a no-op.
+
         Deploys config files (CLAUDE.md, hooks) via ``deploy_ace_files``
         before launching the tmux pane so Claude Code reads the task
         instructions automatically.
         """
         ace_name = f"ace-{title[:30]}"
+
+        # Generate a deterministic assignment_id for idempotency.
+        # The leader_id + task_graph_id combination ensures that the
+        # same leader assigning the same task produces the same key.
+        idempotency_key = f"{self.leader_id}:{task_graph_id}"
 
         try:
             # Look up project metadata for the deploy spec
@@ -123,8 +134,6 @@ class LeaderOrchestrator:
             github_repo = project.github_repo if project else None
 
             # Generate a stable session id up-front so deploy can use it
-            import uuid
-
             session_id_preview = str(uuid.uuid4())
 
             # Deploy config files before launching the session
@@ -162,14 +171,31 @@ class LeaderOrchestrator:
             )
             return None
 
-        # Link the task_graph entry to this Ace
-        await db_ops.update_task_graph(
-            self.conn,
-            task_graph_id,
-            assigned_ace_id=session_id,
-        )
+        # Idempotent assignment — creates record + transitions task to 'assigned'
+        try:
+            db_assignment, created = await db_ops.assign_task(
+                self.conn,
+                task_graph_id,
+                session_id,
+                idempotency_key,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Cannot assign task '%s' (graph %s): %s",
+                title,
+                task_graph_id,
+                exc,
+            )
+            return None
 
-        # Transition the task to in_progress
+        if not created:
+            logger.info(
+                "Leader %s: assignment for task '%s' already exists (idempotent no-op)",
+                self.leader_id,
+                title,
+            )
+
+        # Transition the task to in_progress now that the Ace is running
         await db_ops.update_task_graph_status(
             self.conn,
             task_graph_id,
@@ -180,6 +206,7 @@ class LeaderOrchestrator:
             ace_session_id=session_id,
             task_graph_id=task_graph_id,
             task_title=title,
+            assignment_id=idempotency_key,
             status="assigned",
             deployed_root=deployed.root,
         )
@@ -201,6 +228,7 @@ class LeaderOrchestrator:
                     "session_id": session_id,
                     "task_graph_id": task_graph_id,
                     "task_title": title,
+                    "assignment_id": idempotency_key,
                 },
             )
 
@@ -227,6 +255,15 @@ class LeaderOrchestrator:
     async def mark_task_done(self, task_graph_id: str) -> None:
         """Mark a task graph entry as done and clean up its Ace session."""
         assignment = self.assignments.get(task_graph_id)
+
+        # Update the assignment record status
+        if assignment and assignment.assignment_id:
+            with contextlib.suppress(ValueError):
+                await db_ops.update_task_assignment_status(
+                    self.conn,
+                    assignment.assignment_id,
+                    "done",
+                )
 
         # Update task graph status
         await db_ops.update_task_graph_status(
@@ -276,7 +313,22 @@ class LeaderOrchestrator:
         """Handle a failed task — update status and clean up Ace."""
         assignment = self.assignments.get(task_graph_id)
 
-        # Transition back to todo so it can be retried
+        # Update the assignment record status
+        if assignment and assignment.assignment_id:
+            with contextlib.suppress(ValueError):
+                await db_ops.update_task_assignment_status(
+                    self.conn,
+                    assignment.assignment_id,
+                    "failed",
+                )
+
+        # Transition to error, then back to todo so it can be retried
+        with contextlib.suppress(ValueError):
+            await db_ops.update_task_graph_status(
+                self.conn,
+                task_graph_id,
+                "error",
+            )
         with contextlib.suppress(ValueError):
             await db_ops.update_task_graph_status(
                 self.conn,

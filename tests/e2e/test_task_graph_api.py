@@ -1,6 +1,6 @@
 """E2E tests for task graph REST API.
 
-Covers: CRUD operations, status transitions, error handling.
+Covers: CRUD operations, status transitions, idempotent assignments, error handling.
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ class TestTaskGraphCRUD:
 
 
 class TestTaskGraphStatusTransitions:
-    def test_todo_to_in_progress(self, client: TestClient) -> None:
+    def test_todo_to_assigned(self, client: TestClient) -> None:
         project_id = _create_project(client)
         create_resp = client.post(
             f"/api/projects/{project_id}/task-graphs",
@@ -172,12 +172,13 @@ class TestTaskGraphStatusTransitions:
         tg_id = create_resp.json()["id"]
         resp = client.patch(
             f"/api/task-graphs/{tg_id}/status",
-            json={"status": "in_progress"},
+            json={"status": "assigned"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "in_progress"
+        assert resp.json()["status"] == "assigned"
 
     def test_full_lifecycle(self, client: TestClient) -> None:
+        """Test the full state machine: todo -> assigned -> in_progress -> review -> done."""
         project_id = _create_project(client)
         create_resp = client.post(
             f"/api/projects/{project_id}/task-graphs",
@@ -185,21 +186,43 @@ class TestTaskGraphStatusTransitions:
         )
         tg_id = create_resp.json()["id"]
 
-        # todo → in_progress
+        for status in ["assigned", "in_progress", "review", "done"]:
+            resp = client.patch(
+                f"/api/task-graphs/{tg_id}/status",
+                json={"status": status},
+            )
+            assert resp.status_code == 200, f"Failed transition to {status}"
+            assert resp.json()["status"] == status
+
+    def test_skip_review_lifecycle(self, client: TestClient) -> None:
+        """Test shortcut: todo -> assigned -> in_progress -> done (skip review)."""
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Skip review"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        for status in ["assigned", "in_progress", "done"]:
+            resp = client.patch(
+                f"/api/task-graphs/{tg_id}/status",
+                json={"status": status},
+            )
+            assert resp.status_code == 200
+
+    def test_todo_to_in_progress_rejected(self, client: TestClient) -> None:
+        """Cannot skip 'assigned' step."""
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Skip assigned"},
+        )
+        tg_id = create_resp.json()["id"]
         resp = client.patch(
             f"/api/task-graphs/{tg_id}/status",
             json={"status": "in_progress"},
         )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "in_progress"
-
-        # in_progress → done
-        resp = client.patch(
-            f"/api/task-graphs/{tg_id}/status",
-            json={"status": "done"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "done"
+        assert resp.status_code == 422
 
     def test_invalid_transition_same_status(self, client: TestClient) -> None:
         project_id = _create_project(client)
@@ -233,3 +256,155 @@ class TestTaskGraphStatusTransitions:
             json={"status": "done"},
         )
         assert resp.status_code == 404
+
+    def test_error_recovery_lifecycle(self, client: TestClient) -> None:
+        """Test error recovery: todo -> assigned -> in_progress -> error -> todo."""
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Error recovery"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        for status in ["assigned", "in_progress", "error", "todo"]:
+            resp = client.patch(
+                f"/api/task-graphs/{tg_id}/status",
+                json={"status": status},
+            )
+            assert resp.status_code == 200
+
+
+class TestIdempotentAssignment:
+    def test_assign_task(self, client: TestClient) -> None:
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Assign me"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        resp = client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-1"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["task_graph_id"] == tg_id
+        assert data["ace_session_id"] == "ace-1"
+        assert data["assignment_id"] == "key-1"
+        assert data["status"] == "assigned"
+
+        # Task should now be 'assigned'
+        tg_resp = client.get(f"/api/task-graphs/{tg_id}")
+        assert tg_resp.json()["status"] == "assigned"
+
+    def test_duplicate_assignment_is_noop(self, client: TestClient) -> None:
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Duplicate test"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        resp1 = client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-dup"},
+        )
+        assert resp1.status_code == 200
+
+        # Same assignment_id again -- should return same record
+        resp2 = client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-dup"},
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["id"] == resp1.json()["id"]
+
+    def test_assign_non_todo_task_rejected(self, client: TestClient) -> None:
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Already assigned"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        # First assignment succeeds
+        client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-1"},
+        )
+
+        # Second assignment with different key fails
+        resp = client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-2", "assignment_id": "key-2"},
+        )
+        assert resp.status_code == 422
+
+    def test_list_assignments(self, client: TestClient) -> None:
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "List assignments"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-list"},
+        )
+
+        resp = client.get(f"/api/task-graphs/{tg_id}/assignments")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["assignment_id"] == "key-list"
+
+    def test_assignment_status_transition(self, client: TestClient) -> None:
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Status transition"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-status"},
+        )
+
+        # assigned -> working
+        resp = client.patch(
+            "/api/task-assignments/key-status/status",
+            json={"status": "working"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "working"
+
+        # working -> done
+        resp = client.patch(
+            "/api/task-assignments/key-status/status",
+            json={"status": "done"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "done"
+
+    def test_assignment_invalid_transition(self, client: TestClient) -> None:
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Invalid transition"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-invalid"},
+        )
+
+        # assigned -> done (skip working) should fail
+        resp = client.patch(
+            "/api/task-assignments/key-invalid/status",
+            json={"status": "done"},
+        )
+        assert resp.status_code == 422
