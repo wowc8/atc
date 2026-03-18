@@ -5,6 +5,28 @@
   width: 100%;
 }
 
+/* Two-column layout: projects on left, Tower console on right */
+.dashboard--two-col {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: var(--space-6);
+  max-width: none;
+  height: 100%;
+  overflow: hidden;
+}
+
+.dashboard--two-col .dashboard__main {
+  overflow: auto;
+  min-height: 0;
+}
+
+.dashboard--two-col .dashboard__tower {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .dashboard__header {
   display: flex;
   align-items: center;
