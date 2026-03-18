@@ -253,17 +253,6 @@ export default function SettingsPage() {
     e.target.value = "";
   }
 
-  function onRestoreFileSelected(
-    e: React.ChangeEvent<HTMLInputElement>,
-    projectId: string,
-  ) {
-    const file = e.target.files?.[0];
-    if (file) {
-      setRestoreConfirm({ file, projectId });
-    }
-    e.target.value = "";
-  }
-
   function confirmRestore() {
     if (!restoreConfirm) return;
     handleImportFile(restoreConfirm.file, restoreConfirm.projectId);
@@ -945,7 +934,7 @@ function fileToBase64(file: File): Promise<string> {
     reader.onload = () => {
       const result = reader.result as string;
       // Strip data URL prefix (e.g. "data:application/zip;base64,")
-      const b64 = result.includes(",") ? result.split(",")[1] : result;
+      const b64 = result.includes(",") ? result.split(",")[1] ?? result : result;
       resolve(b64);
     };
     reader.onerror = reject;
