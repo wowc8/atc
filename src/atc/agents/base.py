@@ -55,6 +55,15 @@ class OutputChunk:
 
 
 @dataclass(frozen=True)
+class CostModel:
+    """Describes the cost structure for a provider."""
+
+    input_cost_per_token: float = 0.0
+    output_cost_per_token: float = 0.0
+    currency: str = "USD"
+
+
+@dataclass(frozen=True)
 class ProviderCapabilities:
     """Describes what a provider supports."""
 
@@ -62,6 +71,17 @@ class ProviderCapabilities:
     supports_tool_use: bool = False
     context_window: int = 0
     model: str = ""
+    cost_model: CostModel | None = None
+
+
+@dataclass(frozen=True)
+class ProviderMetadata:
+    """Metadata about a provider plugin for discoverability."""
+
+    name: str
+    version: str = "0.0.0"
+    description: str = ""
+    author: str = ""
 
 
 @runtime_checkable
