@@ -138,6 +138,17 @@ export interface TowerDetail {
   current_goal: string | null;
   current_project_id: string | null;
   current_session_id: string | null;
+  leader_activity_preview: string | null;
+}
+
+export interface TowerProgress {
+  project_id: string | null;
+  total: number;
+  done: number;
+  in_progress: number;
+  todo: number;
+  progress_pct: number;
+  all_done: boolean;
 }
 
 export interface FailureLog {
@@ -163,6 +174,7 @@ export interface AppState {
   budgets: Record<string, Budget>;
   brainStatus: TowerStatus;
   towerDetail: TowerDetail;
+  towerProgress: TowerProgress;
   notifications: Notification[];
   failureLogs: FailureLog[];
   usage: UsageSummary;

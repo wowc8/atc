@@ -20,6 +20,7 @@ import type {
   GitHubSummary,
   TowerStatus,
   TowerDetail,
+  TowerProgress,
 } from "../types";
 import { useWebSocket, type WsMessage } from "../hooks/useWebSocket";
 import { api } from "../utils/api";
@@ -40,6 +41,16 @@ const initialState: AppState = {
     current_goal: null,
     current_project_id: null,
     current_session_id: null,
+    leader_activity_preview: null,
+  },
+  towerProgress: {
+    project_id: null,
+    total: 0,
+    done: 0,
+    in_progress: 0,
+    todo: 0,
+    progress_pct: 0,
+    all_done: false,
   },
   notifications: [],
   failureLogs: [],
@@ -71,7 +82,8 @@ type Action =
   | { type: "MARK_NOTIFICATION_READ"; payload: string }
   | { type: "SET_FAILURE_LOGS"; payload: FailureLog[] }
   | { type: "ADD_FAILURE_LOG"; payload: FailureLog }
-  | { type: "RESOLVE_FAILURE_LOG"; payload: string };
+  | { type: "RESOLVE_FAILURE_LOG"; payload: string }
+  | { type: "SET_TOWER_PROGRESS"; payload: TowerProgress };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -132,6 +144,8 @@ function reducer(state: AppState, action: Action): AppState {
           f.id === action.payload ? { ...f, resolved: true } : f,
         ),
       };
+    case "SET_TOWER_PROGRESS":
+      return { ...state, towerProgress: action.payload };
   }
 }
 
@@ -217,6 +231,7 @@ export function AppProvider({ children }: AppProviderProps) {
           current_goal: towerStatus.current_goal,
           current_project_id: towerStatus.current_project_id,
           current_session_id: towerStatus.current_session_id,
+          leader_activity_preview: null,
         },
       });
     } catch {
@@ -244,6 +259,26 @@ export function AppProvider({ children }: AppProviderProps) {
           type: "SET_TOWER_DETAIL",
           payload: {
             current_session_id: (data.session_id as string) ?? null,
+          },
+        });
+      } else if (data.type === "progress") {
+        dispatch({
+          type: "SET_TOWER_PROGRESS",
+          payload: {
+            project_id: (data.project_id as string) ?? null,
+            total: (data.total as number) ?? 0,
+            done: (data.done as number) ?? 0,
+            in_progress: (data.in_progress as number) ?? 0,
+            todo: (data.todo as number) ?? 0,
+            progress_pct: (data.progress_pct as number) ?? 0,
+            all_done: (data.all_done as boolean) ?? false,
+          },
+        });
+      } else if (data.type === "leader_activity") {
+        dispatch({
+          type: "SET_TOWER_DETAIL",
+          payload: {
+            leader_activity_preview: (data.preview as string) ?? null,
           },
         });
       }

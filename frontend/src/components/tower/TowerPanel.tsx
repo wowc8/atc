@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppContext } from "../../context/AppContext";
 import { useTerminal } from "../../hooks/useTerminal";
 import { api } from "../../utils/api";
@@ -10,16 +10,23 @@ import "./TowerPanel.css";
  *
  * Minimized: single-line ticker showing latest Tower activity.
  * Expanded + idle: goal input form.
- * Expanded + running: full PTY terminal streaming Leader output.
+ * Expanded + running: full PTY terminal + message input bar.
+ *
+ * The message input bar allows the user to send instructions to the
+ * Leader through Tower. This is the top of the chain of command —
+ * Tower is the user's interface to the entire hierarchy.
  */
 export default function TowerPanel() {
   const { state } = useAppContext();
-  const { towerDetail, brainStatus, projects } = state;
+  const { towerDetail, towerProgress, brainStatus, projects } = state;
 
   const [expanded, setExpanded] = useState(false);
   const [goal, setGoal] = useState("");
   const [projectId, setProjectId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const messageInputRef = useRef<HTMLInputElement>(null);
 
   const isRunning =
     towerDetail.state === "planning" || towerDetail.state === "managing";
@@ -89,6 +96,32 @@ export default function TowerPanel() {
     }
   }, []);
 
+  const handleSendMessage = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!message.trim()) return;
+      setSending(true);
+      try {
+        await api.post("/tower/message", { message: message.trim() });
+        setMessage("");
+        messageInputRef.current?.focus();
+      } catch (err) {
+        console.error("Failed to send message to Leader:", err);
+      } finally {
+        setSending(false);
+      }
+    },
+    [message],
+  );
+
+  const handleMarkComplete = useCallback(async () => {
+    try {
+      await api.post("/tower/complete");
+    } catch (err) {
+      console.error("Failed to mark Tower goal complete:", err);
+    }
+  }, []);
+
   const tickerText =
     brainStatus.message ||
     (towerDetail.current_goal
@@ -121,14 +154,31 @@ export default function TowerPanel() {
         </span>
 
         <div className="tower-panel__bar-actions">
-          {isRunning && (
-            <button
-              className="btn btn-danger btn-sm"
-              onClick={handleCancel}
-              data-testid="tower-panel-cancel"
+          {isRunning && towerProgress.total > 0 && (
+            <span
+              className="tower-panel__progress"
+              data-testid="tower-panel-progress"
             >
-              Cancel
-            </button>
+              {towerProgress.done}/{towerProgress.total} tasks ({towerProgress.progress_pct}%)
+            </span>
+          )}
+          {isRunning && (
+            <>
+              <button
+                className="btn btn-sm"
+                onClick={handleMarkComplete}
+                data-testid="tower-panel-complete"
+              >
+                Complete
+              </button>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={handleCancel}
+                data-testid="tower-panel-cancel"
+              >
+                Cancel
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -178,11 +228,37 @@ export default function TowerPanel() {
           )}
 
           {isRunning && (
-            <div
-              className="tower-panel__terminal"
-              ref={attachRef}
-              data-testid="tower-panel-terminal"
-            />
+            <>
+              <div
+                className="tower-panel__terminal"
+                ref={attachRef}
+                data-testid="tower-panel-terminal"
+              />
+              <form
+                className="tower-panel__message-form"
+                onSubmit={handleSendMessage}
+                data-testid="tower-panel-message-form"
+              >
+                <input
+                  ref={messageInputRef}
+                  type="text"
+                  className="tower-panel__message-input"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="Send instruction to Leader..."
+                  disabled={sending}
+                  data-testid="tower-panel-message"
+                />
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={sending || !message.trim()}
+                  data-testid="tower-panel-send"
+                >
+                  {sending ? "Sending..." : "Send"}
+                </button>
+              </form>
+            </>
           )}
 
           {towerDetail.state === "error" && towerDetail.current_goal && (

@@ -1,9 +1,12 @@
-"""Tower REST endpoints — goal intake and tower status.
+"""Tower REST endpoints — goal intake, messaging, progress, and memory.
 
 Routes:
   GET    /api/tower/status           → Tower status summary
   POST   /api/tower/goal             → submit new goal (creates Leader + context)
+  POST   /api/tower/message          → send message to current Leader
   POST   /api/tower/cancel           → cancel current goal
+  POST   /api/tower/complete         → mark current goal as complete
+  GET    /api/tower/progress         → get Leader task graph progress
   GET    /api/tower/memory           → list tower memory entries
   DELETE /api/tower/memory/{key}     → forget a memory entry
 """
@@ -23,6 +26,10 @@ class GoalRequest(BaseModel):
     goal: str
 
 
+class MessageRequest(BaseModel):
+    message: str
+
+
 class TowerStatusResponse(BaseModel):
     status: str
     active_projects: int
@@ -31,6 +38,17 @@ class TowerStatusResponse(BaseModel):
     current_goal: str | None
     current_project_id: str | None
     current_session_id: str | None
+    output_line_count: int
+
+
+class TowerProgressResponse(BaseModel):
+    project_id: str | None
+    total: int
+    done: int
+    in_progress: int
+    todo: int
+    progress_pct: int
+    all_done: bool
 
 
 class MemoryEntry(BaseModel):
@@ -77,6 +95,7 @@ async def tower_status(request: Request) -> TowerStatusResponse:
         current_goal=controller_status["current_goal"],
         current_project_id=controller_status["current_project_id"],
         current_session_id=controller_status["current_session_id"],
+        output_line_count=controller_status.get("output_line_count", 0),
     )
 
 
@@ -106,6 +125,23 @@ async def submit_goal(body: GoalRequest, request: Request) -> dict:
     return result
 
 
+@router.post("/message")
+async def send_message(body: MessageRequest, request: Request) -> dict[str, str]:
+    """Send a message to the current Leader's terminal.
+
+    The Tower types this message into the Leader's Claude Code session,
+    allowing the user to communicate with the Leader through Tower.
+    """
+    tower = _get_tower(request)
+
+    try:
+        await tower.send_message(body.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {"status": "sent"}
+
+
 @router.post("/cancel")
 async def cancel_goal(request: Request) -> dict:
     """Cancel the current goal and stop the Leader session."""
@@ -116,6 +152,29 @@ async def cancel_goal(request: Request) -> dict:
 
     await tower.cancel_goal()
     return {"status": "cancelled"}
+
+
+@router.post("/complete")
+async def mark_complete(request: Request) -> dict[str, str]:
+    """Mark the current goal as complete and return Tower to idle."""
+    tower = _get_tower(request)
+
+    if tower.state.value != "managing":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot complete — Tower is {tower.state.value}, not managing",
+        )
+
+    await tower.mark_complete()
+    return {"status": "completed"}
+
+
+@router.get("/progress", response_model=TowerProgressResponse)
+async def get_progress(request: Request) -> TowerProgressResponse:
+    """Get the current Leader's task graph progress."""
+    tower = _get_tower(request)
+    progress = await tower.get_progress()
+    return TowerProgressResponse(**progress)
 
 
 @router.get("/memory", response_model=list[MemoryEntry])
