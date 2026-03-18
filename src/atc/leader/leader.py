@@ -16,6 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
+from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
     _ensure_tmux_session,
@@ -33,8 +34,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The command used to launch a Claude Code session in each tmux pane.
-_CLAUDE_LAUNCH_CMD = "claude --dangerously-skip-permissions"
 
 
 def _build_manager_deploy_spec(
@@ -128,10 +127,14 @@ async def start_leader(
         # Spawn tmux pane in the repo working directory, running claude
         working_dir = spec.repo_path or str(deployed.root)
 
+        launch_cmd = get_launch_command(
+            project.agent_provider if project else "claude_code",
+        )
+
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(
             ATC_TMUX_SESSION,
-            _CLAUDE_LAUNCH_CMD,
+            launch_cmd,
             working_dir=working_dir,
         )
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)

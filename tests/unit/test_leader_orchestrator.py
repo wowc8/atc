@@ -76,6 +76,36 @@ class TestSpawnAces:
         assert assignments[0].ace_session_id == "ace-session-1"
         mock_create.assert_called_once()
 
+    async def test_uses_project_agent_provider(
+        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """Ace sessions must use the project's configured agent_provider."""
+        # Set project to use opencode
+        await db.execute(
+            "UPDATE projects SET agent_provider = ? WHERE id = ?",
+            ("opencode", orchestrator.project_id),
+        )
+        await db.commit()
+
+        await create_task_graph(db, orchestrator.project_id, "Task A")
+        await orchestrator.spawn_aces_for_ready_tasks()
+
+        # Verify the launch_command used the opencode provider
+        call_kwargs = mock_create.call_args
+        assert call_kwargs is not None
+        assert call_kwargs.kwargs.get("launch_command") == "opencode"
+
+    async def test_default_provider_uses_claude(
+        self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """Default agent_provider (claude_code) uses the Claude launch command."""
+        await create_task_graph(db, orchestrator.project_id, "Task B")
+        await orchestrator.spawn_aces_for_ready_tasks()
+
+        call_kwargs = mock_create.call_args
+        assert call_kwargs is not None
+        assert call_kwargs.kwargs.get("launch_command") == "claude --dangerously-skip-permissions"
+
     async def test_skips_tasks_with_unmet_deps(
         self, mock_create: AsyncMock, db, orchestrator: LeaderOrchestrator,
     ) -> None:

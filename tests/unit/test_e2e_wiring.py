@@ -17,8 +17,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from atc.agents.deploy import AceDeploySpec, ManagerDeploySpec, deploy_ace_files
+from atc.agents.factory import get_launch_command
 from atc.core.events import EventBus
-from atc.leader.leader import _CLAUDE_LAUNCH_CMD, _build_manager_deploy_spec
+from atc.leader.leader import _build_manager_deploy_spec
 from atc.leader.orchestrator import LeaderOrchestrator
 from atc.state.db import (
     _SCHEMA_SQL,
@@ -163,7 +164,7 @@ class TestTowerToLeaderWiring:
         mock_spawn.assert_called_once()
         args, kwargs = mock_spawn.call_args
         assert args[0] == "atc"  # tmux session name
-        assert args[1] == _CLAUDE_LAUNCH_CMD
+        assert args[1] == get_launch_command("claude_code")
         assert kwargs.get("working_dir") == "/tmp/repo"
 
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
@@ -191,6 +192,40 @@ class TestTowerToLeaderWiring:
         # Without repo_path, should fall back to deployed root
         _, kwargs = mock_spawn.call_args
         assert kwargs.get("working_dir") == "/tmp/atc-agents/leader-1"
+
+    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
+    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader.deploy_manager_files")
+    async def test_start_leader_uses_project_agent_provider(
+        self,
+        mock_deploy: AsyncMock,
+        mock_ensure: AsyncMock,
+        mock_spawn: AsyncMock,
+        db,
+        event_bus: EventBus,
+    ) -> None:
+        """Leader must use project.agent_provider to pick the launch command."""
+        from atc.agents.deploy import DeployedFiles
+
+        mock_deploy.return_value = DeployedFiles(root=Path("/tmp/atc-agents/leader-1"), files=[])
+
+        project = await create_project(db, "test-proj", repo_path="/tmp/repo")
+        # Set project to use opencode
+        await db.execute(
+            "UPDATE projects SET agent_provider = ? WHERE id = ?",
+            ("opencode", project.id),
+        )
+        await db.commit()
+        await create_leader(db, project.id)
+
+        from atc.leader.leader import start_leader
+
+        await start_leader(db, project.id, goal="Build it", event_bus=event_bus)
+
+        mock_spawn.assert_called_once()
+        args, _ = mock_spawn.call_args
+        assert args[1] == get_launch_command("opencode")
+        assert args[1] == "opencode"
 
 
 # ---------------------------------------------------------------------------
