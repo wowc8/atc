@@ -58,6 +58,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     set_ws_hub(ws_hub)
 
+    # Wire app event broadcasting
+    from atc.core import app_events as _app_events_mod
+
+    _app_events_mod.set_ws_hub(ws_hub)
+
     # 4b. Start Tower controller
     from atc.tower.controller import TowerController
 

@@ -1,9 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../utils/api";
 import { hasConsent, setConsent, sendReport } from "../utils/sentry";
-import type { AgentProviderConfig, ProviderInfo } from "../types";
+import type { AgentProviderConfig, AppEvent, ProviderInfo } from "../types";
 import type { UseUpdaterReturn } from "../hooks/useUpdater";
 import "./SettingsPage.css";
 
@@ -61,6 +61,14 @@ export default function SettingsPage() {
     "idle",
   );
 
+  const [logEvents, setLogEvents] = useState<AppEvent[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState("");
+  const [logLevelFilter, setLogLevelFilter] = useState("");
+  const [logCategoryFilter, setLogCategoryFilter] = useState("");
+  const [logExporting, setLogExporting] = useState(false);
+  const [logTotal, setLogTotal] = useState(0);
+
   useEffect(() => {
     api.get<AgentProviderConfig>("/settings/agent-provider").then(setProviderConfig).catch(() => {});
     api.get<ProviderInfo[]>("/settings/providers").then(setProviders).catch(() => {});
@@ -71,6 +79,51 @@ export default function SettingsPage() {
       .then(setSentryStatus)
       .catch(() => {});
   }, []);
+
+  const fetchLogs = useCallback(async () => {
+    setLogLoading(true);
+    setLogError("");
+    try {
+      const params = new URLSearchParams();
+      if (logLevelFilter) params.set("level", logLevelFilter);
+      if (logCategoryFilter) params.set("category", logCategoryFilter);
+      params.set("limit", "200");
+      const qs = params.toString();
+      const [events, countRes] = await Promise.all([
+        api.get<AppEvent[]>(`/app-events?${qs}`),
+        api.get<{ count: number }>(`/app-events/count?${qs}`),
+      ]);
+      setLogEvents(events);
+      setLogTotal(countRes.count);
+    } catch (e) {
+      setLogError(e instanceof Error ? e.message : "Failed to load logs");
+    } finally {
+      setLogLoading(false);
+    }
+  }, [logLevelFilter, logCategoryFilter]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
+
+  async function handleExportLogs() {
+    setLogExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (logLevelFilter) params.set("level", logLevelFilter);
+      if (logCategoryFilter) params.set("category", logCategoryFilter);
+      const qs = params.toString();
+      const blob = await api.postBlob(`/app-events/export?${qs}`);
+      downloadBlob(
+        blob,
+        `atc-logs-${new Date().toISOString().slice(0, 10)}.zip`,
+      );
+    } catch (e) {
+      setLogError(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setLogExporting(false);
+    }
+  }
 
   async function handleProviderChange(newDefault: string) {
     setProviderSaving(true);
@@ -249,23 +302,37 @@ export default function SettingsPage() {
               <button
                 className="btn"
                 onClick={() => updater.checkForUpdates()}
-                disabled={updater.status === "checking" || updater.status === "downloading"}
+                disabled={
+                  updater.status === "checking" ||
+                  updater.status === "downloading"
+                }
                 data-testid="check-updates-btn"
               >
-                {updater.status === "checking" ? "Checking..." : "Check for Updates"}
+                {updater.status === "checking"
+                  ? "Checking..."
+                  : "Check for Updates"}
               </button>
               {updater.status === "available" && updater.updateInfo && (
-                <span className="settings-page__success" data-testid="update-available">
+                <span
+                  className="settings-page__success"
+                  data-testid="update-available"
+                >
                   v{updater.updateInfo.version} available!
                 </span>
               )}
               {updater.status === "idle" && (
-                <span className="settings-page__up-to-date" data-testid="up-to-date">
+                <span
+                  className="settings-page__up-to-date"
+                  data-testid="up-to-date"
+                >
                   Up to date
                 </span>
               )}
               {updater.error && (
-                <span className="settings-page__error" data-testid="update-error">
+                <span
+                  className="settings-page__error"
+                  data-testid="update-error"
+                >
                   {updater.error}
                 </span>
               )}
@@ -677,6 +744,131 @@ export default function SettingsPage() {
             </p>
           )}
         </section>
+
+        {/* Log Viewer */}
+        <section
+          className="panel settings-page__section"
+          data-testid="log-viewer-section"
+        >
+          <div className="settings-page__logs-header">
+            <h2>App Event Logs</h2>
+            <div className="settings-page__logs-actions">
+              <button
+                className="btn btn-sm"
+                onClick={fetchLogs}
+                disabled={logLoading}
+                data-testid="log-refresh-btn"
+              >
+                Refresh
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={handleExportLogs}
+                disabled={logExporting}
+                data-testid="log-export-btn"
+              >
+                {logExporting ? "Exporting..." : "Export Zip"}
+              </button>
+            </div>
+          </div>
+          <p className="settings-page__description">
+            Structured app events for debugging. Showing {logEvents.length} of{" "}
+            {logTotal} total.
+          </p>
+          <div className="settings-page__logs-filters">
+            <div className="form-group form-group--inline">
+              <label htmlFor="log-level-filter">Level</label>
+              <select
+                id="log-level-filter"
+                data-testid="log-level-filter"
+                value={logLevelFilter}
+                onChange={(e) => setLogLevelFilter(e.target.value)}
+              >
+                <option value="">All</option>
+                <option value="debug">Debug</option>
+                <option value="info">Info</option>
+                <option value="warning">Warning</option>
+                <option value="error">Error</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+            <div className="form-group form-group--inline">
+              <label htmlFor="log-category-filter">Category</label>
+              <select
+                id="log-category-filter"
+                data-testid="log-category-filter"
+                value={logCategoryFilter}
+                onChange={(e) => setLogCategoryFilter(e.target.value)}
+              >
+                <option value="">All</option>
+                <option value="session">Session</option>
+                <option value="task">Task</option>
+                <option value="error">Error</option>
+                <option value="cost">Cost</option>
+                <option value="system">System</option>
+              </select>
+            </div>
+          </div>
+          {logError && (
+            <p className="settings-page__error" data-testid="log-error">
+              {logError}
+            </p>
+          )}
+          {logLoading && logEvents.length === 0 ? (
+            <div className="settings-page__progress">
+              <div className="settings-page__progress-bar">
+                <div className="settings-page__progress-fill settings-page__progress-fill--indeterminate" />
+              </div>
+            </div>
+          ) : logEvents.length === 0 ? (
+            <p className="settings-page__description">No events found.</p>
+          ) : (
+            <div className="settings-page__logs-table-wrap">
+              <table
+                className="settings-page__logs-table"
+                data-testid="log-table"
+              >
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Level</th>
+                    <th>Category</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logEvents.map((evt) => (
+                    <tr
+                      key={evt.id}
+                      className={`settings-page__log-row settings-page__log-row--${evt.level}`}
+                    >
+                      <td className="settings-page__log-time">
+                        {formatLogTime(evt.created_at)}
+                      </td>
+                      <td>
+                        <span
+                          className={`settings-page__log-badge settings-page__log-badge--${evt.level}`}
+                        >
+                          {evt.level}
+                        </span>
+                      </td>
+                      <td>{evt.category}</td>
+                      <td className="settings-page__log-message">
+                        {evt.message}
+                        {evt.detail && (
+                          <details className="settings-page__log-detail">
+                            <summary>detail</summary>
+                            <pre>{JSON.stringify(evt.detail, null, 2)}</pre>
+                          </details>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
 
       {/* Restore Confirmation Dialog */}
@@ -717,6 +909,21 @@ export default function SettingsPage() {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+
+function formatLogTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
