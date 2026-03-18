@@ -406,10 +406,10 @@ class OpenCodeProvider:
 
         tmux_args = [
             _TMUX_CMD,
-            "split-window",
-            "-h",
+            "new-window",
             "-t",
             self._tmux_session,
+            "-d",
             "-P",
             "-F",
             "#{pane_id}",
@@ -430,6 +430,6 @@ class OpenCodeProvider:
 
         if proc.returncode != 0:
             err = stderr.decode().strip()
-            raise ProviderError(self.name, f"tmux split-window failed: {err}")
+            raise ProviderError(self.name, f"tmux new-window failed: {err}")
 
         return stdout.decode().strip()

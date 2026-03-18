@@ -32,7 +32,7 @@ _TMUX_CMD = "tmux"
 class ClaudeCodeProvider:
     """Agent provider using Claude Code in tmux panes.
 
-    Sessions are spawned as tmux split-window commands. Prompts are delivered
+    Sessions are spawned as tmux new-window commands. Prompts are delivered
     via ``tmux send-keys``. Status is tracked internally (future: via PTY
     monitor). Output streaming delegates to the terminal/pty_stream module.
 
@@ -82,13 +82,13 @@ class ClaudeCodeProvider:
 
         shell_cmd = f"{env_prefix}{' '.join(cmd_parts)}"
 
-        # Spawn in a new tmux pane
+        # Spawn in a new tmux window (avoids 'no space for new pane' in small terminals)
         tmux_args = [
             _TMUX_CMD,
-            "split-window",
-            "-h",
+            "new-window",
             "-t",
             self._tmux_session,
+            "-d",
             "-P",  # print pane info
             "-F",
             "#{pane_id}",
@@ -109,7 +109,7 @@ class ClaudeCodeProvider:
 
         if proc.returncode != 0:
             err = stderr.decode().strip()
-            raise ProviderError(self.name, f"tmux split-window failed: {err}")
+            raise ProviderError(self.name, f"tmux new-window failed: {err}")
 
         pane_id = stdout.decode().strip()
         tracked = _TrackedSession(

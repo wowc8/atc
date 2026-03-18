@@ -67,11 +67,16 @@ async def _tmux_run(*args: str) -> str:
 
 
 async def _ensure_tmux_session(session_name: str) -> None:
-    """Create the tmux session if it doesn't already exist."""
+    """Create the tmux session if it doesn't already exist.
+
+    Uses explicit dimensions (-x 200 -y 50) so panes work correctly even
+    when no real terminal is attached (e.g. PTY output streams to xterm.js
+    in the frontend).
+    """
     try:
         await _tmux_run("has-session", "-t", session_name)
     except RuntimeError:
-        await _tmux_run("new-session", "-d", "-s", session_name)
+        await _tmux_run("new-session", "-d", "-s", session_name, "-x", "200", "-y", "50")
 
 
 async def _spawn_pane(
@@ -80,8 +85,13 @@ async def _spawn_pane(
     *,
     working_dir: str | None = None,
 ) -> str:
-    """Split a new pane in *session_name* and return its pane id (e.g. ``%5``)."""
-    args = ["split-window", "-t", session_name, "-d", "-P", "-F", "#{pane_id}"]
+    """Create a new window in *session_name* and return its pane id (e.g. ``%5``).
+
+    Uses ``new-window`` instead of ``split-window`` to avoid the
+    'no space for new pane' error that occurs when the terminal is small
+    or headless (PTY output streams to the frontend xterm.js panel).
+    """
+    args = ["new-window", "-t", session_name, "-d", "-P", "-F", "#{pane_id}"]
     if working_dir:
         args.extend(["-c", working_dir])
     if command:
