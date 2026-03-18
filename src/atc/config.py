@@ -54,6 +54,15 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
+class SentryConfig(BaseModel):
+    """Sentry crash reporting configuration (opt-in)."""
+
+    enabled: bool = False
+    dsn: str = ""
+    traces_sample_rate: float = 0.0
+    environment: str = "development"
+
+
 class AgentProviderConfig(BaseModel):
     """Configuration for the agent provider abstraction layer."""
 
@@ -75,6 +84,7 @@ class Settings(BaseSettings):
     cost_tracker: CostTrackerConfig = CostTrackerConfig()
     heartbeat: HeartbeatConfig = HeartbeatConfig()
     logging: LoggingConfig = LoggingConfig()
+    sentry: SentryConfig = SentryConfig()
     agent_provider: AgentProviderConfig = AgentProviderConfig()
 
 

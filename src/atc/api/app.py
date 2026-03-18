@@ -13,6 +13,7 @@ from atc import __version__
 from atc.api.ws.hub import WsHub
 from atc.config import Settings, load_settings
 from atc.core.events import EventBus
+from atc.core.sentry import init_sentry
 from atc.state.db import run_migrations
 from atc.terminal.pty_stream import PtyStreamPool
 
@@ -196,6 +197,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
     if settings is None:
         settings = load_settings()
+
+    # Initialise Sentry before creating the app so the FastAPI integration hooks in
+    init_sentry(settings.sentry)
 
     app = FastAPI(
         title="ATC",
