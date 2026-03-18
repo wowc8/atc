@@ -5,6 +5,7 @@ import { api } from "../utils/api";
 import { hasConsent, setConsent, sendReport } from "../utils/sentry";
 import type { AgentProviderConfig, AppEvent, ProviderInfo } from "../types";
 import type { UseUpdaterReturn } from "../hooks/useUpdater";
+import { FeatureFlagsPanel } from "../components/settings/FeatureFlagsPanel";
 import "./SettingsPage.css";
 
 const APP_VERSION = __APP_VERSION__;
@@ -380,6 +381,8 @@ export default function SettingsPage() {
             <span className="settings-page__value">Dark</span>
           </div>
         </section>
+
+        <FeatureFlagsPanel />
 
         <section
           className="panel settings-page__section"

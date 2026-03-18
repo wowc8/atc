@@ -218,3 +218,15 @@ class ContextEntry:
     updated_by: str = ""
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass
+class FeatureFlag:
+    id: str
+    key: str  # unique slug e.g. 'remote_aces', 'tower_memory'
+    name: str  # human-readable display name
+    description: str | None = None
+    enabled: bool = False
+    metadata: str | None = None  # optional JSON
+    created_at: str = ""
+    updated_at: str = ""

@@ -225,6 +225,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from atc.api.routers import (
         aces,
         failure_logs,
+        feature_flags,
         heartbeat,
         leader,
         projects,
@@ -245,6 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
     app.include_router(failure_logs.router, prefix="/api", tags=["failure_logs"])
     app.include_router(heartbeat.router, prefix="/api", tags=["heartbeat"])
+    app.include_router(feature_flags.router, prefix="/api/feature-flags", tags=["feature_flags"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
