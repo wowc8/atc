@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AppProvider } from "./context/AppContext";
 import TowerBar from "./components/tower/TowerBar";
+import TowerPanel from "./components/tower/TowerPanel";
 import UpdateBanner from "./components/common/UpdateBanner";
 import { useUpdater } from "./hooks/useUpdater";
 import Dashboard from "./pages/Dashboard";
@@ -27,6 +28,7 @@ function Layout() {
       <main style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
         <Outlet context={updater} />
       </main>
+      <TowerPanel />
     </>
   );
 }

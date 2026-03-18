@@ -55,6 +55,17 @@
   flex-shrink: 0;
 }
 
+.tower-panel__context {
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tower-panel__ticker {
   flex: 1;
   font-size: var(--text-xs);
@@ -85,46 +96,6 @@
   height: 280px;
 }
 
-/* Goal form — shown when idle */
-.tower-panel__goal-form {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3);
-}
-
-.tower-panel__project-select {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-sm);
-  font-family: var(--font-sans);
-  color: var(--color-text);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  outline: none;
-  min-width: 140px;
-}
-
-.tower-panel__project-select:focus {
-  border-color: var(--color-accent);
-}
-
-.tower-panel__goal-input {
-  flex: 1;
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--text-sm);
-  font-family: var(--font-sans);
-  color: var(--color-text);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  outline: none;
-}
-
-.tower-panel__goal-input:focus {
-  border-color: var(--color-accent);
-}
-
 /* Terminal area */
 .tower-panel__terminal {
   flex: 1;
@@ -132,33 +103,41 @@
   padding: var(--space-1) var(--space-2);
 }
 
-/* Message input bar — below terminal when managing */
-.tower-panel__message-form {
+/* Unified input bar at bottom -- terminal-style */
+.tower-panel__input-bar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
+  background: var(--color-bg);
 }
 
-.tower-panel__message-input {
+.tower-panel__prompt {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.tower-panel__input {
   flex: 1;
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2);
   font-size: var(--text-sm);
   font-family: var(--font-mono);
   color: var(--color-text);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
   outline: none;
 }
 
-.tower-panel__message-input:focus {
-  border-color: var(--color-accent);
+.tower-panel__input::placeholder {
+  color: var(--color-text-muted);
 }
 
-.tower-panel__message-input:disabled {
+.tower-panel__input:disabled {
   opacity: 0.6;
 }
 
