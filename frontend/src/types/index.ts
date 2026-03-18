@@ -173,6 +173,17 @@ export interface SessionHeartbeat {
   updated_at: string;
 }
 
+export interface AppEvent {
+  id: string;
+  level: "debug" | "info" | "warning" | "error" | "critical";
+  category: "session" | "task" | "error" | "cost" | "system";
+  message: string;
+  detail: Record<string, unknown> | null;
+  project_id: string | null;
+  session_id: string | null;
+  created_at: string;
+}
+
 export interface AppState {
   projects: Project[];
   leaders: Record<string, Leader>;

@@ -196,6 +196,18 @@ class SessionHeartbeat:
 
 
 @dataclass
+class AppEvent:
+    id: str
+    level: str  # debug|info|warning|error|critical
+    category: str  # session|task|error|cost|system
+    message: str
+    created_at: str = ""
+    detail: str | None = None  # JSON
+    project_id: str | None = None
+    session_id: str | None = None
+
+
+@dataclass
 class ContextEntry:
     id: str
     project_id: str

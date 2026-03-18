@@ -341,6 +341,22 @@ CREATE TABLE IF NOT EXISTS context_entries (
     updated_at  TEXT NOT NULL,
     UNIQUE(project_id, key)
 );
+
+CREATE TABLE IF NOT EXISTS app_events (
+    id          TEXT PRIMARY KEY,
+    level       TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    message     TEXT NOT NULL,
+    detail      TEXT,
+    project_id  TEXT,
+    session_id  TEXT,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_events_created_at ON app_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_app_events_level ON app_events(level);
+CREATE INDEX IF NOT EXISTS idx_app_events_category ON app_events(category);
+CREATE INDEX IF NOT EXISTS idx_app_events_project_id ON app_events(project_id);
 """
 
 
