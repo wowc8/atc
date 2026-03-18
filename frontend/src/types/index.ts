@@ -184,6 +184,17 @@ export interface AppEvent {
   created_at: string;
 }
 
+export interface FeatureFlag {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  metadata: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AppState {
   projects: Project[];
   leaders: Record<string, Leader>;

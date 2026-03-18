@@ -19,7 +19,14 @@ from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
-from atc.state.models import Leader, Project, Session, SessionHeartbeat, TaskGraph
+from atc.state.models import (
+    FeatureFlag,
+    Leader,
+    Project,
+    Session,
+    SessionHeartbeat,
+    TaskGraph,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator
@@ -357,6 +364,19 @@ CREATE INDEX IF NOT EXISTS idx_app_events_created_at ON app_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_app_events_level ON app_events(level);
 CREATE INDEX IF NOT EXISTS idx_app_events_category ON app_events(category);
 CREATE INDEX IF NOT EXISTS idx_app_events_project_id ON app_events(project_id);
+
+CREATE TABLE IF NOT EXISTS feature_flags (
+    id          TEXT PRIMARY KEY,
+    key         TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    description TEXT,
+    enabled     INTEGER NOT NULL DEFAULT 0,
+    metadata    TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_flags_key ON feature_flags(key);
 """
 
 
@@ -922,3 +942,128 @@ async def deregister_heartbeat(
     )
     await db.commit()
     return cursor.rowcount > 0
+
+# ---------------------------------------------------------------------------
+# Feature flag helpers
+# ---------------------------------------------------------------------------
+
+
+def _flag_from_row(row: aiosqlite.Row) -> FeatureFlag:
+    """Convert a DB row to a FeatureFlag dataclass."""
+    d = dict(row)
+    d["enabled"] = bool(d.get("enabled", 0))
+    return FeatureFlag(**d)
+
+
+async def create_feature_flag(
+    db: aiosqlite.Connection,
+    key: str,
+    name: str,
+    *,
+    description: str | None = None,
+    enabled: bool = False,
+    metadata: str | None = None,
+) -> FeatureFlag:
+    """Insert a new feature flag."""
+    now = _now()
+    flag = FeatureFlag(
+        id=_uuid(),
+        key=key,
+        name=name,
+        description=description,
+        enabled=enabled,
+        metadata=metadata,
+        created_at=now,
+        updated_at=now,
+    )
+    await db.execute(
+        """INSERT INTO feature_flags
+           (id, key, name, description, enabled, metadata, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            flag.id,
+            flag.key,
+            flag.name,
+            flag.description,
+            int(flag.enabled),
+            flag.metadata,
+            flag.created_at,
+            flag.updated_at,
+        ),
+    )
+    await db.commit()
+    return flag
+
+
+async def get_feature_flag(db: aiosqlite.Connection, key: str) -> FeatureFlag | None:
+    """Fetch a feature flag by its unique key."""
+    cursor = await db.execute("SELECT * FROM feature_flags WHERE key = ?", (key,))
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _flag_from_row(row)
+
+
+async def list_feature_flags(db: aiosqlite.Connection) -> list[FeatureFlag]:
+    """Return all feature flags ordered by creation time."""
+    cursor = await db.execute("SELECT * FROM feature_flags ORDER BY created_at ASC")
+    rows = await cursor.fetchall()
+    return [_flag_from_row(r) for r in rows]
+
+
+async def update_feature_flag(
+    db: aiosqlite.Connection,
+    key: str,
+    *,
+    enabled: bool | None = None,
+    name: str | None = None,
+    description: str | None = ...,  # type: ignore[assignment]
+    metadata: str | None = ...,  # type: ignore[assignment]
+) -> FeatureFlag | None:
+    """Update a feature flag. Returns None if not found."""
+    existing = await get_feature_flag(db, key)
+    if existing is None:
+        return None
+
+    sets: list[str] = []
+    params: list[Any] = []
+    if enabled is not None:
+        sets.append("enabled = ?")
+        params.append(int(enabled))
+    if name is not None:
+        sets.append("name = ?")
+        params.append(name)
+    if description is not ...:
+        sets.append("description = ?")
+        params.append(description)
+    if metadata is not ...:
+        sets.append("metadata = ?")
+        params.append(metadata)
+
+    if not sets:
+        return existing
+
+    sets.append("updated_at = ?")
+    params.append(_now())
+    params.append(key)
+
+    await db.execute(
+        f"UPDATE feature_flags SET {', '.join(sets)} WHERE key = ?",
+        params,
+    )
+    await db.commit()
+    return await get_feature_flag(db, key)
+
+
+async def delete_feature_flag(db: aiosqlite.Connection, key: str) -> bool:
+    """Delete a feature flag by key. Returns True if deleted."""
+    cursor = await db.execute("DELETE FROM feature_flags WHERE key = ?", (key,))
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def is_feature_enabled(db: aiosqlite.Connection, key: str) -> bool:
+    """Check if a feature flag is enabled. Returns False if flag doesn't exist."""
+    flag = await get_feature_flag(db, key)
+    return flag.enabled if flag is not None else False
+
