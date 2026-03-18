@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from atc.agents.deploy import AceDeploySpec, deploy_ace_files
 from atc.agents.factory import get_launch_command
+from atc.core.errors import CreationFailedError, SessionNotFoundError, SessionStaleError
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
 from atc.state import db as db_ops
@@ -151,7 +152,7 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
     )
     session = await db_ops.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=500, detail="Session creation failed")
+        raise CreationFailedError(f"Session creation failed for project {project_id}")
     return _session_to_response(session)
 
 
@@ -162,9 +163,9 @@ async def start_ace(session_id: str, body: StartAceRequest, request: Request) ->
     try:
         await ace_ops.start_ace(db, session_id, instruction=body.instruction, event_bus=event_bus)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+        raise SessionNotFoundError(str(e)) from None
     except InvalidTransitionError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        raise SessionStaleError(str(e)) from None
     return {"status": "started"}
 
 
@@ -175,9 +176,9 @@ async def stop_ace(session_id: str, request: Request) -> dict[str, str]:
     try:
         await ace_ops.stop_ace(db, session_id, event_bus=event_bus)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+        raise SessionNotFoundError(str(e)) from None
     except InvalidTransitionError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        raise SessionStaleError(str(e)) from None
     return {"status": "stopped"}
 
 
@@ -195,7 +196,7 @@ async def update_ace_status(
 
     session = await db_ops.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        raise SessionNotFoundError(f"Session {session_id} not found")
 
     try:
         target = SessionStatus(body.status)
@@ -210,7 +211,7 @@ async def update_ace_status(
         await transition(session.id, current, target, event_bus)
         await db_ops.update_session_status(db, session.id, target.value)
     except InvalidTransitionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from None
+        raise SessionStaleError(str(exc)) from None
 
     return {"status": target.value}
 
@@ -230,7 +231,7 @@ async def notify_ace(
 
     session = await db_ops.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        raise SessionNotFoundError(f"Session {session_id} not found")
 
     now = datetime.now(UTC).isoformat()
     await db.execute(
@@ -268,10 +269,10 @@ async def message_ace(
 
     session = await db_ops.get_session(db, session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        raise SessionNotFoundError(f"Session {session_id} not found")
 
     if session.tmux_pane is None:
-        raise HTTPException(status_code=409, detail="Session has no tmux pane")
+        raise SessionStaleError("Session has no tmux pane")
 
     from atc.session.ace import _send_keys
     from atc.session.state_machine import SessionStatus, transition
@@ -295,4 +296,4 @@ async def delete_ace(session_id: str, request: Request) -> None:
     try:
         await ace_ops.destroy_ace(db, session_id, event_bus=event_bus)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+        raise SessionNotFoundError(str(e)) from None
