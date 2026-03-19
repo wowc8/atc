@@ -91,7 +91,7 @@ async def _spawn_pane(
     'no space for new pane' error that occurs when the terminal is small
     or headless (PTY output streams to the frontend xterm.js panel).
     """
-    args = ["new-window", "-t", session_name, "-d", "-P", "-F", "#{pane_id}"]
+    args = ["new-window", "-a", "-t", session_name, "-d", "-P", "-F", "#{pane_id}"]
     if working_dir:
         args.extend(["-c", working_dir])
     if command:

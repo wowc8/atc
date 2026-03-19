@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
     _ensure_tmux_session,
@@ -68,9 +69,7 @@ async def reconnect_session(
             # disconnected → idle not directly valid; go through connecting
             if current == SessionStatus.DISCONNECTED:
                 await transition(session_id, current, SessionStatus.CONNECTING, event_bus)
-                await db_ops.update_session_status(
-                    conn, session_id, SessionStatus.CONNECTING.value
-                )
+                await db_ops.update_session_status(conn, session_id, SessionStatus.CONNECTING.value)
                 current = SessionStatus.CONNECTING
             await transition(session_id, current, target, event_bus)
             await db_ops.update_session_status(conn, session_id, target.value)
@@ -82,7 +81,9 @@ async def reconnect_session(
     # Mark as connecting
     if current != SessionStatus.CONNECTING:
         if current in (
-            SessionStatus.DISCONNECTED, SessionStatus.IDLE, SessionStatus.ERROR,
+            SessionStatus.DISCONNECTED,
+            SessionStatus.IDLE,
+            SessionStatus.ERROR,
         ):
             await transition(session_id, current, SessionStatus.CONNECTING, event_bus)
         else:
@@ -100,8 +101,22 @@ async def reconnect_session(
         await db_ops.update_session_status(conn, session_id, SessionStatus.CONNECTING.value)
 
     try:
+        # Look up the project's agent provider to get the correct launch command
+        launch_cmd: str | None = None
+        working_dir: str | None = None
+        if session.project_id:
+            project = await db_ops.get_project(conn, session.project_id)
+            if project:
+                provider = project.agent_provider or "claude_code"
+                launch_cmd = get_launch_command(provider)
+                working_dir = project.repo_path
+
         await _ensure_tmux_session(ATC_TMUX_SESSION)
-        pane_id = await _spawn_pane(ATC_TMUX_SESSION)
+        pane_id = await _spawn_pane(
+            ATC_TMUX_SESSION,
+            launch_cmd,
+            working_dir=working_dir,
+        )
         await db_ops.update_session_tmux(conn, session_id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session_id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
