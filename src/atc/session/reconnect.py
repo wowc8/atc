@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from atc.agents.deploy import TowerDeploySpec, deploy_tower_files
 from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
@@ -104,12 +105,27 @@ async def reconnect_session(
         # Look up the project's agent provider to get the correct launch command
         launch_cmd: str | None = None
         working_dir: str | None = None
+        project = None
         if session.project_id:
             project = await db_ops.get_project(conn, session.project_id)
             if project:
                 provider = project.agent_provider or "claude_code"
                 launch_cmd = get_launch_command(provider)
                 working_dir = project.repo_path
+
+        # Tower sessions need their identity files (CLAUDE.md, settings)
+        # re-deployed so Claude Code picks up the Tower role on respawn.
+        if getattr(session, "session_type", None) == "tower" and project:
+            spec = TowerDeploySpec(
+                session_id=session_id,
+                project_name=project.name if project else "",
+                project_id=session.project_id,
+                repo_path=working_dir,
+                github_repo=project.github_repo if project else None,
+            )
+            deployed = deploy_tower_files(spec)
+            working_dir = str(deployed.root)
+            logger.info("Re-deployed tower config for %s → %s", session_id, deployed.root)
 
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(
