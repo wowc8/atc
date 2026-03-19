@@ -38,7 +38,7 @@ export default function TowerConsole() {
     ? `terminal:${towerDetail.current_session_id}`
     : undefined;
 
-  const { attachRef } = useTerminal({
+  const { attachRef, sendInput } = useTerminal({
     channel: terminalChannel,
     enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
@@ -98,16 +98,12 @@ export default function TowerConsole() {
     }
   }
 
-  async function handleSendMessage(e: React.FormEvent) {
+  function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!message.trim()) return;
-    try {
-      await api.post("/tower/message", { message: message.trim() });
-      setMessage("");
-      messageInputRef.current?.focus();
-    } catch (err) {
-      console.error("Failed to send message:", err);
-    }
+    sendInput(message.trim());
+    setMessage("");
+    messageInputRef.current?.focus();
   }
 
   const statusLabel = brainStatus.status ?? towerDetail.state;

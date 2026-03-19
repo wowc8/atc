@@ -22,6 +22,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const cleanedUpRef = useRef(false);
 
   // Create terminal once
   useEffect(() => {
@@ -80,7 +81,10 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   useEffect(() => {
     if (!enabled || !channel) return;
 
+    cleanedUpRef.current = false;
+
     function connect() {
+      if (cleanedUpRef.current) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
       wsRef.current = ws;
@@ -103,7 +107,9 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       };
 
       ws.onclose = () => {
-        reconnectRef.current = setTimeout(connect, 3000);
+        if (!cleanedUpRef.current) {
+          reconnectRef.current = setTimeout(connect, 3000);
+        }
       };
 
       ws.onerror = () => ws.close();
@@ -112,6 +118,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     connect();
 
     return () => {
+      cleanedUpRef.current = true;
       clearTimeout(reconnectRef.current);
       wsRef.current?.close();
       wsRef.current = null;
@@ -134,11 +141,17 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     return () => disposable.dispose();
   }, [channel, enabled]);
 
-  // Ref callback for container div
+  // Ref callback for container div — handles initial open and re-attach
+  // after the container is re-mounted (e.g. minimize → restore).
   const attachRef = useCallback((el: HTMLDivElement | null) => {
     containerRef.current = el;
-    if (el && termRef.current && !termRef.current.element) {
-      termRef.current.open(el);
+    if (el && termRef.current) {
+      const term = termRef.current;
+      // If the terminal's element is missing or is a detached DOM node,
+      // re-open on the new container.
+      if (!term.element || !el.contains(term.element)) {
+        term.open(el);
+      }
       // Delay fit to ensure container has dimensions
       requestAnimationFrame(() => fitRef.current?.fit());
     }
@@ -152,5 +165,16 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     fitRef.current?.fit();
   }, []);
 
-  return { attachRef, terminal: termRef, writeLine, fit };
+  /** Send text + Enter to the terminal's PTY via WebSocket. */
+  const sendInput = useCallback(
+    (text: string) => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN && channel) {
+        ws.send(JSON.stringify({ channel, data: text + "\r" }));
+      }
+    },
+    [channel],
+  );
+
+  return { attachRef, terminal: termRef, writeLine, fit, sendInput };
 }
