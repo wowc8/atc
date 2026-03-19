@@ -104,9 +104,11 @@ async def start_tower_session(
         deployed = deploy_tower_files(spec)
         logger.info("Deployed tower config for %s → %s", session.id, deployed.root)
 
-        # Use repo path if available, otherwise the deployed config directory
-        if not working_dir:
-            working_dir = str(deployed.root)
+        # Always use the staging directory so Claude Code finds the deployed
+        # CLAUDE.md (Tower identity) and .claude/settings.json (hooks, model).
+        # Tower never writes code directly — it delegates through Leaders —
+        # so it doesn't need to start in the repo directory.
+        working_dir = str(deployed.root)
 
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(

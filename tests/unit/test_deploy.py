@@ -384,7 +384,14 @@ class TestDeployTowerFiles:
         content = result.claude_md_path.read_text()
         assert "acme/phoenix" in content
 
-    def test_no_github_repo_omits_section(self, staging_root: Path) -> None:
+    def test_claude_md_includes_repo_path(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "/home/user/phoenix" in content
+
+    def test_no_repo_info_omits_section(self, staging_root: Path) -> None:
         spec = TowerDeploySpec(
             session_id="tower-002",
             project_name="Test",

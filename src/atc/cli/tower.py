@@ -30,15 +30,6 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     )
     status_parser.set_defaults(handler=_handle_status)
 
-    # atc tower goal <project_id> <goal>
-    goal_parser = tower_sub.add_parser("goal", help="Submit a goal to the Tower")
-    goal_parser.add_argument("project_id", help="Project UUID")
-    goal_parser.add_argument("goal", help="Goal description")
-    goal_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
-    )
-    goal_parser.set_defaults(handler=_handle_goal)
-
     # atc tower cancel
     cancel_parser = tower_sub.add_parser("cancel", help="Cancel the current goal")
     cancel_parser.add_argument(
@@ -97,12 +88,6 @@ def _post_json(url: str, payload: dict) -> int:
 def _handle_status(args: argparse.Namespace) -> int:
     return _get_json(f"{args.api}/api/tower/status")
 
-
-def _handle_goal(args: argparse.Namespace) -> int:
-    return _post_json(
-        f"{args.api}/api/tower/goal",
-        {"project_id": args.project_id, "goal": args.goal},
-    )
 
 
 def _handle_cancel(args: argparse.Namespace) -> int:
