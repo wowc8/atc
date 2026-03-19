@@ -39,33 +39,12 @@ export default function TaskBoard({
     await onRefresh();
   }, [projectId, newTitle, onRefresh]);
 
-  const handleStatusChange = useCallback(
-    async (taskGraphId: string, newStatus: string) => {
-      await api.patch(`/task-graphs/${taskGraphId}/status`, {
-        status: newStatus,
-      });
-      await onRefresh();
-    },
-    [onRefresh],
-  );
-
-  const handleDelete = useCallback(
-    async (taskGraphId: string) => {
-      await api.delete(`/task-graphs/${taskGraphId}`);
-      await onRefresh();
-    },
-    [onRefresh],
-  );
-
   return (
     <div className="task-board" data-testid="task-board">
       <div className="task-board__header">
         <h3>Tasks</h3>
         <div className="task-board__controls">
-          <div
-            className="task-board__view-toggle"
-            data-testid="view-toggle"
-          >
+          <div className="task-board__view-toggle" data-testid="view-toggle">
             <button
               className={`btn btn-sm ${viewMode === "kanban" ? "btn-primary" : ""}`}
               onClick={() => setViewMode("kanban")}
@@ -130,17 +109,9 @@ export default function TaskBoard({
       {taskGraphs.length === 0 && !creating ? (
         <p className="task-board__empty">No tasks yet.</p>
       ) : viewMode === "kanban" ? (
-        <KanbanView
-          taskGraphs={taskGraphs}
-          onStatusChange={handleStatusChange}
-          onDelete={handleDelete}
-        />
+        <KanbanView taskGraphs={taskGraphs} />
       ) : (
-        <TableView
-          taskGraphs={taskGraphs}
-          onStatusChange={handleStatusChange}
-          onDelete={handleDelete}
-        />
+        <TableView taskGraphs={taskGraphs} />
       )}
     </div>
   );
@@ -152,11 +123,9 @@ export default function TaskBoard({
 
 interface ViewProps {
   taskGraphs: TaskGraph[];
-  onStatusChange: (id: string, status: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
 }
 
-function KanbanView({ taskGraphs, onStatusChange, onDelete }: ViewProps) {
+function KanbanView({ taskGraphs }: ViewProps) {
   return (
     <div className="task-board__grid" data-testid="kanban-view">
       {COLUMNS.map((col) => {
@@ -168,12 +137,7 @@ function KanbanView({ taskGraphs, onStatusChange, onDelete }: ViewProps) {
               <span className="task-board__col-count">{colTasks.length}</span>
             </h4>
             {colTasks.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                onStatusChange={onStatusChange}
-                onDelete={onDelete}
-              />
+              <TaskCard key={task.id} task={task} />
             ))}
           </div>
         );
@@ -186,7 +150,7 @@ function KanbanView({ taskGraphs, onStatusChange, onDelete }: ViewProps) {
 // Table View
 // ---------------------------------------------------------------------------
 
-function TableView({ taskGraphs, onStatusChange, onDelete }: ViewProps) {
+function TableView({ taskGraphs }: ViewProps) {
   return (
     <div className="task-board__table-wrap" data-testid="table-view">
       <table className="task-board__table">
@@ -195,7 +159,6 @@ function TableView({ taskGraphs, onStatusChange, onDelete }: ViewProps) {
             <th>Title</th>
             <th>Status</th>
             <th>Assignee</th>
-            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -221,40 +184,6 @@ function TableView({ taskGraphs, onStatusChange, onDelete }: ViewProps) {
                   <span className="task-board__unassigned">—</span>
                 )}
               </td>
-              <td>
-                <div className="task-board__table-actions">
-                  {task.status !== "in_progress" && (
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => void onStatusChange(task.id, "in_progress")}
-                    >
-                      Start
-                    </button>
-                  )}
-                  {task.status !== "done" && (
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => void onStatusChange(task.id, "done")}
-                    >
-                      Done
-                    </button>
-                  )}
-                  {task.status === "done" && (
-                    <button
-                      className="btn btn-sm"
-                      onClick={() => void onStatusChange(task.id, "todo")}
-                    >
-                      Reopen
-                    </button>
-                  )}
-                  <button
-                    className="btn btn-sm btn-danger"
-                    onClick={() => void onDelete(task.id)}
-                  >
-                    Del
-                  </button>
-                </div>
-              </td>
             </tr>
           ))}
         </tbody>
@@ -267,13 +196,7 @@ function TableView({ taskGraphs, onStatusChange, onDelete }: ViewProps) {
 // Task Card (Kanban)
 // ---------------------------------------------------------------------------
 
-interface TaskCardProps {
-  task: TaskGraph;
-  onStatusChange: (id: string, status: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-}
-
-function TaskCard({ task, onStatusChange, onDelete }: TaskCardProps) {
+function TaskCard({ task }: { task: TaskGraph }) {
   return (
     <div className="task-board__card" data-testid="task-card">
       <div className="task-board__card-title">{task.title}</div>
@@ -292,38 +215,6 @@ function TaskCard({ task, onStatusChange, onDelete }: TaskCardProps) {
             : task.description}
         </p>
       )}
-      <div className="task-board__card-actions">
-        {task.status === "todo" && (
-          <button
-            className="btn btn-sm"
-            onClick={() => void onStatusChange(task.id, "in_progress")}
-          >
-            Start
-          </button>
-        )}
-        {task.status === "in_progress" && (
-          <button
-            className="btn btn-sm"
-            onClick={() => void onStatusChange(task.id, "done")}
-          >
-            Done
-          </button>
-        )}
-        {task.status === "done" && (
-          <button
-            className="btn btn-sm"
-            onClick={() => void onStatusChange(task.id, "todo")}
-          >
-            Reopen
-          </button>
-        )}
-        <button
-          className="btn btn-sm btn-danger"
-          onClick={() => void onDelete(task.id)}
-        >
-          Del
-        </button>
-      </div>
     </div>
   );
 }

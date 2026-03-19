@@ -97,12 +97,6 @@
   line-height: 1.4;
 }
 
-.task-board__card-actions {
-  display: flex;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-}
-
 /* Create form */
 .task-board__create-form {
   display: flex;
@@ -176,9 +170,4 @@
   color: var(--color-text-muted);
   display: block;
   margin-top: 2px;
-}
-
-.task-board__table-actions {
-  display: flex;
-  gap: var(--space-1);
 }
