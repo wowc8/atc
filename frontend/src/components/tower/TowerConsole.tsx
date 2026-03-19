@@ -22,6 +22,7 @@ export default function TowerConsole() {
   const [message, setMessage] = useState("");
   const messageInputRef = useRef<HTMLInputElement>(null);
   const autoStarted = useRef(false);
+  const userStopped = useRef(false);
 
   const isRunning =
     towerDetail.state === "planning" || towerDetail.state === "managing";
@@ -48,9 +49,10 @@ export default function TowerConsole() {
     if (activeProject) setProjectId(activeProject.id);
   }
 
-  // Auto-start for claude_code provider on app load
+  // Auto-start for claude_code provider on app load.
+  // Respects userStopped ref to prevent re-starting after manual Stop.
   useEffect(() => {
-    if (isClaudeCode && isIdle && !loading && !autoStarted.current && projectId) {
+    if (isClaudeCode && isIdle && !loading && !autoStarted.current && !userStopped.current && projectId) {
       autoStarted.current = true;
       void handleStart();
     }
@@ -58,6 +60,7 @@ export default function TowerConsole() {
 
   async function handleStart() {
     if (!projectId) return;
+    userStopped.current = false;
     setLoading(true);
     try {
       if (isClaudeCode) {
@@ -93,10 +96,12 @@ export default function TowerConsole() {
   }
 
   async function handleStop() {
+    // Set userStopped BEFORE any state changes to prevent the auto-start
+    // useEffect from firing during the async gap or re-render.
+    userStopped.current = true;
     setLoading(true);
     try {
       await api.post("/tower/stop");
-      autoStarted.current = true;
       dispatch({
         type: "SET_TOWER_DETAIL",
         payload: {
@@ -108,6 +113,7 @@ export default function TowerConsole() {
       });
     } catch (err) {
       console.error("Failed to stop Tower:", err);
+      userStopped.current = false;
     } finally {
       setLoading(false);
     }

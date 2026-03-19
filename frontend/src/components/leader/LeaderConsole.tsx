@@ -26,6 +26,7 @@ export default function LeaderConsole({
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const autoStarted = useRef(false);
+  const userStopped = useRef(false);
 
   const isClaudeCode = project?.agent_provider === "claude_code";
 
@@ -43,15 +44,17 @@ export default function LeaderConsole({
     enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
 
-  // Auto-start for claude_code provider when viewing a project
+  // Auto-start for claude_code provider when viewing a project.
+  // Respects userStopped ref to prevent re-starting after manual Stop.
   useEffect(() => {
-    if (isClaudeCode && isIdle && !loading && !autoStarted.current && leader) {
+    if (isClaudeCode && isIdle && !loading && !autoStarted.current && !userStopped.current && leader) {
       autoStarted.current = true;
       void handleStart();
     }
   }, [isClaudeCode, isIdle, loading, leader]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
+    userStopped.current = false;
     setLoading(true);
     setError(null);
     try {
@@ -91,6 +94,9 @@ export default function LeaderConsole({
   }
 
   async function handleStop() {
+    // Set userStopped BEFORE any state changes to prevent the auto-start
+    // useEffect from firing during the async gap or re-render.
+    userStopped.current = true;
     setLoading(true);
     try {
       await api.post(`/projects/${projectId}/leader/stop`);
@@ -106,6 +112,7 @@ export default function LeaderConsole({
       await onRefresh();
     } catch (err) {
       console.error("Failed to stop leader:", err);
+      userStopped.current = false;
     } finally {
       setLoading(false);
     }
