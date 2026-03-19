@@ -165,7 +165,9 @@ class TestTowerToLeaderWiring:
         args, kwargs = mock_spawn.call_args
         assert args[0] == "atc"  # tmux session name
         assert args[1] == get_launch_command("claude_code")
-        assert kwargs.get("working_dir") == "/tmp/repo"
+        # Leader now always uses the deploy staging directory so Claude Code
+        # finds the deployed CLAUDE.md (Leader role/goal instructions).
+        assert kwargs.get("working_dir") == "/tmp/atc-agents/leader-1"
 
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
     @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)

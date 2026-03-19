@@ -254,6 +254,7 @@ async def create_ace(
     event_bus: EventBus | None = None,
     working_dir: str | None = None,
     launch_command: str | None = None,
+    deploy_spec_kwargs: dict | None = None,
 ) -> str:
     """Create an ace session (DB-first). Returns the session id.
 
@@ -264,6 +265,8 @@ async def create_ace(
         working_dir: Working directory for the tmux pane (e.g. the repo path).
         launch_command: Shell command to run in the pane (e.g. ``claude``).
             When provided, the pane launches this command instead of a bare shell.
+        deploy_spec_kwargs: If provided, deploy Ace config files (CLAUDE.md,
+            hooks, settings.json) using the real session_id after DB creation.
     """
     # Step 1: DB row first — guarantees the UI always sees every entity
     session = await db_ops.create_session(
@@ -275,6 +278,22 @@ async def create_ace(
         host=host,
         status=SessionStatus.CONNECTING.value,
     )
+
+    # Step 1b: Deploy config files with the real session_id so hooks,
+    # CLAUDE.md, and heartbeat all reference the correct ID.
+    effective_working_dir = working_dir
+    if deploy_spec_kwargs is not None:
+        from atc.agents.deploy import AceDeploySpec, deploy_ace_files
+
+        spec = AceDeploySpec(
+            session_id=session.id,
+            **deploy_spec_kwargs,
+        )
+        deployed = deploy_ace_files(spec)
+        # Use the staging directory as working_dir so Claude Code finds
+        # the deployed CLAUDE.md and .claude/settings.json (hooks, model).
+        # The Ace can still access the repo via the repo_path in CLAUDE.md.
+        effective_working_dir = str(deployed.root)
 
     # Step 2: publish creation event — UI shows it immediately
     if event_bus:
@@ -289,7 +308,7 @@ async def create_ace(
         pane_id = await _spawn_pane(
             ATC_TMUX_SESSION,
             launch_command,
-            working_dir=working_dir,
+            working_dir=effective_working_dir,
         )
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
