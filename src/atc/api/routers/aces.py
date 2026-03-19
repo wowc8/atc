@@ -18,7 +18,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from atc.agents.deploy import AceDeploySpec, deploy_ace_files
 from atc.agents.factory import get_launch_command
 from atc.core.errors import CreationFailedError, SessionNotFoundError, SessionStaleError
 from atc.session import ace as ace_ops
@@ -123,21 +122,6 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
-    # Deploy config files so the Ace gets CLAUDE.md + hooks
-    import uuid
-
-    preview_id = str(uuid.uuid4())
-    spec = AceDeploySpec(
-        session_id=preview_id,
-        project_name=project.name,
-        task_title=body.task_title or body.name,
-        task_description=body.task_description,
-        repo_path=project.repo_path,
-        github_repo=project.github_repo,
-    )
-    deployed = deploy_ace_files(spec)
-    working_dir = project.repo_path or str(deployed.root)
-
     launch_cmd = get_launch_command(project.agent_provider)
 
     try:
@@ -148,8 +132,16 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
             task_id=body.task_id,
             host=body.host,
             event_bus=event_bus,
-            working_dir=working_dir,
+            working_dir=project.repo_path,
             launch_command=launch_cmd,
+            # Pass deploy info so create_ace can deploy with the real session_id
+            deploy_spec_kwargs={
+                "project_name": project.name,
+                "task_title": body.task_title or body.name,
+                "task_description": body.task_description,
+                "repo_path": project.repo_path,
+                "github_repo": project.github_repo,
+            },
         )
     except RuntimeError as exc:
         raise CreationFailedError(str(exc)) from None

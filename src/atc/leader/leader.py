@@ -117,15 +117,19 @@ async def start_leader(
             github_repo=ctx.get("github_repo") or (project.github_repo if project else None),
             context_entries=ctx.get("context_entries"),
         )
+        # Pass the real session_id so hooks reference the correct ID
+        spec.session_id = session.id
         deployed = deploy_manager_files(spec)
         logger.info(
-            "Deployed manager config for leader %s → %s",
+            "Deployed manager config for leader %s (session %s) → %s",
             leader.id,
+            session.id,
             deployed.root,
         )
 
-        # Spawn tmux pane in the repo working directory, running claude
-        working_dir = spec.repo_path or str(deployed.root)
+        # Use the staging directory so Claude Code finds the deployed
+        # CLAUDE.md (Leader role/goal) and .claude/settings.json (hooks, model).
+        working_dir = str(deployed.root)
 
         launch_cmd = get_launch_command(
             project.agent_provider if project else "claude_code",

@@ -180,6 +180,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 7. Reconnect sessions that were active at last shutdown
     from atc.session.reconnect import reconnect_all
+    from atc.state import db as db_ops
 
     try:
         results = await reconnect_all(db, event_bus=event_bus)
@@ -188,6 +189,64 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.info("Reconnected %d/%d sessions on startup", ok, len(results))
     except Exception:
         logger.exception("Session reconnection failed on startup")
+
+    # 7b. Start PTY readers for all reconnected sessions that have live panes
+    # (the event-driven auto-start may have missed sessions that were already idle)
+    try:
+        all_sessions = await db_ops.list_active_sessions(db)
+        for sess in all_sessions:
+            if sess.tmux_pane and pty_pool.get_reader(sess.id) is None:
+                logger.info(
+                    "Starting PTY reader for reconnected session %s (pane %s)",
+                    sess.id,
+                    sess.tmux_pane,
+                )
+                await pty_pool.add_session(sess.id, sess.tmux_pane)
+    except Exception:
+        logger.exception("Failed to start PTY readers for reconnected sessions")
+
+    # 8. Restore TowerController state from DB so existing tower sessions
+    # survive server restarts without the frontend needing to re-create them.
+    from atc.tower.controller import TowerState
+
+    try:
+        projects = await db_ops.list_projects(db)
+        restored = False
+        for proj in projects:
+            if restored:
+                break
+            tower_sessions = await db_ops.list_sessions(
+                db, project_id=proj.id, session_type="tower"
+            )
+            for ts in tower_sessions:
+                if ts.status not in ("error", "disconnected") and ts.tmux_pane:
+                    tower_controller._current_project_id = proj.id
+                    tower_controller._current_session_id = ts.id
+                    tower_controller._state = TowerState.MANAGING
+                    logger.info(
+                        "Restored TowerController state: project=%s session=%s",
+                        proj.id,
+                        ts.id,
+                    )
+                    # Also check for a leader session
+                    leader = await db_ops.get_leader_by_project(db, proj.id)
+                    if leader and leader.session_id:
+                        leader_session = await db_ops.get_session(db, leader.session_id)
+                        if leader_session and leader_session.status not in (
+                            "error",
+                            "disconnected",
+                        ):
+                            tower_controller._leader_session_id = leader.session_id
+                            tower_controller._current_goal = leader.goal
+                            logger.info(
+                                "Restored leader session=%s goal=%s",
+                                leader.session_id,
+                                leader.goal,
+                            )
+                    restored = True
+                    break
+    except Exception:
+        logger.exception("Failed to restore TowerController state from DB")
 
     logger.info("ATC startup complete")
     yield

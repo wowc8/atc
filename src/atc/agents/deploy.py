@@ -73,6 +73,7 @@ class ManagerDeploySpec:
     leader_id: str
     project_name: str
     goal: str
+    session_id: str | None = None  # actual session_id for hooks
     repo_path: str | None = None
     github_repo: str | None = None
     api_base_url: str = "http://127.0.0.1:8420"
@@ -527,9 +528,12 @@ def _ace_hook_scripts(spec: AceDeploySpec) -> list[HookConfig]:
 
 def _manager_hook_scripts(spec: ManagerDeploySpec) -> list[HookConfig]:
     """Build the hook shell scripts for a Manager session."""
+    # Use the actual session_id for hooks (not leader_id) so that
+    # /api/aces/{session_id}/status and /api/heartbeat/{session_id} resolve correctly.
+    hook_session_id = spec.session_id or spec.leader_id
     header = _STATUS_HOOK_TEMPLATE.format(
         api_base_url=spec.api_base_url,
-        session_id=spec.leader_id,
+        session_id=hook_session_id,
     )
     return [
         HookConfig(event="PostToolUse", command=header + _POST_TOOL_USE_BODY),
@@ -546,6 +550,7 @@ def _ace_hooks(spec: AceDeploySpec) -> dict[str, list[dict[str, Any]]]:
 
 def _manager_hooks(spec: ManagerDeploySpec) -> dict[str, list[dict[str, Any]]]:
     """Build the hooks section for .claude/settings.json (Manager)."""
+    # The deploy root uses leader_id as the directory name (see deploy_manager_files)
     hooks_dir = f"/tmp/atc-agents/{spec.leader_id}/.claude/hooks"
     return _hooks_dict(hooks_dir)
 
