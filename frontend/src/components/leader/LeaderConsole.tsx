@@ -94,6 +94,7 @@ export default function LeaderConsole({
     setLoading(true);
     try {
       await api.post(`/projects/${projectId}/leader/stop`);
+      autoStarted.current = true;
       // Optimistically update leader status to idle
       if (leader) {
         const updatedLeaders = {
