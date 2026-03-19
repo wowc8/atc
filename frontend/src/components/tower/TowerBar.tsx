@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
 import LogViewer from "./LogViewer";
+import SettingsPane from "./SettingsPane";
 import "./TowerBar.css";
 
 function StatusDot({ status }: { status: string }) {
@@ -26,6 +27,7 @@ export default function TowerBar() {
   const { state } = useAppContext();
   const { brainStatus, usage, notifications, projects, failureLogs } = state;
   const [logViewerOpen, setLogViewerOpen] = useState(false);
+  const [settingsPaneOpen, setSettingsPaneOpen] = useState(false);
 
   const activeProjects = projects.filter((p) => p.status === "active").length;
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -62,12 +64,6 @@ export default function TowerBar() {
             onClick={() => navigate("/usage")}
           >
             Usage
-          </button>
-          <button
-            className={`tower-bar__nav-item ${isActive("/settings") ? "active" : ""}`}
-            onClick={() => navigate("/settings")}
-          >
-            Settings
           </button>
         </nav>
 
@@ -117,11 +113,9 @@ export default function TowerBar() {
           </button>
 
           <button
-            className={`tower-bar__icon-btn ${isActive("/settings") ? "active" : ""}`}
+            className={`tower-bar__icon-btn ${settingsPaneOpen ? "active" : ""}`}
             data-testid="settings-button"
-            onClick={() =>
-              isActive("/settings") ? navigate("/dashboard") : navigate("/settings")
-            }
+            onClick={() => setSettingsPaneOpen((prev) => !prev)}
             title="Settings"
           >
             <SettingsIcon />
@@ -130,6 +124,7 @@ export default function TowerBar() {
       </header>
 
       {logViewerOpen && <LogViewer onClose={() => setLogViewerOpen(false)} />}
+      {settingsPaneOpen && <SettingsPane onClose={() => setSettingsPaneOpen(false)} />}
     </>
   );
 }

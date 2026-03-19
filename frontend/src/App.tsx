@@ -6,7 +6,6 @@ import UpdateBanner from "./components/common/UpdateBanner";
 import { useUpdater } from "./hooks/useUpdater";
 import Dashboard from "./pages/Dashboard";
 import ProjectView from "./pages/ProjectView";
-import SettingsPage from "./pages/SettingsPage";
 import UsagePage from "./pages/UsagePage";
 
 function Layout() {
@@ -42,7 +41,6 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/projects/:id" element={<ProjectView />} />
-            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/usage" element={<UsagePage />} />
           </Route>
         </Routes>
