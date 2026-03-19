@@ -17,6 +17,7 @@ from atc.session.ace import (
     ATC_TMUX_SESSION,
     _ensure_tmux_session,
     _kill_pane,
+    _pane_is_alive,
     _send_keys,
     _spawn_pane,
 )
@@ -46,11 +47,31 @@ async def start_tower_session(
     project = await db_ops.get_project(conn, project_id)
     name = f"tower-{project.name}" if project else f"tower-{project_id[:8]}"
 
-    # Check for existing tower session
+    # Check for existing tower session — validate tmux pane is actually alive
     existing = await db_ops.list_sessions(conn, project_id=project_id, session_type="tower")
     for sess in existing:
-        if sess.status not in (SessionStatus.ERROR.value, SessionStatus.DISCONNECTED.value):
+        if sess.status in (SessionStatus.ERROR.value, SessionStatus.DISCONNECTED.value):
+            continue
+        # Verify the tmux pane is still alive; stale sessions from a previous
+        # app run may have a non-terminal DB status but a dead pane.
+        if sess.tmux_pane and await _pane_is_alive(sess.tmux_pane):
             return sess.id
+        # Pane is dead or missing — mark session as disconnected so we create fresh
+        logger.warning(
+            "Tower session %s has dead/missing tmux pane %s — discarding",
+            sess.id,
+            sess.tmux_pane,
+        )
+        await db_ops.update_session_status(conn, sess.id, SessionStatus.DISCONNECTED.value)
+        if event_bus:
+            await event_bus.publish(
+                "session_status_changed",
+                {
+                    "session_id": sess.id,
+                    "previous_status": sess.status,
+                    "new_status": SessionStatus.DISCONNECTED.value,
+                },
+            )
 
     session = await db_ops.create_session(
         conn,
