@@ -84,6 +84,20 @@ class ManagerDeploySpec:
     budget_ceiling_usd: float | None = None
 
 
+@dataclass
+class TowerDeploySpec:
+    """Everything needed to deploy a Tower session's config files."""
+
+    session_id: str
+    project_name: str
+    project_id: str
+    repo_path: str | None = None
+    github_repo: str | None = None
+    api_base_url: str = "http://127.0.0.1:8420"
+    model: str = "opus"
+    allowed_commands: list[str] = field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -173,6 +187,48 @@ def deploy_manager_files(
     return DeployedFiles(root=root, files=written)
 
 
+def deploy_tower_files(
+    spec: TowerDeploySpec,
+    *,
+    staging_root: Path | None = None,
+) -> DeployedFiles:
+    """Write CLAUDE.md, .claude/settings.json, and hooks for a Tower session.
+
+    Args:
+        spec: Deployment specification for the Tower.
+        staging_root: Override the staging root directory (default: /tmp/atc-agents).
+
+    Returns:
+        DeployedFiles with the root directory and list of all written file paths.
+    """
+    root = (staging_root or _DEFAULT_STAGING_ROOT) / spec.session_id
+    written: list[str] = []
+
+    # CLAUDE.md
+    claude_md = _build_tower_claude_md(spec)
+    written.append(_write_file(root / "CLAUDE.md", claude_md))
+
+    # .claude/settings.json
+    settings = _build_settings(
+        model=spec.model,
+        allowed_commands=_tower_allowed_commands(spec),
+        hooks=_tower_hooks(spec),
+    )
+    written.append(_write_file(root / ".claude" / "settings.json", json.dumps(settings, indent=2)))
+
+    # Hook scripts
+    for hook in _tower_hook_scripts(spec):
+        path = root / ".claude" / "hooks" / f"{hook.event}.sh"
+        written.append(_write_executable(path, hook.command))
+
+    # Manifest
+    manifest = {"session_id": spec.session_id, "session_type": "tower", "files": written}
+    written.append(_write_file(root / ".manifest.json", json.dumps(manifest, indent=2)))
+
+    logger.info("Deployed tower files for %s → %s (%d files)", spec.session_id, root, len(written))
+    return DeployedFiles(root=root, files=written)
+
+
 def cleanup_deployed_files(root: Path) -> None:
     """Remove all files listed in a deployment manifest, then the directory tree.
 
@@ -207,6 +263,23 @@ def _build_ace_claude_md(spec: AceDeploySpec) -> str:
         f"# {spec.project_name} — Ace Session",
         "",
         f"Session ID: `{spec.session_id}`",
+        "",
+        "## Role",
+        "",
+        "You are an **Ace** — an expert developer in the ATC agent hierarchy.",
+        "You receive a single task from your Leader and own it end-to-end:",
+        "",
+        "- **Design** the solution before writing code.",
+        "- **Implement** clean, production-quality code that follows project conventions.",
+        "- **Write tests** that cover the critical paths and edge cases.",
+        "- **Run tests** and fix failures — do not move on until all tests pass.",
+        "- **Self-review** your diff for bugs, security issues, and style.",
+        "- **Iterate** until the code is solid and CI-ready.",
+        "- **Create a PR** with a clear description: what, why, how tested.",
+        "",
+        "Never move on to the next step until the current one is done right.",
+        "Never ask the Leader for help you can figure out yourself.",
+        "When blocked on something outside your control, report it immediately.",
         "",
         "## Task",
         "",
@@ -262,6 +335,22 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
         "",
         f"Leader ID: `{spec.leader_id}`",
         "",
+        "## Role",
+        "",
+        "You are a **Leader** — a project manager in the ATC agent hierarchy.",
+        "You receive a goal from Tower and are responsible for delivering it:",
+        "",
+        "- **Plan** — decompose the goal into well-scoped tasks with acceptance criteria.",
+        "- **Create Aces** — spin up Ace sessions and assign one task each.",
+        "- **Monitor** — track Ace progress, unblock them, reassign if needed.",
+        "- **Review** — inspect Ace output to ensure quality before marking done.",
+        "- **Coordinate** — manage dependencies between tasks so Aces don't conflict.",
+        "- **Report** — keep Tower informed of milestone progress and blockers.",
+        "",
+        "You never write code directly — always delegate implementation to Aces.",
+        "You own the task graph: create it, maintain it, and drive it to completion.",
+        "When all tasks are done and verified, report completion to Tower.",
+        "",
         "## Goal",
         "",
         spec.goal,
@@ -312,6 +401,44 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
             "",
         ]
     )
+
+    if spec.github_repo:
+        lines.extend(
+            [
+                "## Repository",
+                "",
+                f"GitHub: `{spec.github_repo}`",
+                "",
+            ]
+        )
+
+    return "\n".join(lines)
+
+
+def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
+    """Build the CLAUDE.md content for a Tower session."""
+    lines = [
+        f"# {spec.project_name} — Tower Session",
+        "",
+        f"Session ID: `{spec.session_id}`",
+        f"Project ID: `{spec.project_id}`",
+        "",
+        "## Role",
+        "",
+        "You are **Tower** — the top-level orchestrator in the ATC agent hierarchy.",
+        "You talk directly to the user, understand their vision, and turn it into action:",
+        "",
+        "- **Listen** — understand the user's goal and ask clarifying questions when needed.",
+        "- **Plan** — break the goal into projects and high-level milestones.",
+        "- **Delegate** — spin up Leaders and provide them with goals and context.",
+        "- **Monitor** — track Leader progress and intervene when off track.",
+        "- **Communicate** — keep the user informed and ask for decisions.",
+        "",
+        "You never write code directly — always delegate through Leaders.",
+        "You never manage individual tasks — that is the Leader's job.",
+        "You are the single point of contact between the user and the agent hierarchy.",
+        "",
+    ]
 
     if spec.github_repo:
         lines.extend(
@@ -424,6 +551,25 @@ def _manager_hooks(spec: ManagerDeploySpec) -> dict[str, list[dict[str, Any]]]:
     return _hooks_dict(hooks_dir)
 
 
+def _tower_hook_scripts(spec: TowerDeploySpec) -> list[HookConfig]:
+    """Build the hook shell scripts for a Tower session."""
+    header = _STATUS_HOOK_TEMPLATE.format(
+        api_base_url=spec.api_base_url,
+        session_id=spec.session_id,
+    )
+    return [
+        HookConfig(event="PostToolUse", command=header + _POST_TOOL_USE_BODY),
+        HookConfig(event="Stop", command=header + _STOP_HOOK_BODY),
+        HookConfig(event="Notification", command=header + _NOTIFICATION_HOOK_BODY),
+    ]
+
+
+def _tower_hooks(spec: TowerDeploySpec) -> dict[str, list[dict[str, Any]]]:
+    """Build the hooks section for .claude/settings.json (Tower)."""
+    hooks_dir = f"/tmp/atc-agents/{spec.session_id}/.claude/hooks"
+    return _hooks_dict(hooks_dir)
+
+
 def _hooks_dict(hooks_dir: str) -> dict[str, list[dict[str, Any]]]:
     """Build a hooks dict pointing to shell scripts in the given directory.
 
@@ -484,6 +630,14 @@ def _ace_allowed_commands(spec: AceDeploySpec) -> list[str]:
 
 def _manager_allowed_commands(spec: ManagerDeploySpec) -> list[str]:
     """Build the allowed commands list for a Manager."""
+    commands = list(_BASE_ALLOWED_COMMANDS)
+    commands.append("Bash(atc tower *)")
+    commands.extend(spec.allowed_commands)
+    return commands
+
+
+def _tower_allowed_commands(spec: TowerDeploySpec) -> list[str]:
+    """Build the allowed commands list for a Tower."""
     commands = list(_BASE_ALLOWED_COMMANDS)
     commands.append("Bash(atc tower *)")
     commands.extend(spec.allowed_commands)

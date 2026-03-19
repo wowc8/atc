@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from atc.agents.deploy import TowerDeploySpec, deploy_tower_files
 from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
@@ -91,6 +92,21 @@ async def start_tower_session(
         provider = project.agent_provider if project else "claude_code"
         launch_cmd = get_launch_command(provider)
         working_dir = project.repo_path if project and project.repo_path else None
+
+        # Deploy config files (CLAUDE.md, hooks, settings.json) before launch
+        spec = TowerDeploySpec(
+            session_id=session.id,
+            project_name=project.name if project else "",
+            project_id=project_id,
+            repo_path=working_dir,
+            github_repo=project.github_repo if project else None,
+        )
+        deployed = deploy_tower_files(spec)
+        logger.info("Deployed tower config for %s → %s", session.id, deployed.root)
+
+        # Use repo path if available, otherwise the deployed config directory
+        if not working_dir:
+            working_dir = str(deployed.root)
 
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(
