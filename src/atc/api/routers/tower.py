@@ -176,6 +176,17 @@ async def send_message(body: MessageRequest, request: Request) -> dict[str, str]
     return {"status": "sent"}
 
 
+@router.post("/complete")
+async def mark_complete(request: Request) -> dict[str, str]:
+    """Mark the current Tower goal as complete."""
+    tower = _get_tower(request)
+    try:
+        await tower.mark_complete()
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "complete"}
+
+
 @router.get("/progress", response_model=TowerProgressResponse)
 async def get_progress(request: Request) -> TowerProgressResponse:
     """Get the current Leader's task graph progress."""

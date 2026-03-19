@@ -79,6 +79,13 @@
   border-color: var(--color-accent);
 }
 
+.tower-console__send-error {
+  color: var(--color-status-red);
+  font-weight: bold;
+  font-size: var(--text-sm);
+  cursor: help;
+}
+
 .tower-console__error {
   padding: var(--space-3);
   font-size: var(--text-sm);
