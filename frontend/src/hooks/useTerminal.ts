@@ -77,11 +77,10 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   }, [enabled]);
 
   // WebSocket connection for terminal channel.
-  // Uses a local `cancelled` variable (captured in the closure) instead of a
-  // shared ref so that React StrictMode double-mount cannot cause a stale
-  // onclose handler to schedule a spurious reconnect after the new effect has
-  // already started.  This prevents the duplicate-lines bug where two
-  // WebSocket connections subscribe to the same channel simultaneously.
+  // The `cancelled` flag gates every callback so that React StrictMode
+  // double-mount cannot cause two live subscriptions.  Without these guards
+  // the first WebSocket's `onopen` can fire (and subscribe) before the
+  // cleanup's `ws.close()` takes effect, leading to duplicate lines.
   useEffect(() => {
     if (!enabled || !channel) return;
 
@@ -94,10 +93,15 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (cancelled) {
+          ws.close();
+          return;
+        }
         ws.send(JSON.stringify({ channel: "subscribe", data: [channel] }));
       };
 
       ws.onmessage = (evt) => {
+        if (cancelled) return;
         try {
           const msg = JSON.parse(evt.data);
           if (msg.channel === channel && msg.data) {
