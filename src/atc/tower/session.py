@@ -10,9 +10,11 @@ Uses the same tmux infrastructure as aces and leaders.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from atc.agents.deploy import TowerDeploySpec, deploy_tower_files
+from atc.agents.deploy import _DEFAULT_STAGING_ROOT, TowerDeploySpec, deploy_tower_files
 from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
@@ -49,6 +51,7 @@ async def start_tower_session(
     name = f"tower-{project.name}" if project else f"tower-{project_id[:8]}"
 
     # Check for existing tower session — validate tmux pane is actually alive
+    # AND that the Tower identity files are deployed at the working directory.
     existing = await db_ops.list_sessions(conn, project_id=project_id, session_type="tower")
     for sess in existing:
         if sess.status in (SessionStatus.ERROR.value, SessionStatus.DISCONNECTED.value):
@@ -56,7 +59,23 @@ async def start_tower_session(
         # Verify the tmux pane is still alive; stale sessions from a previous
         # app run may have a non-terminal DB status but a dead pane.
         if sess.tmux_pane and await _pane_is_alive(sess.tmux_pane):
-            return sess.id
+            # Verify CLAUDE.md is deployed — a stale pane from a prior app run
+            # may have been launched without Tower identity files.
+            staging_dir = Path(_DEFAULT_STAGING_ROOT) / sess.id
+            if (staging_dir / "CLAUDE.md").is_file():
+                logger.info(
+                    "Reusing existing tower session %s (CLAUDE.md present at %s)",
+                    sess.id,
+                    staging_dir,
+                )
+                return sess.id
+            # CLAUDE.md missing — kill stale pane and create fresh session
+            logger.warning(
+                "Tower session %s has live pane but CLAUDE.md missing at %s — killing stale pane",
+                sess.id,
+                staging_dir,
+            )
+            await _kill_pane(sess.tmux_pane)
         # Pane is dead or missing — mark session as disconnected so we create fresh
         logger.warning(
             "Tower session %s has dead/missing tmux pane %s — discarding",
@@ -109,6 +128,9 @@ async def start_tower_session(
         # Tower never writes code directly — it delegates through Leaders —
         # so it doesn't need to start in the repo directory.
         working_dir = str(deployed.root)
+
+        # --- Runtime debug: verify CLAUDE.md is present at working_dir ---
+        _log_working_dir_contents(working_dir, session.id, "start_tower_session")
 
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(
@@ -182,3 +204,55 @@ async def send_tower_message(
         await db_ops.update_session_status(conn, session.id, SessionStatus.WORKING.value)
 
     await _send_keys(session.tmux_pane, message)
+
+
+def _log_working_dir_contents(working_dir: str, session_id: str, caller: str) -> None:
+    """Log the contents of the working directory for runtime debugging.
+
+    Verifies that CLAUDE.md and .claude/settings.json are present at the
+    path that will be passed as -c to tmux (i.e. where Claude Code starts).
+    """
+    logger.warning(
+        "=== TOWER DEBUG [%s] session=%s ===\n"
+        "  working_dir: %s\n"
+        "  working_dir exists: %s",
+        caller,
+        session_id,
+        working_dir,
+        os.path.isdir(working_dir),
+    )
+
+    if not os.path.isdir(working_dir):
+        logger.warning("  working_dir DOES NOT EXIST — Claude Code will NOT find CLAUDE.md")
+        return
+
+    # List all files at the root of working_dir
+    try:
+        entries = os.listdir(working_dir)
+        logger.warning("  Files at working_dir root: %s", entries)
+    except OSError as exc:
+        logger.warning("  Failed to list working_dir: %s", exc)
+        return
+
+    # Check CLAUDE.md specifically
+    claude_md_path = os.path.join(working_dir, "CLAUDE.md")
+    if os.path.isfile(claude_md_path):
+        try:
+            with open(claude_md_path) as f:
+                first_lines = "".join(f.readlines()[:5])
+            logger.warning(
+                "  CLAUDE.md FOUND (%d bytes), first lines:\n%s",
+                os.path.getsize(claude_md_path),
+                first_lines,
+            )
+        except OSError as exc:
+            logger.warning("  CLAUDE.md exists but could not read: %s", exc)
+    else:
+        logger.warning("  CLAUDE.md NOT FOUND at %s", claude_md_path)
+
+    # Check .claude/settings.json
+    settings_path = os.path.join(working_dir, ".claude", "settings.json")
+    if os.path.isfile(settings_path):
+        logger.warning("  .claude/settings.json FOUND (%d bytes)", os.path.getsize(settings_path))
+    else:
+        logger.warning("  .claude/settings.json NOT FOUND at %s", settings_path)

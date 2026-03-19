@@ -8,6 +8,7 @@ the TUI is ready (alternate_on == False).
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from atc.agents.deploy import TowerDeploySpec, deploy_tower_files
@@ -15,6 +16,7 @@ from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
     _ensure_tmux_session,
+    _kill_pane,
     _pane_is_alive,
     _spawn_pane,
 )
@@ -58,23 +60,39 @@ async def reconnect_session(
 
     # Check if pane is still alive
     if session.tmux_pane and await _pane_is_alive(session.tmux_pane):
-        logger.info("Session %s: tmux pane %s still alive", session_id, session.tmux_pane)
-        # Transition back to idle if it was working/waiting/disconnected
-        if current in (
-            SessionStatus.WORKING,
-            SessionStatus.WAITING,
-            SessionStatus.DISCONNECTED,
-            SessionStatus.CONNECTING,
-        ):
-            target = SessionStatus.IDLE
-            # disconnected → idle not directly valid; go through connecting
-            if current == SessionStatus.DISCONNECTED:
-                await transition(session_id, current, SessionStatus.CONNECTING, event_bus)
-                await db_ops.update_session_status(conn, session_id, SessionStatus.CONNECTING.value)
-                current = SessionStatus.CONNECTING
-            await transition(session_id, current, target, event_bus)
-            await db_ops.update_session_status(conn, session_id, target.value)
-        return True
+        # Tower sessions must always be respawned with fresh config so Claude
+        # Code picks up the latest CLAUDE.md identity and settings.  A stale
+        # pane from a prior app run may have been launched with outdated (or
+        # missing) Tower identity files, causing "no specific ATC role".
+        session_type = getattr(session, "session_type", None)
+        if session_type == "tower":
+            logger.info(
+                "Session %s: tower pane %s alive but killing to respawn with fresh config",
+                session_id,
+                session.tmux_pane,
+            )
+            await _kill_pane(session.tmux_pane)
+            # Fall through to the respawn logic below
+        else:
+            logger.info("Session %s: tmux pane %s still alive", session_id, session.tmux_pane)
+            # Transition back to idle if it was working/waiting/disconnected
+            if current in (
+                SessionStatus.WORKING,
+                SessionStatus.WAITING,
+                SessionStatus.DISCONNECTED,
+                SessionStatus.CONNECTING,
+            ):
+                target = SessionStatus.IDLE
+                # disconnected → idle not directly valid; go through connecting
+                if current == SessionStatus.DISCONNECTED:
+                    await transition(session_id, current, SessionStatus.CONNECTING, event_bus)
+                    await db_ops.update_session_status(
+                        conn, session_id, SessionStatus.CONNECTING.value
+                    )
+                    current = SessionStatus.CONNECTING
+                await transition(session_id, current, target, event_bus)
+                await db_ops.update_session_status(conn, session_id, target.value)
+            return True
 
     # Pane is dead — try to respawn
     logger.info("Session %s: pane dead, attempting respawn", session_id)
@@ -127,6 +145,10 @@ async def reconnect_session(
             working_dir = str(deployed.root)
             logger.info("Re-deployed tower config for %s → %s", session_id, deployed.root)
 
+        # --- Runtime debug: verify working_dir contents before spawn ---
+        if working_dir:
+            _log_reconnect_working_dir(working_dir, session_id)
+
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(
             ATC_TMUX_SESSION,
@@ -174,3 +196,29 @@ async def reconnect_all(
     succeeded = sum(1 for v in results.values() if v)
     logger.info("Reconnected %d/%d sessions", succeeded, len(results))
     return results
+
+
+def _log_reconnect_working_dir(working_dir: str, session_id: str) -> None:
+    """Log working_dir contents during reconnection for runtime debugging."""
+    logger.warning(
+        "=== RECONNECT DEBUG session=%s ===\n"
+        "  working_dir: %s\n"
+        "  exists: %s",
+        session_id,
+        working_dir,
+        os.path.isdir(working_dir),
+    )
+    if os.path.isdir(working_dir):
+        try:
+            entries = os.listdir(working_dir)
+            logger.warning("  Files at working_dir root: %s", entries)
+        except OSError as exc:
+            logger.warning("  Failed to list working_dir: %s", exc)
+
+        claude_md = os.path.join(working_dir, "CLAUDE.md")
+        if os.path.isfile(claude_md):
+            logger.warning("  CLAUDE.md FOUND (%d bytes)", os.path.getsize(claude_md))
+        else:
+            logger.warning("  CLAUDE.md NOT FOUND at %s", claude_md)
+    else:
+        logger.warning("  working_dir DOES NOT EXIST")

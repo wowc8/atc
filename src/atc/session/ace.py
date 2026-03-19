@@ -96,6 +96,12 @@ async def _spawn_pane(
         args.extend(["-c", working_dir])
     if command:
         args.extend([command])
+    logger.warning(
+        "=== SPAWN_PANE DEBUG ===\n  tmux args: %s\n  working_dir: %s\n  command: %s",
+        args,
+        working_dir,
+        command,
+    )
     pane_id = await _tmux_run(*args)
     return pane_id
 
