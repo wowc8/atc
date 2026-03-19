@@ -15,9 +15,11 @@ from atc.agents.deploy import (
     AceDeploySpec,
     DeployedFiles,
     ManagerDeploySpec,
+    TowerDeploySpec,
     cleanup_deployed_files,
     deploy_ace_files,
     deploy_manager_files,
+    deploy_tower_files,
 )
 
 
@@ -82,6 +84,17 @@ class TestDeployAceFiles:
         assert "ace-001" in content
         assert "Implement login page" in content
         assert "OAuth login" in content
+
+    def test_claude_md_includes_role_identity(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Role" in content
+        assert "Ace" in content
+        assert "expert developer" in content
+        assert "Create a PR" in content
+        assert "Run tests" in content
 
     def test_claude_md_includes_constraints(
         self, ace_spec: AceDeploySpec, staging_root: Path
@@ -246,6 +259,17 @@ class TestDeployManagerFiles:
         assert "leader-bravo" in content
         assert "Ship the MVP" in content
 
+    def test_claude_md_includes_role_identity(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Role" in content
+        assert "Leader" in content
+        assert "project manager" in content
+        assert "never write code directly" in content
+        assert "Create Aces" in content
+
     def test_claude_md_includes_budget(
         self, manager_spec: ManagerDeploySpec, staging_root: Path
     ) -> None:
@@ -312,6 +336,88 @@ class TestDeployManagerFiles:
         result = deploy_manager_files(spec, staging_root=staging_root)
         content = result.claude_md_path.read_text()
         assert "Budget" not in content
+
+
+# ---------------------------------------------------------------------------
+# Tower deployment
+# ---------------------------------------------------------------------------
+
+
+class TestDeployTowerFiles:
+    @pytest.fixture
+    def tower_spec(self) -> TowerDeploySpec:
+        return TowerDeploySpec(
+            session_id="tower-001",
+            project_name="Phoenix",
+            project_id="proj-abc",
+            repo_path="/home/user/phoenix",
+            github_repo="acme/phoenix",
+        )
+
+    def test_returns_deployed_files(self, tower_spec: TowerDeploySpec, staging_root: Path) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        assert isinstance(result, DeployedFiles)
+        assert result.root == staging_root / "tower-001"
+
+    def test_creates_claude_md(self, tower_spec: TowerDeploySpec, staging_root: Path) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        assert result.claude_md_path.exists()
+        content = result.claude_md_path.read_text()
+        assert "Phoenix — Tower Session" in content
+        assert "tower-001" in content
+
+    def test_claude_md_includes_role_identity(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Role" in content
+        assert "Tower" in content
+        assert "top-level orchestrator" in content
+        assert "never write code directly" in content
+        assert "Delegate" in content
+
+    def test_claude_md_includes_github_repo(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "acme/phoenix" in content
+
+    def test_no_github_repo_omits_section(self, staging_root: Path) -> None:
+        spec = TowerDeploySpec(
+            session_id="tower-002",
+            project_name="Test",
+            project_id="proj-x",
+        )
+        result = deploy_tower_files(spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "Repository" not in content
+
+    def test_creates_settings_json(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        assert result.settings_path.exists()
+        settings = json.loads(result.settings_path.read_text())
+        assert settings["model"] == "opus"
+        assert "Bash(atc tower *)" in settings["permissions"]["allow"]
+
+    def test_creates_hook_scripts(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        hooks_dir = result.root / ".claude" / "hooks"
+        assert (hooks_dir / "PostToolUse.sh").exists()
+        assert (hooks_dir / "Stop.sh").exists()
+        assert (hooks_dir / "Notification.sh").exists()
+
+    def test_manifest_session_type_is_tower(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        manifest = json.loads(result.manifest_path.read_text())
+        assert manifest["session_type"] == "tower"
 
 
 # ---------------------------------------------------------------------------
