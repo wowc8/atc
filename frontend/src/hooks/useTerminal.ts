@@ -22,7 +22,6 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const cleanedUpRef = useRef(false);
 
   // Create terminal once
   useEffect(() => {
@@ -77,14 +76,19 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     return () => window.removeEventListener("resize", handleResize);
   }, [enabled]);
 
-  // WebSocket connection for terminal channel
+  // WebSocket connection for terminal channel.
+  // Uses a local `cancelled` variable (captured in the closure) instead of a
+  // shared ref so that React StrictMode double-mount cannot cause a stale
+  // onclose handler to schedule a spurious reconnect after the new effect has
+  // already started.  This prevents the duplicate-lines bug where two
+  // WebSocket connections subscribe to the same channel simultaneously.
   useEffect(() => {
     if (!enabled || !channel) return;
 
-    cleanedUpRef.current = false;
+    let cancelled = false;
 
     function connect() {
-      if (cleanedUpRef.current) return;
+      if (cancelled) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
       wsRef.current = ws;
@@ -107,7 +111,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       };
 
       ws.onclose = () => {
-        if (!cleanedUpRef.current) {
+        if (!cancelled) {
           reconnectRef.current = setTimeout(connect, 3000);
         }
       };
@@ -118,7 +122,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     connect();
 
     return () => {
-      cleanedUpRef.current = true;
+      cancelled = true;
       clearTimeout(reconnectRef.current);
       wsRef.current?.close();
       wsRef.current = null;

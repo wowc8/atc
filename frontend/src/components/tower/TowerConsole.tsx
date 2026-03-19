@@ -60,17 +60,30 @@ export default function TowerConsole() {
     if (!projectId) return;
     setLoading(true);
     try {
-      const res = await api.post<{ session_id?: string }>("/tower/goal", {
-        project_id: projectId,
-        goal: goal.trim() || null,
-      });
-      setGoal("");
-      // Update session_id immediately so the terminal can subscribe
-      if (res.session_id) {
-        dispatch({
-          type: "SET_TOWER_DETAIL",
-          payload: { current_session_id: res.session_id },
+      if (isClaudeCode) {
+        // For claude_code: start Tower's own Claude Code session
+        const res = await api.post<{ session_id?: string }>("/tower/start", {
+          project_id: projectId,
         });
+        if (res.session_id) {
+          dispatch({
+            type: "SET_TOWER_DETAIL",
+            payload: { current_session_id: res.session_id },
+          });
+        }
+      } else {
+        // For other providers: submit a goal to start the Leader
+        const res = await api.post<{ session_id?: string }>("/tower/goal", {
+          project_id: projectId,
+          goal: goal.trim() || null,
+        });
+        setGoal("");
+        if (res.session_id) {
+          dispatch({
+            type: "SET_TOWER_DETAIL",
+            payload: { current_session_id: res.session_id },
+          });
+        }
       }
     } catch (err) {
       console.error("Failed to start Tower:", err);
@@ -82,7 +95,17 @@ export default function TowerConsole() {
   async function handleStop() {
     setLoading(true);
     try {
-      await api.post("/tower/cancel");
+      await api.post("/tower/stop");
+      autoStarted.current = false;
+      dispatch({
+        type: "SET_TOWER_DETAIL",
+        payload: {
+          state: "idle",
+          current_session_id: null,
+          leader_session_id: null,
+          current_goal: null,
+        },
+      });
     } catch (err) {
       console.error("Failed to stop Tower:", err);
     } finally {
