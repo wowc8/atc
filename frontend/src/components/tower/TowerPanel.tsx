@@ -328,9 +328,6 @@ function deriveContextLabel(
   if (pathname === "/dashboard" || pathname === "/") {
     return "Dashboard";
   }
-  if (pathname === "/settings") {
-    return "Settings";
-  }
   if (pathname === "/usage") {
     return "Usage";
   }

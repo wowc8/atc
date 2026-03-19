@@ -26,7 +26,6 @@ describe("TowerBar", () => {
     renderWithProviders(<TowerBar />);
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("Usage")).toBeInTheDocument();
-    expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
   it("renders cost summary", () => {
@@ -52,6 +51,23 @@ describe("TowerBar", () => {
   it("renders settings button", () => {
     renderWithProviders(<TowerBar />);
     expect(screen.getByTestId("settings-button")).toBeInTheDocument();
+  });
+
+  it("opens settings pane when cog icon is clicked", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TowerBar />);
+    expect(screen.queryByTestId("settings-pane")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("settings-button"));
+    expect(screen.getByTestId("settings-pane")).toBeInTheDocument();
+  });
+
+  it("closes settings pane when close button is clicked", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TowerBar />);
+    await user.click(screen.getByTestId("settings-button"));
+    expect(screen.getByTestId("settings-pane")).toBeInTheDocument();
+    await user.click(screen.getByTestId("close-settings-pane"));
+    expect(screen.queryByTestId("settings-pane")).not.toBeInTheDocument();
   });
 
   it("navigates to dashboard when brand is clicked", async () => {

@@ -78,7 +78,7 @@ export default function ApiErrorBanner({ error, onRetry, onDismiss }: Props) {
           <button
             style={styles.actionBtn}
             onClick={() => {
-              window.location.href = "/settings";
+              window.location.href = "/dashboard";
             }}
           >
             Re-authenticate
