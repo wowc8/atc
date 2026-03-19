@@ -440,15 +440,14 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "",
     ]
 
-    if spec.github_repo:
-        lines.extend(
-            [
-                "## Repository",
-                "",
-                f"GitHub: `{spec.github_repo}`",
-                "",
-            ]
-        )
+    if spec.repo_path or spec.github_repo:
+        lines.append("## Repository")
+        lines.append("")
+        if spec.repo_path:
+            lines.append(f"Local path: `{spec.repo_path}`")
+        if spec.github_repo:
+            lines.append(f"GitHub: `{spec.github_repo}`")
+        lines.append("")
 
     return "\n".join(lines)
 

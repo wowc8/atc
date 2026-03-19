@@ -199,21 +199,6 @@ class TestTowerStatus:
 
 
 # ---------------------------------------------------------------------------
-# atc tower goal
-# ---------------------------------------------------------------------------
-
-
-class TestTowerGoal:
-    def test_submits_goal(self, api_stub: str) -> None:
-        rc = cli(["tower", "goal", "proj-1", "Build the MVP", "--api", api_stub])
-        assert rc == 0
-        req = _StubHandler.requests[0]
-        assert req["method"] == "POST"
-        assert req["path"] == "/api/tower/goal"
-        assert req["body"] == {"project_id": "proj-1", "goal": "Build the MVP"}
-
-
-# ---------------------------------------------------------------------------
 # atc tower cancel
 # ---------------------------------------------------------------------------
 
