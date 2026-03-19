@@ -42,6 +42,7 @@ const initialState: AppState = {
     current_goal: null,
     current_project_id: null,
     current_session_id: null,
+    leader_session_id: null,
     leader_activity_preview: null,
   },
   towerProgress: {
@@ -255,6 +256,7 @@ export function AppProvider({ children }: AppProviderProps) {
         current_goal: string | null;
         current_project_id: string | null;
         current_session_id: string | null;
+        leader_session_id: string | null;
       }>("/tower/status");
       dispatch({
         type: "SET_TOWER_DETAIL",
@@ -263,6 +265,7 @@ export function AppProvider({ children }: AppProviderProps) {
           current_goal: towerStatus.current_goal,
           current_project_id: towerStatus.current_project_id,
           current_session_id: towerStatus.current_session_id,
+          leader_session_id: towerStatus.leader_session_id ?? null,
           leader_activity_preview: null,
         },
       });
@@ -294,11 +297,18 @@ export function AppProvider({ children }: AppProviderProps) {
             current_project_id: (data.project_id as string) ?? null,
           },
         });
-      } else if (data.type === "leader_status") {
+      } else if (data.type === "tower_session") {
         dispatch({
           type: "SET_TOWER_DETAIL",
           payload: {
             current_session_id: (data.session_id as string) ?? null,
+          },
+        });
+      } else if (data.type === "leader_status") {
+        dispatch({
+          type: "SET_TOWER_DETAIL",
+          payload: {
+            leader_session_id: (data.session_id as string) ?? null,
           },
         });
       } else if (data.type === "progress") {

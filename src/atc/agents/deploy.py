@@ -335,7 +335,7 @@ def _build_settings(
     *,
     model: str,
     allowed_commands: list[str],
-    hooks: dict[str, list[dict[str, str]]],
+    hooks: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Build the .claude/settings.json content."""
     return {
@@ -412,24 +412,43 @@ def _manager_hook_scripts(spec: ManagerDeploySpec) -> list[HookConfig]:
     ]
 
 
-def _ace_hooks(spec: AceDeploySpec) -> dict[str, list[dict[str, str]]]:
+def _ace_hooks(spec: AceDeploySpec) -> dict[str, list[dict[str, Any]]]:
     """Build the hooks section for .claude/settings.json (Ace)."""
     hooks_dir = f"/tmp/atc-agents/{spec.session_id}/.claude/hooks"
     return _hooks_dict(hooks_dir)
 
 
-def _manager_hooks(spec: ManagerDeploySpec) -> dict[str, list[dict[str, str]]]:
+def _manager_hooks(spec: ManagerDeploySpec) -> dict[str, list[dict[str, Any]]]:
     """Build the hooks section for .claude/settings.json (Manager)."""
     hooks_dir = f"/tmp/atc-agents/{spec.leader_id}/.claude/hooks"
     return _hooks_dict(hooks_dir)
 
 
-def _hooks_dict(hooks_dir: str) -> dict[str, list[dict[str, str]]]:
-    """Build a hooks dict pointing to shell scripts in the given directory."""
+def _hooks_dict(hooks_dir: str) -> dict[str, list[dict[str, Any]]]:
+    """Build a hooks dict pointing to shell scripts in the given directory.
+
+    Claude Code settings.json hooks format requires each entry to have a
+    ``matcher`` string and a ``hooks`` array of command objects.
+    """
     return {
-        "PostToolUse": [{"type": "command", "command": f"bash {hooks_dir}/PostToolUse.sh"}],
-        "Stop": [{"type": "command", "command": f"bash {hooks_dir}/Stop.sh"}],
-        "Notification": [{"type": "command", "command": f"bash {hooks_dir}/Notification.sh"}],
+        "PostToolUse": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"bash {hooks_dir}/PostToolUse.sh"}],
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"bash {hooks_dir}/Stop.sh"}],
+            }
+        ],
+        "Notification": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"bash {hooks_dir}/Notification.sh"}],
+            }
+        ],
     }
 
 

@@ -41,7 +41,7 @@ export interface Leader {
 export interface Session {
   id: string;
   project_id: string;
-  session_type: "ace" | "manager";
+  session_type: "ace" | "manager" | "tower";
   name: string;
   status:
     | "idle"
@@ -138,6 +138,7 @@ export interface TowerDetail {
   current_goal: string | null;
   current_project_id: string | null;
   current_session_id: string | null;
+  leader_session_id: string | null;
   leader_activity_preview: string | null;
 }
 

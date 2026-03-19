@@ -45,7 +45,7 @@ class Leader:
 class Session:
     id: str
     project_id: str
-    session_type: str  # ace|manager
+    session_type: str  # ace|manager|tower
     name: str
     status: str  # idle|connecting|working|paused|waiting|disconnected|error
     task_id: str | None = None

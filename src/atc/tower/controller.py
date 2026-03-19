@@ -23,7 +23,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from atc.leader.context_package import build_context_package
-from atc.leader.leader import send_leader_message, start_leader, stop_leader
+from atc.leader.leader import start_leader, stop_leader
+from atc.tower.session import send_tower_message, start_tower_session, stop_tower_session
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -73,7 +74,10 @@ class TowerController:
         self._state = TowerState.IDLE
         self._current_goal: str | None = None
         self._current_project_id: str | None = None
+        # Tower's own Claude Code session (independent from Leader)
         self._current_session_id: str | None = None
+        # Leader's session (separate terminal stream)
+        self._leader_session_id: str | None = None
 
         # Track Leader output lines for monitoring
         self._leader_output_lines: list[str] = []
@@ -132,13 +136,85 @@ class TowerController:
                 },
             )
 
+    async def start_session(self, project_id: str) -> str:
+        """Start Tower's own Claude Code session (independent from Leader).
+
+        Returns the tower session id.  If a session already exists, returns
+        its id without spawning a new one.
+        """
+        self._current_project_id = project_id
+
+        session_id = await start_tower_session(
+            self._db,
+            project_id,
+            event_bus=self._event_bus,
+        )
+        self._current_session_id = session_id
+
+        # Transition to MANAGING so the frontend shows the terminal
+        if self._state in (TowerState.IDLE, TowerState.COMPLETE, TowerState.ERROR):
+            if self._state in (TowerState.COMPLETE, TowerState.ERROR):
+                self._state = TowerState.IDLE
+            await self._transition(TowerState.PLANNING)
+            await self._transition(TowerState.MANAGING)
+
+        # Broadcast tower session info so the frontend subscribes immediately
+        if self._ws_hub is not None:
+            await self._ws_hub.broadcast(
+                "tower",
+                {
+                    "type": "tower_session",
+                    "session_id": session_id,
+                    "status": "idle",
+                    "project_id": project_id,
+                },
+            )
+
+        return session_id
+
+    async def stop_session(self) -> None:
+        """Stop Tower's own Claude Code session."""
+        if self._current_session_id:
+            await stop_tower_session(
+                self._db,
+                self._current_session_id,
+                event_bus=self._event_bus,
+            )
+
+        # Also stop the Leader if running
+        if self._current_project_id and self._leader_session_id:
+            await stop_leader(
+                self._db,
+                self._current_project_id,
+                event_bus=self._event_bus,
+            )
+            self._leader_session_id = None
+
+        # Reset state
+        if self._state in (TowerState.MANAGING, TowerState.PLANNING):
+            await self._transition(TowerState.ERROR)
+
+        if self._state in (TowerState.ERROR, TowerState.COMPLETE):
+            self._state = TowerState.IDLE
+
+        self._current_goal = None
+        self._current_project_id = None
+        self._current_session_id = None
+        self._leader_output_lines.clear()
+
+        await self._event_bus.publish(
+            "tower_state_changed",
+            {"previous_state": "managing", "new_state": "idle", "project_id": None, "goal": None},
+        )
+
     async def submit_goal(self, project_id: str, goal: str) -> dict[str, Any]:
         """Process a new goal: build context, start Leader, begin monitoring.
 
         Returns a dict with status, project_id, session_id, and context_package.
         Raises if the tower is not idle (already processing a goal).
         """
-        if self._state not in (TowerState.IDLE, TowerState.COMPLETE, TowerState.ERROR):
+        allowed = (TowerState.IDLE, TowerState.COMPLETE, TowerState.ERROR, TowerState.MANAGING)
+        if self._state not in allowed:
             raise TowerBusyError(self._state, project_id)
 
         # Reset to idle first if coming from complete/error
@@ -149,9 +225,12 @@ class TowerController:
         self._current_goal = goal
 
         try:
-            # Phase 1: Planning — build the context package
-            await self._transition(TowerState.PLANNING)
+            # If not already managing (i.e. Tower session not yet started)
+            if self._state == TowerState.IDLE:
+                await self._transition(TowerState.PLANNING)
+                await self._transition(TowerState.MANAGING)
 
+            # Build the context package
             context_package = await build_context_package(self._db, project_id, goal)
 
             # Store context on the leader row
@@ -162,29 +241,23 @@ class TowerController:
             )
             await self._db.commit()
 
-            # Phase 2: Managing — start the Leader session
-            await self._transition(TowerState.MANAGING)
-
-            session_id = await start_leader(
+            # Start the Leader session (separate from Tower's session)
+            leader_session_id = await start_leader(
                 self._db,
                 project_id,
                 goal=goal,
                 event_bus=self._event_bus,
                 context_package=context_package,
             )
-            self._current_session_id = session_id
+            self._leader_session_id = leader_session_id
 
-            # Broadcast leader session info to frontend so the terminal
-            # panel can subscribe to the PTY WebSocket channel immediately.
-            # The initial connecting→idle transition fires BEFORE
-            # _current_session_id is set, so _on_session_status_changed
-            # misses it.  This explicit broadcast closes that gap.
+            # Broadcast leader session info so LeaderConsole can subscribe
             if self._ws_hub is not None:
                 await self._ws_hub.broadcast(
                     "tower",
                     {
                         "type": "leader_status",
-                        "session_id": session_id,
+                        "session_id": leader_session_id,
                         "status": "idle",
                         "project_id": project_id,
                     },
@@ -195,14 +268,15 @@ class TowerController:
                 {
                     "project_id": project_id,
                     "goal": goal,
-                    "session_id": session_id,
+                    "session_id": leader_session_id,
                 },
             )
 
             return {
                 "status": "accepted",
                 "project_id": project_id,
-                "session_id": session_id,
+                "session_id": self._current_session_id,
+                "leader_session_id": leader_session_id,
                 "context_package": context_package,
             }
 
@@ -215,34 +289,42 @@ class TowerController:
         """Mark the current goal as complete and return tower to idle."""
         await self._transition(TowerState.COMPLETE)
         self._current_goal = None
-        self._current_project_id = None
-        self._current_session_id = None
+        self._leader_session_id = None
         self._leader_output_lines.clear()
 
     async def cancel_goal(self) -> None:
-        """Cancel the current goal, stop the Leader, and return to idle."""
-        if self._current_project_id and self._state == TowerState.MANAGING:
+        """Cancel the current goal and stop the Leader.
+
+        If Tower has its own session, it stays in MANAGING. Otherwise
+        transitions back to idle.
+        """
+        if self._current_project_id and self._leader_session_id:
             await stop_leader(
                 self._db,
                 self._current_project_id,
                 event_bus=self._event_bus,
             )
+            self._leader_session_id = None
 
-        # Transition through error → idle for cancellation
-        if self._state == TowerState.MANAGING:
-            await self._transition(TowerState.ERROR)
+        self._current_goal = None
+        self._leader_output_lines.clear()
 
-        if self._state in (TowerState.ERROR, TowerState.COMPLETE):
-            self._state = TowerState.IDLE
-            self._current_goal = None
-            self._current_project_id = None
-            self._current_session_id = None
-            self._leader_output_lines.clear()
-
-            await self._event_bus.publish(
-                "tower_state_changed",
-                {"previous_state": "error", "new_state": "idle", "project_id": None, "goal": None},
-            )
+        # If Tower has no session of its own, return to idle
+        if not self._current_session_id:
+            if self._state == TowerState.MANAGING:
+                await self._transition(TowerState.ERROR)
+            if self._state in (TowerState.ERROR, TowerState.COMPLETE):
+                self._state = TowerState.IDLE
+                self._current_project_id = None
+                await self._event_bus.publish(
+                    "tower_state_changed",
+                    {
+                        "previous_state": "error",
+                        "new_state": "idle",
+                        "project_id": None,
+                        "goal": None,
+                    },
+                )
 
     async def reset(self) -> None:
         """Force-reset tower to idle state (e.g. after unrecoverable error)."""
@@ -250,6 +332,7 @@ class TowerController:
         self._current_goal = None
         self._current_project_id = None
         self._current_session_id = None
+        self._leader_session_id = None
         self._leader_output_lines.clear()
 
     def get_status(self) -> dict[str, Any]:
@@ -259,31 +342,28 @@ class TowerController:
             "current_goal": self._current_goal,
             "current_project_id": self._current_project_id,
             "current_session_id": self._current_session_id,
+            "leader_session_id": self._leader_session_id,
             "output_line_count": len(self._leader_output_lines),
         }
 
     async def send_message(self, message: str) -> None:
-        """Send a message to the current Leader's terminal.
+        """Send a message to Tower's own terminal.
 
-        This is the Tower → Leader communication channel. The message is
-        typed into the Leader's Claude Code terminal just like a human
-        would, triggering the Leader to process the instruction.
+        This types the message into Tower's Claude Code session.
 
-        Raises ``ValueError`` if no Leader is currently active.
+        Raises ``ValueError`` if no Tower session is active.
         """
-        if self._state != TowerState.MANAGING:
-            raise ValueError(f"Cannot send message — Tower is {self._state.value}, not managing")
-        if not self._current_project_id:
-            raise ValueError("No active project")
+        if not self._current_session_id:
+            raise ValueError("No active Tower session")
 
-        await send_leader_message(
+        await send_tower_message(
             self._db,
-            self._current_project_id,
+            self._current_session_id,
             message,
             event_bus=self._event_bus,
         )
 
-        logger.info("Tower sent message to Leader (project %s)", self._current_project_id)
+        logger.info("Sent message to Tower session (project %s)", self._current_project_id)
 
         if self._ws_hub is not None:
             await self._ws_hub.broadcast(
@@ -358,7 +438,7 @@ class TowerController:
         event so the frontend can show activity indicators.
         """
         session_id = data.get("session_id")
-        if session_id != self._current_session_id:
+        if session_id != self._leader_session_id:
             return
 
         raw = data.get("data", b"")
@@ -389,7 +469,7 @@ class TowerController:
         session_id = data.get("session_id")
         new_status = data.get("new_status")
 
-        if session_id != self._current_session_id:
+        if session_id != self._leader_session_id:
             return
 
         if new_status == "error" and self._state == TowerState.MANAGING:
