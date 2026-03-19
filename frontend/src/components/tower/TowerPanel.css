@@ -141,6 +141,13 @@
   opacity: 0.6;
 }
 
+.tower-panel__send-error {
+  color: var(--color-status-red);
+  font-weight: bold;
+  font-size: var(--text-sm);
+  cursor: help;
+}
+
 /* Progress indicator in the bar */
 .tower-panel__progress {
   font-size: var(--text-xs);

@@ -59,7 +59,7 @@ export default function TowerPanel() {
     ? `terminal:${towerDetail.current_session_id}`
     : undefined;
 
-  const { attachRef, fit, sendInput } = useTerminal({
+  const { attachRef, fit } = useTerminal({
     channel: terminalChannel,
     enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
@@ -144,15 +144,26 @@ export default function TowerPanel() {
     }
   }, [dispatch]);
 
+  const [sendError, setSendError] = useState<string | null>(null);
+
   const handleSendMessage = useCallback(
-    (e: React.FormEvent) => {
+    async (e: React.FormEvent) => {
       e.preventDefault();
       if (!message.trim()) return;
-      sendInput(message.trim());
+      const text = message.trim();
       setMessage("");
+      setSendError(null);
       messageInputRef.current?.focus();
+      try {
+        await api.post("/tower/message", { message: text });
+      } catch (err) {
+        console.error("Failed to send message to Tower:", err);
+        setSendError("Failed to send message");
+        // Restore message so user can retry
+        setMessage(text);
+      }
     },
-    [message, sendInput],
+    [message],
   );
 
   const tickerText =
@@ -286,6 +297,11 @@ export default function TowerPanel() {
             >
               Send
             </button>
+            {sendError && (
+              <span className="tower-panel__send-error" title={sendError}>
+                !
+              </span>
+            )}
           </form>
         )}
       </div>

@@ -39,7 +39,7 @@ export default function TowerConsole() {
     ? `terminal:${towerDetail.current_session_id}`
     : undefined;
 
-  const { attachRef, sendInput } = useTerminal({
+  const { attachRef } = useTerminal({
     channel: terminalChannel,
     enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
@@ -127,12 +127,22 @@ export default function TowerConsole() {
     }
   }
 
-  function handleSendMessage(e: React.FormEvent) {
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!message.trim()) return;
-    sendInput(message.trim());
+    const text = message.trim();
     setMessage("");
+    setSendError(null);
     messageInputRef.current?.focus();
+    try {
+      await api.post("/tower/message", { message: text });
+    } catch (err) {
+      console.error("Failed to send message to Tower:", err);
+      setSendError("Failed to send message");
+      setMessage(text);
+    }
   }
 
   const statusLabel = brainStatus.status ?? towerDetail.state;
@@ -277,6 +287,11 @@ export default function TowerConsole() {
             >
               Send
             </button>
+            {sendError && (
+              <span className="tower-console__send-error" title={sendError}>
+                !
+              </span>
+            )}
           </form>
         </>
       )}
