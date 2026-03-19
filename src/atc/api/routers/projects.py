@@ -195,4 +195,8 @@ async def send_leader_message(
         await leader_ops.send_leader_message(db, project_id, body.message, event_bus=event_bus)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=409, detail=f"Leader pane unavailable: {e}"
+        ) from None
     return {"status": "sent"}

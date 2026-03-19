@@ -228,8 +228,23 @@ async def send_leader_message(
         raise ValueError("Leader session has no tmux pane")
 
     current = SessionStatus(session.status)
+
+    # Reject sends to sessions that are clearly not running
+    if current in (SessionStatus.ERROR, SessionStatus.DISCONNECTED):
+        raise ValueError(
+            f"Leader session is {current.value} — stop and restart the leader"
+        )
+
     if current in (SessionStatus.IDLE, SessionStatus.WAITING):
         await transition(session.id, current, SessionStatus.WORKING, event_bus)
         await db_ops.update_session_status(conn, session.id, SessionStatus.WORKING.value)
+
+    # Verify the pane is alive before sending keys
+    from atc.session.ace import _pane_is_alive
+
+    if not await _pane_is_alive(session.tmux_pane):
+        raise ValueError(
+            "Leader tmux pane is dead — stop and restart the leader"
+        )
 
     await _send_keys(session.tmux_pane, message)
