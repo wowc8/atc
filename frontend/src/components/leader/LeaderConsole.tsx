@@ -46,12 +46,13 @@ export default function LeaderConsole({
 
   // Auto-start for claude_code provider when viewing a project.
   // Respects userStopped ref to prevent re-starting after manual Stop.
+  // Note: does NOT require `leader` to exist — handleStart() creates one if needed.
   useEffect(() => {
-    if (isClaudeCode && isIdle && !loading && !autoStarted.current && !userStopped.current && leader) {
+    if (isClaudeCode && isIdle && !loading && !autoStarted.current && !userStopped.current) {
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isClaudeCode, isIdle, loading, leader]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isClaudeCode, isIdle, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
     userStopped.current = false;
@@ -118,16 +119,22 @@ export default function LeaderConsole({
     }
   }
 
+  const [sendError, setSendError] = useState<string | null>(null);
+
   async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!message.trim()) return;
+    const text = message.trim();
+    setMessage("");
+    setSendError(null);
     try {
       await api.post(`/projects/${projectId}/leader/message`, {
-        message: message.trim(),
+        message: text,
       });
-      setMessage("");
     } catch (err) {
       console.error("Failed to send message:", err);
+      setSendError("Failed to send — leader may need restart");
+      setMessage(text);
     }
   }
 
@@ -213,6 +220,11 @@ export default function LeaderConsole({
             >
               Send
             </button>
+            {sendError && (
+              <span className="leader-console__send-error" title={sendError}>
+                !
+              </span>
+            )}
           </form>
         </>
       )}

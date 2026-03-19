@@ -207,6 +207,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 8. Restore TowerController state from DB so existing tower sessions
     # survive server restarts without the frontend needing to re-create them.
+    from atc.session.ace import _pane_is_alive
     from atc.tower.controller import TowerState
 
     try:
@@ -220,6 +221,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
             for ts in tower_sessions:
                 if ts.status not in ("error", "disconnected") and ts.tmux_pane:
+                    # Verify the tmux pane is actually alive — don't restore
+                    # state for dead panes (let frontend auto-start instead).
+                    if not await _pane_is_alive(ts.tmux_pane):
+                        logger.warning(
+                            "Tower session %s has dead pane %s — skipping restore",
+                            ts.id,
+                            ts.tmux_pane,
+                        )
+                        await db_ops.update_session_status(
+                            db, ts.id, "disconnected"
+                        )
+                        continue
+
                     tower_controller._current_project_id = proj.id
                     tower_controller._current_session_id = ts.id
                     tower_controller._state = TowerState.MANAGING
@@ -236,13 +250,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                             "error",
                             "disconnected",
                         ):
-                            tower_controller._leader_session_id = leader.session_id
-                            tower_controller._current_goal = leader.goal
-                            logger.info(
-                                "Restored leader session=%s goal=%s",
-                                leader.session_id,
-                                leader.goal,
-                            )
+                            # Verify leader pane is alive too
+                            if leader_session.tmux_pane and await _pane_is_alive(
+                                leader_session.tmux_pane
+                            ):
+                                tower_controller._leader_session_id = leader.session_id
+                                tower_controller._current_goal = leader.goal
+                                logger.info(
+                                    "Restored leader session=%s goal=%s",
+                                    leader.session_id,
+                                    leader.goal,
+                                )
+                            else:
+                                logger.warning(
+                                    "Leader session %s has dead pane — clearing from leader row",
+                                    leader.session_id,
+                                )
+                                await db.execute(
+                                    "UPDATE leaders SET session_id = NULL, status = 'idle',"
+                                    " updated_at = datetime('now') WHERE id = ?",
+                                    (leader.id,),
+                                )
+                                await db.commit()
                     restored = True
                     break
     except Exception:

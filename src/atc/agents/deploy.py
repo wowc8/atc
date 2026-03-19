@@ -354,7 +354,7 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
         "",
         "## Goal",
         "",
-        spec.goal,
+        spec.goal or "(No specific goal set — await instructions from Tower.)",
         "",
     ]
 

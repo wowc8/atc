@@ -172,6 +172,10 @@ async def send_message(body: MessageRequest, request: Request) -> dict[str, str]
         await tower.send_message(body.message)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409, detail=f"Tower pane unavailable: {exc}"
+        ) from exc
 
     return {"status": "sent"}
 

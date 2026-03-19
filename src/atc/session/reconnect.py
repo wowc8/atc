@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from atc.agents.deploy import TowerDeploySpec, deploy_tower_files
 from atc.agents.factory import get_launch_command
+from atc.leader.leader import _build_manager_deploy_spec
 from atc.session.ace import (
     ATC_TMUX_SESSION,
     _ensure_tmux_session,
@@ -65,10 +66,11 @@ async def reconnect_session(
         # pane from a prior app run may have been launched with outdated (or
         # missing) Tower identity files, causing "no specific ATC role".
         session_type = getattr(session, "session_type", None)
-        if session_type == "tower":
+        if session_type in ("tower", "manager"):
             logger.info(
-                "Session %s: tower pane %s alive but killing to respawn with fresh config",
+                "Session %s: %s pane %s alive but killing to respawn with fresh config",
                 session_id,
+                session_type,
                 session.tmux_pane,
             )
             await _kill_pane(session.tmux_pane)
@@ -144,6 +146,24 @@ async def reconnect_session(
             deployed = deploy_tower_files(spec)
             working_dir = str(deployed.root)
             logger.info("Re-deployed tower config for %s → %s", session_id, deployed.root)
+
+        # Manager (Leader) sessions also need config re-deployed so Claude
+        # Code picks up the Leader identity, hooks, and settings on respawn.
+        elif getattr(session, "session_type", None) == "manager" and project:
+            from atc.agents.deploy import deploy_manager_files
+
+            leader = await db_ops.get_leader_by_project(conn, session.project_id)
+            spec = _build_manager_deploy_spec(
+                leader_id=leader.id if leader else session_id,
+                project_name=project.name if project else "",
+                goal=leader.goal if leader else "",
+                repo_path=working_dir,
+                github_repo=project.github_repo if project else None,
+            )
+            spec.session_id = session_id
+            deployed = deploy_manager_files(spec)
+            working_dir = str(deployed.root)
+            logger.info("Re-deployed manager config for %s → %s", session_id, deployed.root)
 
         # --- Runtime debug: verify working_dir contents before spawn ---
         if working_dir:
