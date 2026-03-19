@@ -3,33 +3,33 @@ import { useLocation } from "react-router-dom";
 import { useAppContext } from "../../context/AppContext";
 import { useTerminal } from "../../hooks/useTerminal";
 import { api } from "../../utils/api";
+import ConfirmPopover from "../common/ConfirmPopover";
 import "./TowerPanel.css";
 
 /**
  * Persistent bottom panel for Tower — lives in the shell layout,
  * persists across all pages. Think VS Code integrated terminal.
  *
- * Context-aware: automatically infers the active project from the
- * current route (e.g. /projects/:id). No project dropdown needed.
+ * For claude_code provider: auto-starts Tower's own Claude Code session
+ * on mount (no goal form). Tower has its own independent terminal session,
+ * separate from the Leader session.
  *
  * Minimized: single-line ticker showing latest Tower activity.
- * Expanded + idle: terminal-style input at bottom.
  * Expanded + running: full PTY terminal + message input bar.
  */
 export default function TowerPanel() {
-  const { state } = useAppContext();
+  const { state, dispatch } = useAppContext();
   const { towerDetail, towerProgress, brainStatus, projects } = state;
 
   const location = useLocation();
   const routeProjectId = useRouteProjectId();
 
   const [expanded, setExpanded] = useState(false);
-  const [input, setInput] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [starting, setStarting] = useState(false);
   const messageInputRef = useRef<HTMLInputElement>(null);
+  const autoStarted = useRef(false);
 
   const isRunning =
     towerDetail.state === "planning" || towerDetail.state === "managing";
@@ -37,37 +37,6 @@ export default function TowerPanel() {
     towerDetail.state === "idle" ||
     towerDetail.state === "complete" ||
     towerDetail.state === "error";
-
-  const terminalChannel = towerDetail.current_session_id
-    ? `terminal:${towerDetail.current_session_id}`
-    : undefined;
-
-  const { attachRef, fit } = useTerminal({
-    channel: terminalChannel,
-    enabled: isRunning && !!terminalChannel,
-  });
-
-  // Re-fit terminal when panel expands
-  useEffect(() => {
-    if (expanded && isRunning) {
-      const timer = setTimeout(() => fit(), 200);
-      return () => clearTimeout(timer);
-    }
-  }, [expanded, isRunning, fit]);
-
-  // Auto-expand when Tower starts running
-  useEffect(() => {
-    if (isRunning) {
-      setExpanded(true);
-    }
-  }, [isRunning]);
-
-  // Focus input when expanded and idle
-  useEffect(() => {
-    if (expanded && isIdle) {
-      inputRef.current?.focus();
-    }
-  }, [expanded, isIdle]);
 
   // Derive the active project from the route
   const contextProject = routeProjectId
@@ -79,35 +48,95 @@ export default function TowerPanel() {
     routeProjectId ??
     (projects.find((p) => p.status === "active")?.id || "");
 
+  const resolvedProject = resolvedProjectId
+    ? projects.find((p) => p.id === resolvedProjectId)
+    : null;
+
+  const isClaudeCode = resolvedProject?.agent_provider === "claude_code";
+
+  // Tower's own terminal channel (NOT the Leader's)
+  const terminalChannel = towerDetail.current_session_id
+    ? `terminal:${towerDetail.current_session_id}`
+    : undefined;
+
+  const { attachRef, fit } = useTerminal({
+    channel: terminalChannel,
+    enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
+  });
+
+  // Auto-start Tower session for claude_code provider
+  useEffect(() => {
+    if (
+      isClaudeCode &&
+      isIdle &&
+      !starting &&
+      !autoStarted.current &&
+      resolvedProjectId
+    ) {
+      autoStarted.current = true;
+      void handleStart();
+    }
+  }, [isClaudeCode, isIdle, starting, resolvedProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fit terminal when panel expands
+  useEffect(() => {
+    if (expanded && (isRunning || (isClaudeCode && !!terminalChannel))) {
+      const timer = setTimeout(() => fit(), 200);
+      return () => clearTimeout(timer);
+    }
+  }, [expanded, isRunning, isClaudeCode, terminalChannel, fit]);
+
+  // Auto-expand when Tower starts running
+  useEffect(() => {
+    if (isRunning) {
+      setExpanded(true);
+    }
+  }, [isRunning]);
+
   const contextLabel = deriveContextLabel(location.pathname, contextProject?.name);
 
-  const handleSubmitGoal = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!input.trim() || !resolvedProjectId) return;
-      setSubmitting(true);
-      try {
-        await api.post("/tower/goal", {
-          project_id: resolvedProjectId,
-          goal: input.trim(),
-        });
-        setInput("");
-      } catch (err) {
-        console.error("Failed to set tower goal:", err);
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [input, resolvedProjectId],
-  );
-
-  const handleCancel = useCallback(async () => {
+  const handleStart = useCallback(async () => {
+    if (!resolvedProjectId) return;
+    setStarting(true);
     try {
-      await api.post("/tower/cancel");
+      const res = await api.post<{ session_id?: string }>(
+        "/tower/start",
+        { project_id: resolvedProjectId },
+      );
+      if (res.session_id) {
+        dispatch({
+          type: "SET_TOWER_DETAIL",
+          payload: {
+            current_session_id: res.session_id,
+            current_project_id: resolvedProjectId,
+          },
+        });
+      }
+      setExpanded(true);
     } catch (err) {
-      console.error("Failed to cancel tower goal:", err);
+      console.error("Failed to start tower session:", err);
+    } finally {
+      setStarting(false);
     }
-  }, []);
+  }, [resolvedProjectId, dispatch]);
+
+  const handleStop = useCallback(async () => {
+    try {
+      await api.post("/tower/stop");
+      autoStarted.current = false;
+      dispatch({
+        type: "SET_TOWER_DETAIL",
+        payload: {
+          state: "idle",
+          current_session_id: null,
+          leader_session_id: null,
+          current_goal: null,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to stop tower:", err);
+    }
+  }, [dispatch]);
 
   const handleSendMessage = useCallback(
     async (e: React.FormEvent) => {
@@ -119,7 +148,7 @@ export default function TowerPanel() {
         setMessage("");
         messageInputRef.current?.focus();
       } catch (err) {
-        console.error("Failed to send message to Leader:", err);
+        console.error("Failed to send message to Tower:", err);
       } finally {
         setSending(false);
       }
@@ -127,19 +156,13 @@ export default function TowerPanel() {
     [message],
   );
 
-  const handleMarkComplete = useCallback(async () => {
-    try {
-      await api.post("/tower/complete");
-    } catch (err) {
-      console.error("Failed to mark Tower goal complete:", err);
-    }
-  }, []);
-
   const tickerText =
     brainStatus.message ||
     (towerDetail.current_goal
       ? `Goal: ${towerDetail.current_goal}`
       : "Idle");
+
+  const showTerminal = isRunning || (isClaudeCode && !!terminalChannel);
 
   return (
     <div
@@ -183,23 +206,30 @@ export default function TowerPanel() {
               {towerProgress.done}/{towerProgress.total} tasks ({towerProgress.progress_pct}%)
             </span>
           )}
-          {isRunning && (
-            <>
-              <button
-                className="btn btn-sm"
-                onClick={handleMarkComplete}
-                data-testid="tower-panel-complete"
-              >
-                Complete
-              </button>
+          {!showTerminal && !isClaudeCode && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleStart}
+              disabled={starting || !resolvedProjectId}
+              data-testid="tower-panel-start"
+            >
+              {starting ? "Starting..." : "Start"}
+            </button>
+          )}
+          {showTerminal && (
+            <ConfirmPopover
+              message="Stop the Tower session?"
+              confirmLabel="Stop"
+              onConfirm={handleStop}
+              variant="danger"
+            >
               <button
                 className="btn btn-danger btn-sm"
-                onClick={handleCancel}
-                data-testid="tower-panel-cancel"
+                data-testid="tower-panel-stop"
               >
-                Cancel
+                Stop
               </button>
-            </>
+            </ConfirmPopover>
           )}
         </div>
       </div>
@@ -207,13 +237,18 @@ export default function TowerPanel() {
       {/* Expanded content */}
       {expanded && (
         <div className="tower-panel__content" data-testid="tower-panel-content">
-          {/* Terminal area -- always present when running */}
-          {isRunning && (
+          {/* Terminal area */}
+          {showTerminal && (
             <div
               className="tower-panel__terminal"
               ref={attachRef}
               data-testid="tower-panel-terminal"
             />
+          )}
+
+          {/* Loading state for auto-start */}
+          {isClaudeCode && !showTerminal && starting && (
+            <div className="tower-panel__loading">Starting Tower terminal...</div>
           )}
 
           {/* Error state */}
@@ -224,8 +259,8 @@ export default function TowerPanel() {
             </div>
           )}
 
-          {/* Input bar -- always at the bottom */}
-          {isRunning ? (
+          {/* Message input bar — always at the bottom when terminal is showing */}
+          {showTerminal && (
             <form
               className="tower-panel__input-bar"
               onSubmit={handleSendMessage}
@@ -249,36 +284,6 @@ export default function TowerPanel() {
                 data-testid="tower-panel-send"
               >
                 {sending ? "..." : "Send"}
-              </button>
-            </form>
-          ) : (
-            <form
-              className="tower-panel__input-bar"
-              onSubmit={handleSubmitGoal}
-              data-testid="tower-panel-goal-form"
-            >
-              <span className="tower-panel__prompt">&gt;</span>
-              <input
-                ref={inputRef}
-                type="text"
-                className="tower-panel__input"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={
-                  resolvedProjectId
-                    ? "Describe a goal for Tower..."
-                    : "No active projects"
-                }
-                disabled={submitting || !resolvedProjectId}
-                data-testid="tower-panel-goal"
-              />
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={submitting || !input.trim() || !resolvedProjectId}
-                data-testid="tower-panel-start"
-              >
-                {submitting ? "..." : "Start"}
               </button>
             </form>
           )}

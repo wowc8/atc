@@ -302,13 +302,14 @@ class TestTowerStatus:
     @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
     @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
-    def test_submit_goal_twice_returns_conflict(
+    def test_submit_goal_twice_while_managing_succeeds(
         self,
         mock_ensure: AsyncMock,
         mock_spawn: AsyncMock,
         mock_send: AsyncMock,
         client: TestClient,
     ) -> None:
+        """Tower in MANAGING state can accept new goals (delegates to Leader)."""
         resp = client.post("/api/projects", json={"name": "busy-proj"})
         project_id = resp.json()["id"]
 
@@ -322,39 +323,37 @@ class TestTowerStatus:
             "/api/tower/goal",
             json={"project_id": project_id, "goal": "Second goal"},
         )
-        assert resp.status_code == 409
+        assert resp.status_code == 200
 
+    @patch("atc.tower.session.stop_tower_session", new_callable=AsyncMock)
     @patch("atc.leader.leader._kill_pane", new_callable=AsyncMock)
     @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
     @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
-    def test_cancel_goal(
+    def test_stop_tower(
         self,
         mock_ensure: AsyncMock,
         mock_spawn: AsyncMock,
         mock_send: AsyncMock,
         mock_kill: AsyncMock,
+        mock_stop_tower: AsyncMock,
         client: TestClient,
     ) -> None:
-        resp = client.post("/api/projects", json={"name": "cancel-proj"})
+        resp = client.post("/api/projects", json={"name": "stop-proj"})
         project_id = resp.json()["id"]
 
         client.post(
             "/api/tower/goal",
-            json={"project_id": project_id, "goal": "Cancel me"},
+            json={"project_id": project_id, "goal": "Stop me"},
         )
 
-        resp = client.post("/api/tower/cancel")
+        resp = client.post("/api/tower/stop")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "cancelled"
+        assert resp.json()["status"] == "stopped"
 
         # Tower should be idle again
         resp = client.get("/api/tower/status")
         assert resp.json()["state"] == "idle"
-
-    def test_cancel_no_active_goal(self, client: TestClient) -> None:
-        resp = client.post("/api/tower/cancel")
-        assert resp.status_code == 409
 
 
 # ---------------------------------------------------------------------------

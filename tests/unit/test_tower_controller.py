@@ -53,6 +53,7 @@ class TestTowerState:
         assert status["current_goal"] is None
         assert status["current_project_id"] is None
         assert status["current_session_id"] is None
+        assert status["leader_session_id"] is None
 
     async def test_invalid_transition_raises(self, tower: TowerController) -> None:
         with pytest.raises(InvalidTowerTransitionError):
@@ -100,7 +101,7 @@ class TestTowerState:
         assert status["output_line_count"] == 3
 
 
-@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="session-123")
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-123")
 @pytest.mark.asyncio
 class TestSubmitGoal:
     async def test_submit_goal_success(
@@ -114,11 +115,13 @@ class TestSubmitGoal:
 
         assert result["status"] == "accepted"
         assert result["project_id"] == project.id
-        assert result["session_id"] == "session-123"
+        assert result["leader_session_id"] == "leader-sess-123"
         assert result["context_package"]["goal"] == "Build feature X"
         assert result["context_package"]["project_name"] == "test-proj"
         assert result["context_package"]["repo_path"] == "/tmp/repo"
         assert tower.state == TowerState.MANAGING
+        # Leader session tracked separately
+        assert tower._leader_session_id == "leader-sess-123"
 
     async def test_submit_goal_publishes_event(
         self, mock_start: AsyncMock, db, event_bus: EventBus
@@ -134,7 +137,7 @@ class TestSubmitGoal:
 
         assert len(captured) == 1
         assert captured[0]["goal"] == "Test goal"
-        assert captured[0]["session_id"] == "session-123"
+        assert captured[0]["session_id"] == "leader-sess-123"
 
     async def test_submit_goal_publishes_state_changes(
         self, mock_start: AsyncMock, db, event_bus: EventBus
@@ -159,19 +162,6 @@ class TestSubmitGoal:
             await tower.submit_goal("nonexistent-id", "Some goal")
         # Tower should be in error state after failure
         assert tower.state == TowerState.ERROR
-
-    async def test_submit_goal_while_busy(
-        self, mock_start: AsyncMock, db, event_bus: EventBus
-    ) -> None:
-        project = await create_project(db, "test-proj")
-        await create_leader(db, project.id)
-        tower = TowerController(db, event_bus)
-
-        await tower.submit_goal(project.id, "First goal")
-        assert tower.state == TowerState.MANAGING
-
-        with pytest.raises(TowerBusyError):
-            await tower.submit_goal(project.id, "Second goal")
 
     async def test_submit_goal_after_complete(
         self, mock_start: AsyncMock, db, event_bus: EventBus
@@ -203,7 +193,7 @@ class TestSubmitGoal:
 
 
 @patch("atc.tower.controller.stop_leader", new_callable=AsyncMock)
-@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="session-123")
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-123")
 @pytest.mark.asyncio
 class TestCancelGoal:
     async def test_cancel_active_goal(
@@ -216,10 +206,12 @@ class TestCancelGoal:
         await tower.submit_goal(project.id, "Cancel me")
         await tower.cancel_goal()
 
+        # Leader should be stopped but Tower stays in managing
         mock_stop.assert_called_once()
-        assert tower.state == TowerState.IDLE
+        assert tower.current_goal is None
+        assert tower._leader_session_id is None
 
-    async def test_cancel_resets_properties(
+    async def test_cancel_resets_goal_properties(
         self, mock_start: AsyncMock, mock_stop: AsyncMock, db, event_bus: EventBus
     ) -> None:
         project = await create_project(db, "test-proj")
@@ -230,13 +222,12 @@ class TestCancelGoal:
         await tower.cancel_goal()
 
         assert tower.current_goal is None
-        assert tower.current_project_id is None
-        assert tower.current_session_id is None
+        assert tower._leader_session_id is None
 
 
 @pytest.mark.asyncio
 class TestSessionMonitoring:
-    @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+    @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
     async def test_leader_error_transitions_tower(
         self, mock_start: AsyncMock, db, event_bus: EventBus
     ) -> None:
@@ -250,12 +241,12 @@ class TestSessionMonitoring:
         # Simulate leader session entering error state
         await event_bus.publish(
             "session_status_changed",
-            {"session_id": "sess-1", "new_status": "error"},
+            {"session_id": "leader-sess-1", "new_status": "error"},
         )
 
         assert tower.state == TowerState.ERROR
 
-    @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+    @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
     async def test_unrelated_session_error_ignored(
         self, mock_start: AsyncMock, db, event_bus: EventBus
     ) -> None:
@@ -276,7 +267,7 @@ class TestSessionMonitoring:
 
 @pytest.mark.asyncio
 class TestWebSocketBroadcast:
-    @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+    @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
     async def test_state_changes_broadcast_to_ws(
         self, mock_start: AsyncMock, db, event_bus: EventBus
     ) -> None:
@@ -296,45 +287,50 @@ class TestWebSocketBroadcast:
 
 
 @patch(
-    "atc.tower.controller.send_leader_message",
+    "atc.tower.controller.send_tower_message",
     new_callable=AsyncMock,
 )
-@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+@patch("atc.tower.controller.start_tower_session", new_callable=AsyncMock, return_value="tower-sess-1")
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
 @pytest.mark.asyncio
 class TestSendMessage:
     async def test_send_message_success(
-        self, mock_start: AsyncMock, mock_send: AsyncMock, db, event_bus: EventBus
+        self, mock_start_leader: AsyncMock, mock_start_tower: AsyncMock,
+        mock_send: AsyncMock, db, event_bus: EventBus
     ) -> None:
         project = await create_project(db, "test-proj")
         await create_leader(db, project.id)
         tower = TowerController(db, event_bus)
 
-        await tower.submit_goal(project.id, "Test goal")
+        # Start tower session first, then submit goal
+        await tower.start_session(project.id)
         await tower.send_message("Do the thing")
 
         mock_send.assert_called_once_with(
             db,
-            project.id,
+            "tower-sess-1",
             "Do the thing",
             event_bus=event_bus,
         )
 
-    async def test_send_message_not_managing_raises(
-        self, mock_start: AsyncMock, mock_send: AsyncMock, db, event_bus: EventBus
+    async def test_send_message_no_session_raises(
+        self, mock_start_leader: AsyncMock, mock_start_tower: AsyncMock,
+        mock_send: AsyncMock, db, event_bus: EventBus
     ) -> None:
         tower = TowerController(db, event_bus)
-        with pytest.raises(ValueError, match="not managing"):
+        with pytest.raises(ValueError, match="No active Tower session"):
             await tower.send_message("Hello")
 
     async def test_send_message_broadcasts_to_ws(
-        self, mock_start: AsyncMock, mock_send: AsyncMock, db, event_bus: EventBus
+        self, mock_start_leader: AsyncMock, mock_start_tower: AsyncMock,
+        mock_send: AsyncMock, db, event_bus: EventBus
     ) -> None:
         ws_hub = AsyncMock()
         project = await create_project(db, "test-proj")
         await create_leader(db, project.id)
         tower = TowerController(db, event_bus, ws_hub=ws_hub)
 
-        await tower.submit_goal(project.id, "Test goal")
+        await tower.start_session(project.id)
         ws_hub.broadcast.reset_mock()
 
         await tower.send_message("Do something")
@@ -349,7 +345,7 @@ class TestSendMessage:
         assert msg_calls[0][0][1]["message"] == "Do something"
 
 
-@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
 @pytest.mark.asyncio
 class TestGetProgress:
     async def test_progress_no_active_goal(
@@ -432,7 +428,7 @@ class TestGetProgress:
         assert len(progress_calls) == 1
 
 
-@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="sess-1")
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
 @pytest.mark.asyncio
 class TestLeaderOutput:
     async def test_captures_leader_output(
@@ -447,7 +443,7 @@ class TestLeaderOutput:
         # Simulate PTY output from leader session
         await event_bus.publish(
             "pty_output",
-            {"session_id": "sess-1", "data": b"Working on task 1\n"},
+            {"session_id": "leader-sess-1", "data": b"Working on task 1\n"},
         )
 
         assert len(tower._leader_output_lines) == 1
@@ -482,7 +478,7 @@ class TestLeaderOutput:
         for i in range(10):
             await event_bus.publish(
                 "pty_output",
-                {"session_id": "sess-1", "data": f"Line {i}\n".encode()},
+                {"session_id": "leader-sess-1", "data": f"Line {i}\n".encode()},
             )
 
         assert len(tower._leader_output_lines) == 5
@@ -501,7 +497,7 @@ class TestLeaderOutput:
 
         await event_bus.publish(
             "pty_output",
-            {"session_id": "sess-1", "data": b"Thinking about it...\n"},
+            {"session_id": "leader-sess-1", "data": b"Thinking about it...\n"},
         )
 
         activity_calls = [
@@ -524,7 +520,7 @@ class TestLeaderOutput:
         # String data (not bytes) should also work
         await event_bus.publish(
             "pty_output",
-            {"session_id": "sess-1", "data": "String output\n"},
+            {"session_id": "leader-sess-1", "data": "String output\n"},
         )
 
         assert len(tower._leader_output_lines) == 1
@@ -540,7 +536,7 @@ class TestLeaderOutput:
 
         await event_bus.publish(
             "pty_output",
-            {"session_id": "sess-1", "data": b"Some output\n"},
+            {"session_id": "leader-sess-1", "data": b"Some output\n"},
         )
         assert len(tower._leader_output_lines) > 0
 
@@ -575,7 +571,7 @@ class TestLeaderOutput:
         # Empty/whitespace-only output should not trigger broadcast
         await event_bus.publish(
             "pty_output",
-            {"session_id": "sess-1", "data": b"   \n  \n"},
+            {"session_id": "leader-sess-1", "data": b"   \n  \n"},
         )
 
         activity_calls = [

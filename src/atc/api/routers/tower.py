@@ -2,10 +2,10 @@
 
 Routes:
   GET    /api/tower/status           → Tower status summary
+  POST   /api/tower/start            → start Tower's own Claude Code session
+  POST   /api/tower/stop             → stop Tower's session
   POST   /api/tower/goal             → submit new goal (creates Leader + context)
-  POST   /api/tower/message          → send message to current Leader
-  POST   /api/tower/cancel           → cancel current goal
-  POST   /api/tower/complete         → mark current goal as complete
+  POST   /api/tower/message          → send message to Tower's terminal
   GET    /api/tower/progress         → get Leader task graph progress
   GET    /api/tower/memory           → list tower memory entries
   DELETE /api/tower/memory/{key}     → forget a memory entry
@@ -19,6 +19,10 @@ from pydantic import BaseModel
 from atc.tower.controller import TowerBusyError, TowerController
 
 router = APIRouter()
+
+
+class StartRequest(BaseModel):
+    project_id: str
 
 
 class GoalRequest(BaseModel):
@@ -38,6 +42,7 @@ class TowerStatusResponse(BaseModel):
     current_goal: str | None
     current_project_id: str | None
     current_session_id: str | None
+    leader_session_id: str | None
     output_line_count: int
 
 
@@ -95,8 +100,41 @@ async def tower_status(request: Request) -> TowerStatusResponse:
         current_goal=controller_status["current_goal"],
         current_project_id=controller_status["current_project_id"],
         current_session_id=controller_status["current_session_id"],
+        leader_session_id=controller_status.get("leader_session_id"),
         output_line_count=controller_status.get("output_line_count", 0),
     )
+
+
+@router.post("/start")
+async def start_tower(body: StartRequest, request: Request) -> dict:
+    """Start Tower's own Claude Code session for a project.
+
+    This creates an independent terminal session for Tower, separate
+    from the Leader session.
+    """
+    db = await _get_db(request)
+    tower = _get_tower(request)
+
+    # Verify project exists
+    cursor = await db.execute("SELECT id FROM projects WHERE id = ?", (body.project_id,))
+    row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Project {body.project_id} not found")
+
+    try:
+        session_id = await tower.start_session(body.project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"status": "started", "session_id": session_id, "project_id": body.project_id}
+
+
+@router.post("/stop")
+async def stop_tower(request: Request) -> dict:
+    """Stop Tower's Claude Code session and any active Leader."""
+    tower = _get_tower(request)
+    await tower.stop_session()
+    return {"status": "stopped"}
 
 
 @router.post("/goal")
@@ -127,11 +165,7 @@ async def submit_goal(body: GoalRequest, request: Request) -> dict:
 
 @router.post("/message")
 async def send_message(body: MessageRequest, request: Request) -> dict[str, str]:
-    """Send a message to the current Leader's terminal.
-
-    The Tower types this message into the Leader's Claude Code session,
-    allowing the user to communicate with the Leader through Tower.
-    """
+    """Send a message to Tower's Claude Code terminal."""
     tower = _get_tower(request)
 
     try:
@@ -140,33 +174,6 @@ async def send_message(body: MessageRequest, request: Request) -> dict[str, str]
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return {"status": "sent"}
-
-
-@router.post("/cancel")
-async def cancel_goal(request: Request) -> dict:
-    """Cancel the current goal and stop the Leader session."""
-    tower = _get_tower(request)
-
-    if tower.state.value == "idle":
-        raise HTTPException(status_code=409, detail="No active goal to cancel")
-
-    await tower.cancel_goal()
-    return {"status": "cancelled"}
-
-
-@router.post("/complete")
-async def mark_complete(request: Request) -> dict[str, str]:
-    """Mark the current goal as complete and return Tower to idle."""
-    tower = _get_tower(request)
-
-    if tower.state.value != "managing":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot complete — Tower is {tower.state.value}, not managing",
-        )
-
-    await tower.mark_complete()
-    return {"status": "completed"}
 
 
 @router.get("/progress", response_model=TowerProgressResponse)

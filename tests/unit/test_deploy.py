@@ -135,6 +135,20 @@ class TestDeployAceFiles:
         assert "Stop" in settings["hooks"]
         assert "Notification" in settings["hooks"]
 
+    def test_hooks_use_correct_format(self, ace_spec: AceDeploySpec, staging_root: Path) -> None:
+        """Hooks must use matcher + hooks array format, not bare command objects."""
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        settings = json.loads(result.settings_path.read_text())
+        for event_name, entries in settings["hooks"].items():
+            assert isinstance(entries, list), f"{event_name} hooks must be a list"
+            for entry in entries:
+                assert "matcher" in entry, f"{event_name} entry missing 'matcher'"
+                assert "hooks" in entry, f"{event_name} entry missing 'hooks'"
+                assert isinstance(entry["hooks"], list), f"{event_name} 'hooks' must be a list"
+                for hook in entry["hooks"]:
+                    assert "type" in hook
+                    assert "command" in hook
+
     def test_creates_hook_scripts(self, ace_spec: AceDeploySpec, staging_root: Path) -> None:
         result = deploy_ace_files(ace_spec, staging_root=staging_root)
         hooks_dir = result.root / ".claude" / "hooks"
