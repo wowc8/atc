@@ -112,7 +112,7 @@ async def stop_tower_session(
     if session.tmux_pane:
         await _kill_pane(session.tmux_pane)
 
-    await db_ops.update_session_status(conn, session.id, SessionStatus.IDLE.value)
+    await db_ops.update_session_status(conn, session.id, SessionStatus.DISCONNECTED.value)
 
     if event_bus:
         await event_bus.publish(
@@ -120,7 +120,7 @@ async def stop_tower_session(
             {
                 "session_id": session.id,
                 "previous_status": session.status,
-                "new_status": SessionStatus.IDLE.value,
+                "new_status": SessionStatus.DISCONNECTED.value,
             },
         )
 

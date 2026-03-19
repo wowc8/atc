@@ -198,7 +198,7 @@ export default function TowerPanel() {
               {towerProgress.done}/{towerProgress.total} tasks ({towerProgress.progress_pct}%)
             </span>
           )}
-          {!showTerminal && !isClaudeCode && (
+          {!showTerminal && (
             <button
               className="btn btn-primary btn-sm"
               onClick={handleStart}
