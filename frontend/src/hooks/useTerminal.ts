@@ -11,6 +11,24 @@ interface UseTerminalOptions {
 }
 
 /**
+ * Transform separator lines (rows of box-drawing ─ characters) into subtle,
+ * dimmed dividers so they don't dominate the terminal UI.
+ *
+ * Claude Code emits ─ (U+2500) repeated across the full terminal width as
+ * section separators.  In xterm.js these render as thick grey bars.  We
+ * wrap them with ANSI dim + dark-grey so they fade into the background.
+ */
+function transformSeparators(data: string): string {
+  // Match runs of 3+ box-drawing horizontal chars (─ ━ ╌ ╍ ┄ ┅ ┈ ┉)
+  // that make up separator lines, possibly surrounded by ANSI escapes.
+  // The regex targets sequences that appear as full-width separator rows.
+  return data.replace(
+    /([─━╌╍┄┅┈┉]{3,})/g,
+    "\x1b[2m\x1b[38;5;238m$1\x1b[0m",
+  );
+}
+
+/**
  * Hook that manages an xterm.js Terminal instance and connects it to the
  * ATC WebSocket for streaming PTY output.
  *
@@ -105,9 +123,9 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
         try {
           const msg = JSON.parse(evt.data);
           if (msg.channel === channel && msg.data) {
-            termRef.current?.write(
-              typeof msg.data === "string" ? msg.data : JSON.stringify(msg.data),
-            );
+            const raw =
+              typeof msg.data === "string" ? msg.data : JSON.stringify(msg.data);
+            termRef.current?.write(transformSeparators(raw));
           }
         } catch {
           /* ignore malformed */
