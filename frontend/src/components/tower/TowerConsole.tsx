@@ -96,7 +96,7 @@ export default function TowerConsole() {
     setLoading(true);
     try {
       await api.post("/tower/stop");
-      autoStarted.current = false;
+      autoStarted.current = true;
       dispatch({
         type: "SET_TOWER_DETAIL",
         payload: {
