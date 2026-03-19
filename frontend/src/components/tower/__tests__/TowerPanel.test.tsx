@@ -9,6 +9,7 @@ vi.mock("../../../hooks/useTerminal", () => ({
   useTerminal: () => ({
     attachRef: vi.fn(),
     fit: vi.fn(),
+    sendInput: vi.fn(),
   }),
 }));
 
@@ -31,7 +32,7 @@ describe("TowerPanel", () => {
 
   it("starts minimized", () => {
     renderWithProviders(<TowerPanel />);
-    expect(screen.queryByTestId("tower-panel-content")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tower-panel-content")).not.toBeVisible();
   });
 
   it("expands when toggle is clicked", async () => {
@@ -39,15 +40,11 @@ describe("TowerPanel", () => {
     renderWithProviders(<TowerPanel />);
 
     await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.getByTestId("tower-panel-content")).toBeInTheDocument();
+    expect(screen.getByTestId("tower-panel-content")).toBeVisible();
   });
 
-  it("shows terminal-style goal input when expanded and idle", async () => {
-    const user = userEvent.setup();
+  it("shows Start button in the bar when idle", () => {
     renderWithProviders(<TowerPanel />);
-
-    await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.getByTestId("tower-panel-goal")).toBeInTheDocument();
     expect(screen.getByTestId("tower-panel-start")).toBeInTheDocument();
   });
 
@@ -69,11 +66,8 @@ describe("TowerPanel", () => {
     expect(screen.getByText("Idle")).toBeInTheDocument();
   });
 
-  it("disables Start button when goal is empty", async () => {
-    const user = userEvent.setup();
+  it("disables Start button when no project is active", () => {
     renderWithProviders(<TowerPanel />);
-
-    await user.click(screen.getByTestId("tower-panel-toggle"));
     const startBtn = screen.getByTestId("tower-panel-start");
     expect(startBtn).toBeDisabled();
   });
@@ -84,18 +78,10 @@ describe("TowerPanel", () => {
 
     // Expand
     await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.getByTestId("tower-panel-content")).toBeInTheDocument();
+    expect(screen.getByTestId("tower-panel-content")).toBeVisible();
 
-    // Collapse
+    // Collapse — content stays in DOM but is hidden
     await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.queryByTestId("tower-panel-content")).not.toBeInTheDocument();
-  });
-
-  it("shows prompt character in input bar", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<TowerPanel />);
-
-    await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.getByText(">")).toBeInTheDocument();
+    expect(screen.getByTestId("tower-panel-content")).not.toBeVisible();
   });
 });
