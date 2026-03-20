@@ -441,6 +441,43 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "",
     ]
 
+    # CLI commands documentation
+    lines.extend([
+        "## ATC CLI Commands",
+        "",
+        "Use these commands to manage projects, leaders, and aces.",
+        "",
+        "### Project Management",
+        "```bash",
+        "atc projects list                                    # List all projects",
+        "atc projects create --name 'Name' --description '...' # Create a new project",
+        "atc projects show <project-id>                       # Show project details",
+        "```",
+        "",
+        "### Leader Lifecycle",
+        "```bash",
+        "atc leader start --project-id <id>                   # Start leader for a project",
+        "atc leader start --project-id <id> --goal '...'      # Start leader with a goal",
+        "atc leader stop --project-id <id>                    # Stop leader for a project",
+        "```",
+        "",
+        "### Ace Management",
+        "```bash",
+        "atc ace create --project-id <id> --name 'ace-name'   # Create an ace session",
+        "atc ace list --project-id <id>                       # List aces for a project",
+        "```",
+        "",
+        "### Workflow",
+        "",
+        "When the user asks to create a project:",
+        "1. `atc projects create --name '...' --description '...'` — note the project ID from the response",
+        "2. `atc leader start --project-id <id>` — start the leader for the project",
+        "3. `atc ace create --project-id <id> --name '...'` — add aces as needed",
+        "",
+        "All commands output JSON. Parse the `id` field from create responses to use in subsequent commands.",
+        "",
+    ])
+
     if spec.repo_path or spec.github_repo:
         lines.append("## Repository")
         lines.append("")
@@ -644,6 +681,8 @@ def _tower_allowed_commands(spec: TowerDeploySpec) -> list[str]:
     """Build the allowed commands list for a Tower."""
     commands = list(_BASE_ALLOWED_COMMANDS)
     commands.append("Bash(atc tower *)")
+    commands.append("Bash(atc projects *)")
+    commands.append("Bash(atc leader *)")
     commands.extend(spec.allowed_commands)
     return commands
 

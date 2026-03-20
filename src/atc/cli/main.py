@@ -1,9 +1,16 @@
-"""ATC CLI entry point — dispatches to ``ace`` and ``tower`` subcommands.
+"""ATC CLI entry point — dispatches to ``ace``, ``leader``, ``projects``, and ``tower`` subcommands.
 
 Usage::
 
     atc ace status <session_id> working
     atc ace done <session_id>
+    atc ace create --project-id <id> --name '...'
+    atc ace list --project-id <id>
+    atc leader start --project-id <id>
+    atc leader stop --project-id <id>
+    atc projects list
+    atc projects create --name '...' --description '...'
+    atc projects show <id>
     atc tower status
 """
 
@@ -12,7 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from atc.cli import ace, tower
+from atc.cli import ace, leader, projects, tower
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     ace.register(subparsers)
+    leader.register(subparsers)
+    projects.register(subparsers)
     tower.register(subparsers)
 
     return parser

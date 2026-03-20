@@ -67,6 +67,24 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     )
     notify_parser.set_defaults(handler=_handle_notify)
 
+    # atc ace create --project-id <id> --name '...'
+    create_parser = ace_sub.add_parser("create", help="Create a new ace session")
+    create_parser.add_argument("--project-id", required=True, help="Project UUID")
+    create_parser.add_argument("--name", required=True, help="Ace session name")
+    create_parser.add_argument("--task-id", default=None, help="Task ID to assign")
+    create_parser.add_argument(
+        "--api", default=_DEFAULT_API, help="ATC API base URL",
+    )
+    create_parser.set_defaults(handler=_handle_create)
+
+    # atc ace list --project-id <id>
+    list_parser = ace_sub.add_parser("list", help="List ace sessions for a project")
+    list_parser.add_argument("--project-id", required=True, help="Project UUID")
+    list_parser.add_argument(
+        "--api", default=_DEFAULT_API, help="ATC API base URL",
+    )
+    list_parser.set_defaults(handler=_handle_list)
+
     ace_parser.set_defaults(handler=lambda _: ace_parser.print_help() or 1)
 
 
@@ -135,3 +153,46 @@ def _handle_blocked(args: argparse.Namespace) -> int:
 
 def _handle_notify(args: argparse.Namespace) -> int:
     return _api_post_notify(args.api, args.session_id, args.message)
+
+
+def _handle_create(args: argparse.Namespace) -> int:
+    """POST /api/projects/{project_id}/aces to create a new ace session."""
+    url = f"{args.api}/api/projects/{args.project_id}/aces"
+    payload: dict = {"name": args.name}
+    if args.task_id:
+        payload["task_id"] = args.task_id
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode())
+            print(json.dumps(body, indent=2))
+            return 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode() if exc.fp else str(exc)
+        print(f"Error: {exc.code} — {detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Error: cannot reach ATC API at {args.api} — {exc.reason}", file=sys.stderr)
+        return 1
+
+
+def _handle_list(args: argparse.Namespace) -> int:
+    """GET /api/projects/{project_id}/aces to list ace sessions."""
+    url = f"{args.api}/api/projects/{args.project_id}/aces"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode())
+            print(json.dumps(body, indent=2))
+            return 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode() if exc.fp else str(exc)
+        print(f"Error: {exc.code} — {detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Error: cannot reach ATC API at {args.api} — {exc.reason}", file=sys.stderr)
+        return 1
