@@ -90,6 +90,32 @@ def _entry_to_response(entry) -> ContextEntryResponse:  # noqa: ANN001
     return ContextEntryResponse(**entry.__dict__)
 
 
+def _context_channel(entry) -> str:  # noqa: ANN001
+    """Return the WebSocket channel for a context entry's scope."""
+    if entry.scope == "global":
+        return "context:global"
+    if entry.scope == "project" and entry.project_id:
+        return f"context:{entry.project_id}"
+    if entry.session_id:
+        return f"context:session:{entry.session_id}"
+    return "context:global"
+
+
+async def _broadcast_context_change(
+    request: Request, action: str, entry,  # noqa: ANN001
+) -> None:
+    """Broadcast a context change over the WebSocket hub."""
+    ws_hub = getattr(request.app.state, "ws_hub", None)
+    if ws_hub is None:
+        return
+    channel = _context_channel(entry)
+    payload = {
+        "action": action,
+        "entry": _entry_to_response(entry).model_dump(),
+    }
+    await ws_hub.broadcast(channel, payload)
+
+
 # ---------------------------------------------------------------------------
 # Global context endpoints
 # ---------------------------------------------------------------------------
@@ -134,6 +160,7 @@ async def create_global_context(
     except Exception:
         logger.exception("Failed to create global context entry")
         raise HTTPException(status_code=409, detail="Duplicate key") from None
+    await _broadcast_context_change(request, "created", entry)
     return _entry_to_response(entry)
 
 
@@ -207,6 +234,7 @@ async def create_project_context(
     except Exception:
         logger.exception("Failed to create project context entry")
         raise HTTPException(status_code=409, detail="Duplicate key") from None
+    await _broadcast_context_change(request, "created", entry)
     return _entry_to_response(entry)
 
 
@@ -285,6 +313,7 @@ async def create_session_context(
     except Exception:
         logger.exception("Failed to create session context entry")
         raise HTTPException(status_code=409, detail="Duplicate key") from None
+    await _broadcast_context_change(request, "created", entry)
     return _entry_to_response(entry)
 
 
@@ -325,6 +354,7 @@ async def update_context_entry(
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="Context entry not found")
+    await _broadcast_context_change(request, "updated", updated)
     return _entry_to_response(updated)
 
 
@@ -335,6 +365,8 @@ async def delete_context_entry(
 ) -> None:
     """Delete a context entry."""
     db = await _get_db(request)
-    deleted = await db_ops.delete_context_entry(db, entry_id)
-    if not deleted:
+    entry = await db_ops.get_context_entry(db, entry_id)
+    if entry is None:
         raise HTTPException(status_code=404, detail="Context entry not found")
+    await db_ops.delete_context_entry(db, entry_id)
+    await _broadcast_context_change(request, "deleted", entry)
