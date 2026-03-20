@@ -185,6 +185,23 @@ export interface AppEvent {
   created_at: string;
 }
 
+export type ContextScope = "global" | "project" | "tower" | "leader" | "ace";
+
+export interface ContextEntry {
+  id: string;
+  scope: ContextScope;
+  project_id: string | null;
+  session_id: string | null;
+  key: string;
+  entry_type: string;
+  value: string;
+  restricted: boolean;
+  position: number;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FeatureFlag {
   id: string;
   key: string;

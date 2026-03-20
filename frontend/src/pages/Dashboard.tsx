@@ -4,6 +4,7 @@ import { useAppContext } from "../context/AppContext";
 import StatusBadge from "../components/common/StatusBadge";
 import TimeAgo from "../components/common/TimeAgo";
 import CreateProjectModal from "../components/common/CreateProjectModal";
+import ContextHub from "../components/context/ContextHub";
 import "./Dashboard.css";
 
 export default function Dashboard() {
@@ -139,6 +140,13 @@ export default function Dashboard() {
             ))}
           </div>
         )}
+      </section>
+
+      {/* Global context section */}
+      <section className="dashboard__context">
+        <div className="panel">
+          <ContextHub scope="global" />
+        </div>
       </section>
 
       <CreateProjectModal
