@@ -101,7 +101,13 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   // Fit on resize
   useEffect(() => {
     if (!enabled) return;
-    const handleResize = () => fitRef.current?.fit();
+    const handleResize = () => {
+      try {
+        fitRef.current?.fit();
+      } catch {
+        // Terminal renderer may not be fully initialized
+      }
+    };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [enabled]);
