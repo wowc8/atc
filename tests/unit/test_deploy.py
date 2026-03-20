@@ -586,3 +586,203 @@ class TestDeployedFiles:
         df = DeployedFiles(root=tmp_path, files=["a.txt"])
         with pytest.raises(AttributeError):
             df.root = tmp_path / "other"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Context read/write hook scripts
+# ---------------------------------------------------------------------------
+
+
+class TestContextHookScripts:
+    """Test that context_read.sh and context_write.sh are deployed for all agent types."""
+
+    def test_ace_deploys_context_read_script(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        script = result.root / ".claude" / "hooks" / "context_read.sh"
+        assert script.exists()
+        content = script.read_text()
+        assert "#!/usr/bin/env bash" in content
+        assert "127.0.0.1:8420" in content
+        assert "ace-001" in content
+        assert "/api/sessions/" in content
+        assert "--key" in content
+
+    def test_ace_deploys_context_write_script(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        script = result.root / ".claude" / "hooks" / "context_write.sh"
+        assert script.exists()
+        content = script.read_text()
+        assert "#!/usr/bin/env bash" in content
+        assert "ace-001" in content
+        assert 'SCOPE="ace"' in content
+        assert "--key" in content
+        assert "--value" in content
+
+    def test_ace_context_scripts_are_executable(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        for name in ("context_read.sh", "context_write.sh"):
+            script = result.root / ".claude" / "hooks" / name
+            assert script.stat().st_mode & stat.S_IEXEC, f"{name} should be executable"
+
+    def test_manager_deploys_context_scripts(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        hooks_dir = result.root / ".claude" / "hooks"
+        assert (hooks_dir / "context_read.sh").exists()
+        assert (hooks_dir / "context_write.sh").exists()
+        write_content = (hooks_dir / "context_write.sh").read_text()
+        assert 'SCOPE="leader"' in write_content
+
+    def test_manager_context_scripts_use_session_id(self, staging_root: Path) -> None:
+        """Manager context scripts should use session_id (not leader_id) when available."""
+        spec = ManagerDeploySpec(
+            leader_id="leader-x",
+            project_name="Test",
+            goal="Do something",
+            session_id="session-real-123",
+        )
+        result = deploy_manager_files(spec, staging_root=staging_root)
+        read_content = (result.root / ".claude" / "hooks" / "context_read.sh").read_text()
+        assert "session-real-123" in read_content
+
+    def test_tower_deploys_context_scripts(self, staging_root: Path) -> None:
+        spec = TowerDeploySpec(
+            session_id="tower-ctx-001",
+            project_name="Test",
+            project_id="proj-x",
+        )
+        result = deploy_tower_files(spec, staging_root=staging_root)
+        hooks_dir = result.root / ".claude" / "hooks"
+        assert (hooks_dir / "context_read.sh").exists()
+        assert (hooks_dir / "context_write.sh").exists()
+        write_content = (hooks_dir / "context_write.sh").read_text()
+        assert 'SCOPE="tower"' in write_content
+        assert "tower-ctx-001" in write_content
+
+    def test_context_scripts_in_manifest(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        manifest = json.loads(result.manifest_path.read_text())
+        paths = manifest["files"]
+        assert any("context_read.sh" in p for p in paths)
+        assert any("context_write.sh" in p for p in paths)
+
+    def test_context_read_script_supports_key_filter(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        """context_read.sh should accept --key parameter for filtering."""
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        content = (result.root / ".claude" / "hooks" / "context_read.sh").read_text()
+        assert "key=$KEY" in content
+
+    def test_context_write_script_supports_upsert(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        """context_write.sh should check for existing entry and update or create."""
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        content = (result.root / ".claude" / "hooks" / "context_write.sh").read_text()
+        # Should have both PUT (update) and POST (create) logic
+        assert "PUT" in content
+        assert "POST" in content
+
+
+# ---------------------------------------------------------------------------
+# Context entries in Ace CLAUDE.md
+# ---------------------------------------------------------------------------
+
+
+class TestAceContextEntries:
+    """Test that context entries are rendered in Ace CLAUDE.md."""
+
+    def test_ace_claude_md_includes_context_entries(self, staging_root: Path) -> None:
+        spec = AceDeploySpec(
+            session_id="ace-ctx-001",
+            project_name="Phoenix",
+            task_title="Build feature",
+            context_entries=[
+                {"key": "tech-stack", "value": "Python + FastAPI"},
+                {"key": "conventions", "value": {"linter": "ruff", "formatter": "black"}},
+            ],
+        )
+        result = deploy_ace_files(spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Project Context" in content
+        assert "### tech-stack" in content
+        assert "Python + FastAPI" in content
+        assert "### conventions" in content
+        assert "ruff" in content
+
+    def test_ace_claude_md_omits_empty_context_entries(self, staging_root: Path) -> None:
+        spec = AceDeploySpec(
+            session_id="ace-ctx-002",
+            project_name="Phoenix",
+            task_title="Build feature",
+        )
+        result = deploy_ace_files(spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Project Context" not in content
+
+    def test_ace_spec_accepts_project_id(self, staging_root: Path) -> None:
+        spec = AceDeploySpec(
+            session_id="ace-ctx-003",
+            project_name="Phoenix",
+            task_title="Build feature",
+            project_id="proj-abc",
+        )
+        result = deploy_ace_files(spec, staging_root=staging_root)
+        assert result.claude_md_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Context CLI instructions in CLAUDE.md
+# ---------------------------------------------------------------------------
+
+
+class TestContextCLIInstructions:
+    """Test that context read/write CLI instructions appear in CLAUDE.md for all agents."""
+
+    def test_ace_claude_md_has_context_instructions(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Context Read/Write" in content
+        assert "context_read.sh" in content
+        assert "context_write.sh" in content
+
+    def test_manager_claude_md_has_context_instructions(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Context Read/Write" in content
+        assert "context_read.sh" in content
+        assert "context_write.sh" in content
+
+    def test_tower_claude_md_has_context_instructions(self, staging_root: Path) -> None:
+        spec = TowerDeploySpec(
+            session_id="tower-ctx-002",
+            project_name="Test",
+            project_id="proj-x",
+        )
+        result = deploy_tower_files(spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "## Context Read/Write" in content
+        assert "context_read.sh" in content
+        assert "context_write.sh" in content
+
+    def test_context_instructions_reference_correct_hooks_dir(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        expected_dir = f"/tmp/atc-agents/{ace_spec.session_id}/.claude/hooks"
+        assert expected_dir in content
