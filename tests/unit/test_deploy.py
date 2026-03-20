@@ -279,8 +279,8 @@ class TestDeployManagerFiles:
         assert "## Role" in content
         assert "Leader" in content
         assert "project manager" in content
-        assert "never write code directly" in content
-        assert "Create Aces" in content
+        assert "MUST NOT write code" in content
+        assert "Spawn Aces" in content
 
     def test_claude_md_includes_budget(
         self, manager_spec: ManagerDeploySpec, staging_root: Path
@@ -323,6 +323,17 @@ class TestDeployManagerFiles:
         settings = json.loads(result.settings_path.read_text())
         allowed = settings["permissions"]["allow"]
         assert "Bash(atc tower *)" in allowed
+
+    def test_settings_denies_file_editing_tools(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        """Leader must not be allowed to use Edit, Write, or NotebookEdit tools."""
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        settings = json.loads(result.settings_path.read_text())
+        denied = settings["permissions"]["deny"]
+        assert "Edit" in denied
+        assert "Write" in denied
+        assert "NotebookEdit" in denied
 
     def test_creates_hook_scripts(
         self, manager_spec: ManagerDeploySpec, staging_root: Path

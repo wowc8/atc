@@ -75,6 +75,7 @@ class ManagerDeploySpec:
     leader_id: str
     project_name: str
     goal: str
+    project_id: str | None = None  # project_id for API calls
     session_id: str | None = None  # actual session_id for hooks
     repo_path: str | None = None
     github_repo: str | None = None
@@ -179,10 +180,17 @@ def deploy_manager_files(
     written.append(_write_file(root / "CLAUDE.md", claude_md))
 
     # .claude/settings.json
+    # Leaders must NOT create or edit files — that's the Ace's job.
+    manager_denied = [
+        "Edit",
+        "Write",
+        "NotebookEdit",
+    ]
     settings = _build_settings(
         model=spec.model,
         allowed_commands=_manager_allowed_commands(spec),
         hooks=_manager_hooks(spec),
+        denied_commands=manager_denied,
     )
     settings_json = json.dumps(settings, indent=2)
     written.append(_write_file(root / ".claude" / "settings.json", settings_json))
@@ -360,20 +368,35 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
         f"# {spec.project_name} — Leader Session",
         "",
         f"Leader ID: `{spec.leader_id}`",
+        f"Project ID: `{spec.project_id or 'unknown'}`",
         "",
         "## Role",
         "",
         "You are a **Leader** — a project manager in the ATC agent hierarchy.",
-        "You receive a goal from Tower and are responsible for delivering it:",
+        "You receive a goal from Tower and are responsible for delivering it.",
         "",
-        "- **Plan** — decompose the goal into well-scoped tasks with acceptance criteria.",
-        "- **Create Aces** — spin up Ace sessions and assign one task each.",
-        "- **Monitor** — track Ace progress, unblock them, reassign if needed.",
-        "- **Review** — inspect Ace output to ensure quality before marking done.",
-        "- **Coordinate** — manage dependencies between tasks so Aces don't conflict.",
-        "- **Report** — keep Tower informed of milestone progress and blockers.",
+        "### CRITICAL RULE — NEVER DO WORK DIRECTLY",
         "",
-        "You never write code directly — always delegate implementation to Aces.",
+        "**You MUST NOT write code, create files, edit files, or implement anything yourself.**",
+        "**You MUST NOT use the Edit, Write, or NotebookEdit tools.**",
+        "Your ONLY job is to manage — break the goal into tasks, spawn Aces to do the work,",
+        "and monitor their progress. If you catch yourself about to create or modify a file,",
+        "STOP — that is an Ace's job.",
+        "",
+        "### Your Workflow",
+        "",
+        "1. **Decompose** — break the goal into well-scoped tasks with acceptance criteria.",
+        f'   `curl -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/decompose`',
+        "2. **Spawn Aces** — create Ace sessions for each ready task.",
+        f'   `curl -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/spawn-aces`',
+        "3. **Instruct** — send work instructions to each Ace.",
+        f'   `curl -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/instruct`',
+        "4. **Monitor** — track Ace progress, unblock them, reassign if needed.",
+        f'   `curl {spec.api_base_url}/api/projects/{spec.project_id}/leader/progress`',
+        "5. **Review** — inspect Ace output to ensure quality before marking done.",
+        f'   `curl -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/task-done`',
+        "6. **Report** — keep Tower informed of milestone progress and blockers.",
+        "",
         "You own the task graph: create it, maintain it, and drive it to completion.",
         "When all tasks are done and verified, report completion to Tower.",
         "",
@@ -531,6 +554,7 @@ def _build_settings(
     model: str,
     allowed_commands: list[str],
     hooks: dict[str, list[dict[str, Any]]],
+    denied_commands: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the .claude/settings.json content."""
     return {
@@ -540,7 +564,7 @@ def _build_settings(
         "spinnerTipsEnabled": False,
         "permissions": {
             "allow": allowed_commands,
-            "deny": [],
+            "deny": denied_commands or [],
         },
         "hooks": hooks,
     }
