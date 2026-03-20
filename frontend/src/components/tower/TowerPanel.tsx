@@ -25,9 +25,7 @@ export default function TowerPanel() {
   const routeProjectId = useRouteProjectId();
 
   const [expanded, setExpanded] = useState(false);
-  const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
-  const messageInputRef = useRef<HTMLInputElement>(null);
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
@@ -151,27 +149,6 @@ export default function TowerPanel() {
     }
   }, [dispatch]);
 
-  const [sendError, setSendError] = useState<string | null>(null);
-
-  const handleSendMessage = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!message.trim()) return;
-      const text = message.trim();
-      setMessage("");
-      setSendError(null);
-      messageInputRef.current?.focus();
-      try {
-        await api.post("/tower/message", { message: text });
-      } catch (err) {
-        console.error("Failed to send message to Tower:", err);
-        setSendError("Failed to send message");
-        // Restore message so user can retry
-        setMessage(text);
-      }
-    },
-    [message],
-  );
 
   const tickerText =
     brainStatus.message ||
@@ -279,38 +256,6 @@ export default function TowerPanel() {
           </div>
         )}
 
-        {/* Message input bar — always at the bottom when terminal is showing */}
-        {showTerminal && (
-          <form
-            className="tower-panel__input-bar"
-            onSubmit={handleSendMessage}
-            data-testid="tower-panel-message-form"
-          >
-            <span className="tower-panel__prompt">&gt;</span>
-            <input
-              ref={messageInputRef}
-              type="text"
-              className="tower-panel__input"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Send message to Tower..."
-              data-testid="tower-panel-message"
-            />
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm"
-              disabled={!message.trim()}
-              data-testid="tower-panel-send"
-            >
-              Send
-            </button>
-            {sendError && (
-              <span className="tower-panel__send-error" title={sendError}>
-                !
-              </span>
-            )}
-          </form>
-        )}
       </div>
     </div>
   );
