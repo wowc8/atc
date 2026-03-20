@@ -65,6 +65,12 @@ export default function TowerBar() {
             Dashboard
           </button>
           <button
+            className={`tower-bar__nav-item ${isActive("/context") ? "active" : ""}`}
+            onClick={() => navigate("/context")}
+          >
+            Context
+          </button>
+          <button
             className={`tower-bar__nav-item ${isActive("/usage") ? "active" : ""}`}
             onClick={() => navigate("/usage")}
           >
