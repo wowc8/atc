@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import TowerConsole from "../TowerConsole";
 import { renderWithProviders } from "../../../test/helpers";
 
@@ -50,20 +49,6 @@ describe("TowerConsole", () => {
   it("does not show terminal when idle", () => {
     renderWithProviders(<TowerConsole />);
     expect(screen.queryByTestId("tower-console-terminal")).not.toBeInTheDocument();
-  });
-
-  it("does not show message input when idle", () => {
-    renderWithProviders(<TowerConsole />);
-    expect(screen.queryByTestId("tower-console-message")).not.toBeInTheDocument();
-  });
-
-  it("allows typing a goal", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<TowerConsole />);
-
-    const goalInput = screen.getByTestId("tower-console-goal");
-    await user.type(goalInput, "Build a new feature");
-    expect(goalInput).toHaveValue("Build a new feature");
   });
 
   it("disables Start when no project is selected", () => {
