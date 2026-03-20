@@ -202,11 +202,22 @@ class TestDeployAceFiles:
         result = deploy_ace_files(ace_spec, staging_root=staging_root)
         manifest = json.loads(result.manifest_path.read_text())
         paths = manifest["files"]
-        # CLAUDE.md, settings.json, 3 hooks, manifest itself is NOT in the list
-        # (manifest is added last, so it IS in the list)
+        # CLAUDE.md, settings.json, settings.local.json, 3 hooks, manifest
         assert any("CLAUDE.md" in p for p in paths)
         assert any("settings.json" in p for p in paths)
+        assert any("settings.local.json" in p for p in paths)
         assert any("PostToolUse.sh" in p for p in paths)
+
+    def test_creates_settings_local_json(self, ace_spec: AceDeploySpec, staging_root: Path) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        local_path = result.root / ".claude" / "settings.local.json"
+        assert local_path.exists()
+        settings = json.loads(local_path.read_text())
+        assert settings["hasTrustDialogAccepted"] is True
+
+    def test_initializes_git_repo(self, ace_spec: AceDeploySpec, staging_root: Path) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        assert (result.root / ".git").exists()
 
     def test_custom_allowed_commands(self, staging_root: Path) -> None:
         spec = AceDeploySpec(
@@ -328,6 +339,21 @@ class TestDeployManagerFiles:
         manifest = json.loads(result.manifest_path.read_text())
         assert manifest["session_type"] == "manager"
 
+    def test_creates_settings_local_json(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        local_path = result.root / ".claude" / "settings.local.json"
+        assert local_path.exists()
+        settings = json.loads(local_path.read_text())
+        assert settings["hasTrustDialogAccepted"] is True
+
+    def test_initializes_git_repo(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        assert (result.root / ".git").exists()
+
     def test_no_budget_omits_section(self, staging_root: Path) -> None:
         spec = ManagerDeploySpec(
             leader_id="leader-x",
@@ -426,6 +452,28 @@ class TestDeployTowerFiles:
         result = deploy_tower_files(tower_spec, staging_root=staging_root)
         manifest = json.loads(result.manifest_path.read_text())
         assert manifest["session_type"] == "tower"
+
+    def test_creates_settings_local_json(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        local_path = result.root / ".claude" / "settings.local.json"
+        assert local_path.exists()
+        settings = json.loads(local_path.read_text())
+        assert settings["hasTrustDialogAccepted"] is True
+
+    def test_initializes_git_repo(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        assert (result.root / ".git").exists()
+
+    def test_claude_md_includes_leader_message_command(
+        self, tower_spec: TowerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "atc leader message" in content
 
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     stop_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
     stop_parser.set_defaults(handler=_handle_stop)
 
+    # atc leader message --project-id <id> --message '...'
+    msg_parser = leader_sub.add_parser("message", help="Send a message to the leader's terminal")
+    msg_parser.add_argument("--project-id", required=True, help="Project UUID")
+    msg_parser.add_argument("--message", required=True, help="Message text to send")
+    msg_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
+    msg_parser.set_defaults(handler=_handle_message)
+
     leader_parser.set_defaults(handler=lambda _: leader_parser.print_help() or 1)
 
 
@@ -68,3 +75,10 @@ def _handle_start(args: argparse.Namespace) -> int:
 
 def _handle_stop(args: argparse.Namespace) -> int:
     return _post_json(f"{args.api}/api/projects/{args.project_id}/leader/stop", {})
+
+
+def _handle_message(args: argparse.Namespace) -> int:
+    return _post_json(
+        f"{args.api}/api/projects/{args.project_id}/leader/message",
+        {"message": args.message},
+    )

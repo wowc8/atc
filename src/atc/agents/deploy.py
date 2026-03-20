@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import stat
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -121,6 +123,9 @@ def deploy_ace_files(
     root = (staging_root or _DEFAULT_STAGING_ROOT) / spec.session_id
     written: list[str] = []
 
+    # Ensure the staging directory is a git repo so Claude Code finds settings
+    _ensure_git_repo(root)
+
     # CLAUDE.md
     claude_md = _build_ace_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
@@ -131,7 +136,10 @@ def deploy_ace_files(
         allowed_commands=_ace_allowed_commands(spec),
         hooks=_ace_hooks(spec),
     )
-    written.append(_write_file(root / ".claude" / "settings.json", json.dumps(settings, indent=2)))
+    settings_json = json.dumps(settings, indent=2)
+    written.append(_write_file(root / ".claude" / "settings.json", settings_json))
+    # Also write settings.local.json — Claude Code reads trust/personal prefs from here
+    written.append(_write_file(root / ".claude" / "settings.local.json", settings_json))
 
     # Hook scripts
     for hook in _ace_hook_scripts(spec):
@@ -163,6 +171,9 @@ def deploy_manager_files(
     root = (staging_root or _DEFAULT_STAGING_ROOT) / spec.leader_id
     written: list[str] = []
 
+    # Ensure the staging directory is a git repo so Claude Code finds settings
+    _ensure_git_repo(root)
+
     # CLAUDE.md
     claude_md = _build_manager_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
@@ -173,7 +184,10 @@ def deploy_manager_files(
         allowed_commands=_manager_allowed_commands(spec),
         hooks=_manager_hooks(spec),
     )
-    written.append(_write_file(root / ".claude" / "settings.json", json.dumps(settings, indent=2)))
+    settings_json = json.dumps(settings, indent=2)
+    written.append(_write_file(root / ".claude" / "settings.json", settings_json))
+    # Also write settings.local.json — Claude Code reads trust/personal prefs from here
+    written.append(_write_file(root / ".claude" / "settings.local.json", settings_json))
 
     # Hook scripts
     for hook in _manager_hook_scripts(spec):
@@ -205,6 +219,9 @@ def deploy_tower_files(
     root = (staging_root or _DEFAULT_STAGING_ROOT) / spec.session_id
     written: list[str] = []
 
+    # Ensure the staging directory is a git repo so Claude Code finds settings
+    _ensure_git_repo(root)
+
     # CLAUDE.md
     claude_md = _build_tower_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
@@ -215,7 +232,10 @@ def deploy_tower_files(
         allowed_commands=_tower_allowed_commands(spec),
         hooks=_tower_hooks(spec),
     )
-    written.append(_write_file(root / ".claude" / "settings.json", json.dumps(settings, indent=2)))
+    settings_json = json.dumps(settings, indent=2)
+    written.append(_write_file(root / ".claude" / "settings.json", settings_json))
+    # Also write settings.local.json — Claude Code reads trust/personal prefs from here
+    written.append(_write_file(root / ".claude" / "settings.local.json", settings_json))
 
     # Hook scripts
     for hook in _tower_hook_scripts(spec):
@@ -244,6 +264,11 @@ def cleanup_deployed_files(root: Path) -> None:
             if p.exists():
                 p.unlink()
         manifest_path.unlink()
+
+    # Remove .git directory created by _ensure_git_repo
+    git_dir = root / ".git"
+    if git_dir.exists():
+        shutil.rmtree(git_dir)
 
     # Remove empty directories bottom-up
     if root.exists():
@@ -459,6 +484,7 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "atc leader start --project-id <id>                   # Start leader for a project",
         "atc leader start --project-id <id> --goal '...'      # Start leader with a goal",
         "atc leader stop --project-id <id>                    # Stop leader for a project",
+        "atc leader message --project-id <id> --message '...' # Send a message to the leader's terminal",
         "```",
         "",
         "### Ace Management",
@@ -471,10 +497,15 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "",
         "When the user asks to create a project:",
         "1. `atc projects create --name '...' --description '...'` — note the project ID from the response",
-        "2. `atc leader start --project-id <id>` — start the leader for the project",
-        "3. `atc ace create --project-id <id> --name '...'` — add aces as needed",
+        "2. `atc leader start --project-id <id> --goal '...'` — start the leader with the goal",
+        "3. `atc leader message --project-id <id> --message '...'` — send follow-up instructions to the leader",
+        "4. `atc ace create --project-id <id> --name '...'` — add aces as needed",
         "",
         "All commands output JSON. Parse the `id` field from create responses to use in subsequent commands.",
+        "",
+        "Use `atc leader message` to send follow-up instructions, answer questions,",
+        "or redirect the leader when it needs guidance. This types directly into the",
+        "leader's Claude Code terminal.",
         "",
     ])
 
@@ -691,6 +722,23 @@ def _tower_allowed_commands(spec: TowerDeploySpec) -> list[str]:
 # ---------------------------------------------------------------------------
 # File I/O helpers
 # ---------------------------------------------------------------------------
+
+
+def _ensure_git_repo(root: Path) -> None:
+    """Initialize a bare git repo at *root* so Claude Code recognizes it as a project.
+
+    Claude Code looks for ``.claude/settings.json`` relative to the nearest
+    git root.  Without a ``.git`` marker the staging directory is not seen as a
+    project, and the ``hasTrustDialogAccepted`` setting is ignored.
+    """
+    git_dir = root / ".git"
+    if not git_dir.exists():
+        subprocess.run(
+            ["git", "init", "--quiet", str(root)],
+            check=True,
+            capture_output=True,
+        )
+        logger.debug("Initialized git repo at %s", root)
 
 
 def _write_file(path: Path, content: str) -> str:
