@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
 from atc.agents.factory import get_launch_command
+from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
@@ -136,14 +137,29 @@ class LeaderOrchestrator:
             # Generate a stable session id up-front so deploy can use it
             session_id_preview = str(uuid.uuid4())
 
+            # Fetch inherited context entries for the Ace
+            context_entries: list[dict[str, Any]] = []
+            with contextlib.suppress(Exception):
+                ctx = await build_context_package(
+                    self.conn,
+                    self.project_id,
+                    title,
+                    session_id=session_id_preview,
+                    parent_session_id=self.leader_id,
+                    scope="ace",
+                )
+                context_entries = ctx.get("context_entries", [])
+
             # Deploy config files before launching the session
             spec = AceDeploySpec(
                 session_id=session_id_preview,
                 project_name=project_name,
                 task_title=title,
                 task_description=description,
+                project_id=self.project_id,
                 repo_path=repo_path,
                 github_repo=github_repo,
+                context_entries=context_entries,
             )
             deployed = deploy_ace_files(spec)
             logger.info("Deployed ace config for task '%s' → %s", title, deployed.root)

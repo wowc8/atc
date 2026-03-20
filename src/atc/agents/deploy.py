@@ -59,12 +59,14 @@ class AceDeploySpec:
     project_name: str
     task_title: str
     task_description: str | None = None
+    project_id: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
     api_base_url: str = "http://127.0.0.1:8420"
     model: str = "opus"
     allowed_commands: list[str] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
+    context_entries: list[dict[str, Any]] = field(default_factory=list)
     extra_context: str = ""
 
 
@@ -358,8 +360,21 @@ def _build_ace_claude_md(spec: AceDeploySpec) -> str:
             lines.append(f"- {c}")
         lines.append("")
 
+    if spec.context_entries:
+        lines.extend(["## Project Context", ""])
+        for entry in spec.context_entries:
+            key = entry.get("key", "")
+            value = entry.get("value", "")
+            if isinstance(value, dict):
+                value = json.dumps(value, indent=2)
+            lines.extend([f"### {key}", "", str(value), ""])
+
     if spec.extra_context:
         lines.extend(["## Context", "", spec.extra_context, ""])
+
+    # Context read/write CLI instructions
+    hooks_dir = f"/tmp/atc-agents/{spec.session_id}/.claude/hooks"
+    lines.extend(_context_cli_instructions(hooks_dir))
 
     if spec.github_repo:
         lines.extend(
@@ -448,6 +463,10 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
             if isinstance(value, dict):
                 value = json.dumps(value, indent=2)
             lines.extend([f"### {key}", "", str(value), ""])
+
+    # Context read/write CLI instructions
+    hooks_dir = f"/tmp/atc-agents/{spec.leader_id}/.claude/hooks"
+    lines.extend(_context_cli_instructions(hooks_dir))
 
     lines.extend(
         [
@@ -544,6 +563,10 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "",
     ])
 
+    # Context read/write CLI instructions
+    hooks_dir = f"/tmp/atc-agents/{spec.session_id}/.claude/hooks"
+    lines.extend(_context_cli_instructions(hooks_dir))
+
     if spec.repo_path or spec.github_repo:
         lines.append("## Repository")
         lines.append("")
@@ -587,6 +610,36 @@ def _build_settings(
 # Hook configuration
 # ---------------------------------------------------------------------------
 
+def _context_cli_instructions(hooks_dir: str) -> list[str]:
+    """Return CLAUDE.md lines explaining the context read/write scripts."""
+    return [
+        "## Context Read/Write",
+        "",
+        "You can read and write context entries that persist across sessions.",
+        "Use the deployed helper scripts:",
+        "",
+        "```bash",
+        "# List all context entries visible to you",
+        f"bash {hooks_dir}/context_read.sh",
+        "",
+        "# Read a specific entry by key",
+        f'bash {hooks_dir}/context_read.sh --key "my-key"',
+        "",
+        "# Write a context entry (creates or updates by key)",
+        f'bash {hooks_dir}/context_write.sh --key "my-key" --value "my value"',
+        "",
+        "# Write with explicit type (text, json, list, status, link)",
+        f'bash {hooks_dir}/context_write.sh --key "config"'
+        ' --value \'{"a":1}\' --type json',
+        "```",
+        "",
+        "Context entries are scoped to your session and visible to your scope's",
+        "inheritance rules. Use them to record findings, decisions, and notes",
+        "that should persist beyond the current conversation.",
+        "",
+    ]
+
+
 _STATUS_HOOK_TEMPLATE = """#!/usr/bin/env bash
 set -euo pipefail
 ATC_API="{api_base_url}"
@@ -619,6 +672,91 @@ curl -sf -X POST "$ATC_API/api/aces/$SESSION_ID/notify" \
 """
 
 
+_CONTEXT_READ_TEMPLATE = r"""#!/usr/bin/env bash
+set -euo pipefail
+ATC_API="{api_base_url}"
+SESSION_ID="{session_id}"
+
+# Usage: context_read.sh [--key KEY]
+# Lists context entries visible to this session, or fetches a specific entry by key.
+
+KEY=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --key) KEY="$2"; shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -n "$KEY" ]]; then
+  curl -sf "$ATC_API/api/sessions/$SESSION_ID/context?key=$KEY" \
+    -H "Accept: application/json" 2>/dev/null
+else
+  curl -sf "$ATC_API/api/sessions/$SESSION_ID/context" \
+    -H "Accept: application/json" 2>/dev/null
+fi
+"""
+
+_CONTEXT_WRITE_TEMPLATE = r"""#!/usr/bin/env bash
+set -euo pipefail
+ATC_API="{api_base_url}"
+SESSION_ID="{session_id}"
+SCOPE="{scope}"
+
+# Usage: context_write.sh --key KEY --value VALUE [--type TYPE]
+# Creates or updates a context entry for this session.
+# TYPE defaults to "text". Valid types: text, json, list, status, link.
+
+KEY=""
+VALUE=""
+ENTRY_TYPE="text"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --key) KEY="$2"; shift 2 ;;
+    --value) VALUE="$2"; shift 2 ;;
+    --type) ENTRY_TYPE="$2"; shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$KEY" || -z "$VALUE" ]]; then
+  echo "Usage: context_write.sh --key KEY --value VALUE [--type TYPE]" >&2
+  exit 1
+fi
+
+# Check if entry with this key already exists
+EXISTING=$(curl -sf "$ATC_API/api/sessions/$SESSION_ID/context?key=$KEY" \
+  -H "Accept: application/json" 2>/dev/null || echo "[]")
+
+ENTRY_ID=$(echo "$EXISTING" | python3 -c "
+import sys, json
+entries = json.load(sys.stdin)
+if entries:
+    print(entries[0]['id'])
+" 2>/dev/null || true)
+
+if [[ -n "$ENTRY_ID" ]]; then
+  # Update existing entry
+  curl -sf -X PUT "$ATC_API/api/context/$ENTRY_ID" \
+    -H "Content-Type: application/json" \
+    -d "$(python3 -c "
+import json, sys
+print(json.dumps({{'value': sys.argv[1], 'entry_type': sys.argv[2], 'updated_by': '$SCOPE'}}))
+" "$VALUE" "$ENTRY_TYPE")" 2>/dev/null
+else
+  # Create new entry
+  curl -sf -X POST "$ATC_API/api/sessions/$SESSION_ID/context" \
+    -H "Content-Type: application/json" \
+    -d "$(python3 -c "
+import json, sys
+d = {{'scope': '$SCOPE', 'key': sys.argv[1], 'value': sys.argv[2]}}
+d.update({{'entry_type': sys.argv[3], 'updated_by': '$SCOPE'}})
+print(json.dumps(d))
+" "$KEY" "$VALUE" "$ENTRY_TYPE")" 2>/dev/null
+fi
+"""
+
+
 def _ace_hook_scripts(spec: AceDeploySpec) -> list[HookConfig]:
     """Build the hook shell scripts for an Ace session."""
     header = _STATUS_HOOK_TEMPLATE.format(
@@ -629,6 +767,18 @@ def _ace_hook_scripts(spec: AceDeploySpec) -> list[HookConfig]:
         HookConfig(event="PostToolUse", command=header + _POST_TOOL_USE_BODY),
         HookConfig(event="Stop", command=header + _STOP_HOOK_BODY),
         HookConfig(event="Notification", command=header + _NOTIFICATION_HOOK_BODY),
+        HookConfig(
+            event="context_read",
+            command=_CONTEXT_READ_TEMPLATE.format(
+                api_base_url=spec.api_base_url, session_id=spec.session_id,
+            ),
+        ),
+        HookConfig(
+            event="context_write",
+            command=_CONTEXT_WRITE_TEMPLATE.format(
+                api_base_url=spec.api_base_url, session_id=spec.session_id, scope="ace",
+            ),
+        ),
     ]
 
 
@@ -645,6 +795,18 @@ def _manager_hook_scripts(spec: ManagerDeploySpec) -> list[HookConfig]:
         HookConfig(event="PostToolUse", command=header + _POST_TOOL_USE_BODY),
         HookConfig(event="Stop", command=header + _STOP_HOOK_BODY),
         HookConfig(event="Notification", command=header + _NOTIFICATION_HOOK_BODY),
+        HookConfig(
+            event="context_read",
+            command=_CONTEXT_READ_TEMPLATE.format(
+                api_base_url=spec.api_base_url, session_id=hook_session_id,
+            ),
+        ),
+        HookConfig(
+            event="context_write",
+            command=_CONTEXT_WRITE_TEMPLATE.format(
+                api_base_url=spec.api_base_url, session_id=hook_session_id, scope="leader",
+            ),
+        ),
     ]
 
 
@@ -671,6 +833,18 @@ def _tower_hook_scripts(spec: TowerDeploySpec) -> list[HookConfig]:
         HookConfig(event="PostToolUse", command=header + _POST_TOOL_USE_BODY),
         HookConfig(event="Stop", command=header + _STOP_HOOK_BODY),
         HookConfig(event="Notification", command=header + _NOTIFICATION_HOOK_BODY),
+        HookConfig(
+            event="context_read",
+            command=_CONTEXT_READ_TEMPLATE.format(
+                api_base_url=spec.api_base_url, session_id=spec.session_id,
+            ),
+        ),
+        HookConfig(
+            event="context_write",
+            command=_CONTEXT_WRITE_TEMPLATE.format(
+                api_base_url=spec.api_base_url, session_id=spec.session_id, scope="tower",
+            ),
+        ),
     ]
 
 
