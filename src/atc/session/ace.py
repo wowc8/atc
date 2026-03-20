@@ -69,14 +69,15 @@ async def _tmux_run(*args: str) -> str:
 async def _ensure_tmux_session(session_name: str) -> None:
     """Create the tmux session if it doesn't already exist.
 
-    Uses explicit dimensions (-x 200 -y 50) so panes work correctly even
-    when no real terminal is attached (e.g. PTY output streams to xterm.js
-    in the frontend).
+    Uses explicit dimensions so panes work correctly even when no real
+    terminal is attached (PTY output streams to xterm.js in the frontend).
+    The frontend sends a resize event once xterm.js measures its actual
+    column width, so the initial size here is a reasonable default.
     """
     try:
         await _tmux_run("has-session", "-t", session_name)
     except RuntimeError:
-        await _tmux_run("new-session", "-d", "-s", session_name, "-x", "200", "-y", "50")
+        await _tmux_run("new-session", "-d", "-s", session_name, "-x", "120", "-y", "40")
 
 
 async def _spawn_pane(

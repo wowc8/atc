@@ -94,6 +94,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     ws_hub.on_input(_on_ws_input)
 
+    # Forward terminal resize events from WebSocket clients to PTY
+    async def _on_ws_resize(channel: str, cols: int, rows: int) -> None:
+        session_id = channel.removeprefix("terminal:")
+        try:
+            await pty_pool.resize_pane(session_id, cols, rows)
+        except (ValueError, RuntimeError):
+            logger.debug("Resize failed for session %s (cols=%d, rows=%d)", session_id, cols, rows)
+
+    ws_hub.on_resize(_on_ws_resize)
+
     # Send initial terminal content when a client subscribes to a terminal channel.
     # This captures the current tmux pane content so the terminal isn't blank on load.
     async def _on_terminal_subscribe(ws: Any, channel: str) -> None:

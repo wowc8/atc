@@ -49,11 +49,15 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const channelRef = useRef<string | undefined>(channel);
   // Buffer for data received before the terminal is opened (attached to DOM).
   // xterm.js throws "Cannot read properties of undefined (reading 'dimensions')"
   // when write() is called on a terminal that hasn't been opened yet.
   const pendingWritesRef = useRef<string[]>([]);
   const termOpenRef = useRef(false);
+
+  // Keep channel ref in sync for use in non-reactive callbacks
+  channelRef.current = channel;
 
   // Create terminal once
   useEffect(() => {
@@ -144,6 +148,17 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
           return;
         }
         ws.send(JSON.stringify({ channel: "subscribe", data: [channel] }));
+        // Send initial terminal dimensions so tmux pane matches display
+        const term = termRef.current;
+        if (term && term.cols > 0 && term.rows > 0) {
+          ws.send(
+            JSON.stringify({
+              channel,
+              type: "resize",
+              data: { cols: term.cols, rows: term.rows },
+            }),
+          );
+        }
       };
 
       ws.onmessage = (evt) => {
@@ -194,14 +209,31 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     const term = termRef.current;
     if (!term) return;
 
-    const disposable = term.onData((data) => {
+    const dataDisposable = term.onData((data) => {
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ channel, data }));
       }
     });
 
-    return () => disposable.dispose();
+    // Send terminal dimensions to backend so tmux pane matches xterm.js size
+    const resizeDisposable = term.onResize((evt) => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            channel,
+            type: "resize",
+            data: { cols: evt.cols, rows: evt.rows },
+          }),
+        );
+      }
+    });
+
+    return () => {
+      dataDisposable.dispose();
+      resizeDisposable.dispose();
+    };
   }, [channel, enabled]);
 
   // Ref callback for container div — handles initial open and re-attach
@@ -226,6 +258,18 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
             fitRef.current?.fit();
           } catch {
             // Terminal may not be fully initialized yet — safe to ignore
+          }
+          // Send initial dimensions to backend so tmux pane matches
+          const t = termRef.current;
+          const ws = wsRef.current;
+          if (t && ws?.readyState === WebSocket.OPEN && channelRef.current) {
+            ws.send(
+              JSON.stringify({
+                channel: channelRef.current,
+                type: "resize",
+                data: { cols: t.cols, rows: t.rows },
+              }),
+            );
           }
           // Flush any data that arrived before the terminal was opened
           const pending = pendingWritesRef.current;
