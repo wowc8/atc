@@ -35,6 +35,7 @@ class WsHub:
         self._input_callback: Any | None = None
         self._heartbeat_callback: Any | None = None
         self._subscribe_callback: Any | None = None
+        self._resize_callback: Any | None = None
 
     @property
     def client_count(self) -> int:
@@ -53,6 +54,13 @@ class WsHub:
         Callback signature: ``async def cb(session_id: str) -> None``
         """
         self._heartbeat_callback = callback
+
+    def on_resize(self, callback: Any) -> None:
+        """Register a callback for terminal resize events from clients.
+
+        Callback signature: ``async def cb(channel: str, cols: int, rows: int) -> None``
+        """
+        self._resize_callback = callback
 
     def on_subscribe(self, callback: Any) -> None:
         """Register a callback invoked when a client subscribes to a channel.
@@ -138,6 +146,20 @@ class WsHub:
                             await self._heartbeat_callback(session_id)
                         except Exception:
                             logger.exception("Heartbeat callback error for %s", session_id)
+                elif (
+                    channel
+                    and channel.startswith("terminal:")
+                    and msg.get("type") == "resize"
+                    and isinstance(data, dict)
+                    and self._resize_callback
+                ):
+                    cols = data.get("cols", 0)
+                    rows = data.get("rows", 0)
+                    if cols > 0 and rows > 0:
+                        try:
+                            await self._resize_callback(channel, cols, rows)
+                        except Exception:
+                            logger.debug("Resize callback error for %s", channel)
                 elif (
                     channel
                     and channel.startswith("terminal:")

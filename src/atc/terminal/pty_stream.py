@@ -256,6 +256,19 @@ class PtyStreamPool:
         if reader:
             await reader.stop()
 
+    async def resize_pane(self, session_id: str, cols: int, rows: int) -> None:
+        """Resize a session's tmux pane to the given dimensions.
+
+        Called when the frontend xterm.js terminal is resized so the PTY
+        output matches the actual display width.
+        """
+        reader = self._readers.get(session_id)
+        if reader is None:
+            raise ValueError(f"No active reader for session {session_id}")
+        await PtyStreamReader._run_tmux(
+            "resize-window", "-t", reader._tmux_pane, "-x", str(cols), "-y", str(rows),
+        )
+
     async def send_keys(self, session_id: str, keys: str) -> None:
         """Send keystrokes to a session's tmux pane via tmux send-keys.
 
@@ -299,11 +312,16 @@ class PtyStreamPool:
             return False
 
     async def capture_pane(self, session_id: str) -> str:
-        """Capture the current visible content of a session's tmux pane."""
+        """Capture the current visible content of a session's tmux pane.
+
+        Uses ``-e`` to preserve ANSI escape sequences (colors) and ``-J``
+        to join wrapped lines so xterm.js can re-wrap them at its actual
+        display width instead of inheriting the tmux pane width.
+        """
         reader = self._readers.get(session_id)
         if reader is None:
             raise ValueError(f"No active reader for session {session_id}")
 
         return await PtyStreamReader._run_tmux(
-            "capture-pane", "-t", reader._tmux_pane, "-p"
+            "capture-pane", "-t", reader._tmux_pane, "-p", "-e", "-J"
         )
