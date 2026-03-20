@@ -9,7 +9,9 @@ import pytest
 from atc.leader.context_package import build_context_package
 from atc.state.db import (
     _SCHEMA_SQL,
+    create_context_entry,
     create_project,
+    create_session,
     get_connection,
     run_migrations,
 )
@@ -51,22 +53,27 @@ class TestBuildContextPackage:
     async def test_package_with_context_entries(self, db) -> None:
         project = await create_project(db, "ctx-proj")
 
-        # Insert context entries
-        cols = (
-            "id, project_id, key, entry_type, value,"
-            " position, updated_by, created_at, updated_at"
+        # Create context entries using the new CRUD helper
+        await create_context_entry(
+            db,
+            "project",
+            "tech-stack",
+            "text",
+            json.dumps("Python + FastAPI"),
+            project_id=project.id,
+            position=0,
+            updated_by="test",
         )
-        vals = "?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')"
-        sql = f"INSERT INTO context_entries ({cols}) VALUES ({vals})"
-        await db.execute(
-            sql,
-            ("e1", project.id, "tech-stack", "text", json.dumps("Python + FastAPI"), 0, "test"),
+        await create_context_entry(
+            db,
+            "project",
+            "conventions",
+            "list",
+            json.dumps(["ruff", "mypy"]),
+            project_id=project.id,
+            position=1,
+            updated_by="test",
         )
-        await db.execute(
-            sql,
-            ("e2", project.id, "conventions", "list", json.dumps(["ruff", "mypy"]), 1, "test"),
-        )
-        await db.commit()
 
         pkg = await build_context_package(db, project.id, "Follow conventions")
 
@@ -90,3 +97,56 @@ class TestBuildContextPackage:
         assert pkg["github_repo"] is None
         assert pkg["description"] is None
         assert pkg["context_entries"] == []
+
+    async def test_leader_sees_global_and_project_entries(self, db) -> None:
+        """Leader scope should see global + project entries."""
+        project = await create_project(db, "proj")
+
+        await create_context_entry(
+            db, "global", "coding-standards", "text", json.dumps("Use ruff"),
+        )
+        await create_context_entry(
+            db, "project", "arch-notes", "text", json.dumps("Monorepo"),
+            project_id=project.id,
+        )
+
+        pkg = await build_context_package(db, project.id, "A goal", scope="leader")
+
+        keys = [e["key"] for e in pkg["context_entries"]]
+        assert "coding-standards" in keys
+        assert "arch-notes" in keys
+
+    async def test_ace_sees_leader_parent_entries(self, db) -> None:
+        """Ace scope should see global + project + leader parent + own entries."""
+        project = await create_project(db, "proj")
+        leader_session = await create_session(db, project.id, "manager", "leader-1")
+        ace_session = await create_session(db, project.id, "ace", "ace-1")
+
+        await create_context_entry(
+            db, "global", "standards", "text", json.dumps("PEP8"),
+        )
+        await create_context_entry(
+            db, "project", "design", "text", json.dumps("Clean arch"),
+            project_id=project.id,
+        )
+        await create_context_entry(
+            db, "leader", "decomposition", "text", json.dumps("Split into 3"),
+            session_id=leader_session.id,
+        )
+        await create_context_entry(
+            db, "ace", "wip-notes", "text", json.dumps("Working on X"),
+            session_id=ace_session.id,
+        )
+
+        pkg = await build_context_package(
+            db, project.id, "Do task",
+            scope="ace",
+            session_id=ace_session.id,
+            parent_session_id=leader_session.id,
+        )
+
+        keys = [e["key"] for e in pkg["context_entries"]]
+        assert "standards" in keys
+        assert "design" in keys
+        assert "decomposition" in keys
+        assert "wip-notes" in keys

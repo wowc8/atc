@@ -12,6 +12,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from atc.state.db import get_context_for_agent
+
 if TYPE_CHECKING:
     import aiosqlite
 
@@ -22,8 +24,12 @@ async def build_context_package(
     db: aiosqlite.Connection,
     project_id: str,
     goal: str,
+    *,
+    session_id: str | None = None,
+    parent_session_id: str | None = None,
+    scope: str = "leader",
 ) -> dict[str, Any]:
-    """Assemble a context package for a Leader session.
+    """Assemble a context package for a Leader or Ace session.
 
     Returns a dict with:
       - goal: the user's goal string
@@ -31,7 +37,7 @@ async def build_context_package(
       - project_name: human-readable project name
       - repo_path: filesystem path to the project repo (if set)
       - github_repo: GitHub owner/repo (if set)
-      - context_entries: list of context hub entries for the project
+      - context_entries: list of context hub entries visible to the agent
     """
     # Fetch project metadata
     cursor = await db.execute(
@@ -44,15 +50,22 @@ async def build_context_package(
 
     project = dict(row)
 
-    # Fetch context entries for the project
-    cursor = await db.execute(
-        "SELECT key, entry_type, value FROM context_entries WHERE project_id = ? ORDER BY position",
-        (project_id,),
+    # Fetch context entries using scope-aware inheritance
+    entries = await get_context_for_agent(
+        db,
+        scope,
+        project_id=project_id,
+        session_id=session_id,
+        parent_session_id=parent_session_id,
     )
-    entries = await cursor.fetchall()
+
     context_entries = []
     for entry in entries:
-        entry_dict = dict(entry)
+        entry_dict = {
+            "key": entry.key,
+            "entry_type": entry.entry_type,
+            "value": entry.value,
+        }
         # Parse JSON values
         with contextlib.suppress(json.JSONDecodeError, TypeError):
             entry_dict["value"] = json.loads(entry_dict["value"])

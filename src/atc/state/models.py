@@ -227,10 +227,13 @@ class AppEvent:
 @dataclass
 class ContextEntry:
     id: str
-    project_id: str
     key: str
     entry_type: str  # text|status|list|link|json
     value: str  # JSON-encoded
+    scope: str = "project"  # global|project|tower|leader|ace
+    project_id: str | None = None
+    session_id: str | None = None
+    restricted: bool = False
     position: int = 0
     updated_by: str = ""
     created_at: str = ""
