@@ -338,6 +338,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Register routers
     from atc.api.routers import (
         aces,
+        context,
         failure_logs,
         feature_flags,
         heartbeat,
@@ -361,6 +362,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(failure_logs.router, prefix="/api", tags=["failure_logs"])
     app.include_router(heartbeat.router, prefix="/api", tags=["heartbeat"])
     app.include_router(feature_flags.router, prefix="/api/feature-flags", tags=["feature_flags"])
+    app.include_router(context.router, prefix="/api", tags=["context"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
