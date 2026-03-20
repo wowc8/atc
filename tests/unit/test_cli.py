@@ -225,3 +225,152 @@ class TestTowerMemory:
         req = _StubHandler.requests[0]
         assert req["method"] == "GET"
         assert req["path"] == "/api/tower/memory"
+
+
+# ---------------------------------------------------------------------------
+# atc projects list
+# ---------------------------------------------------------------------------
+
+
+class TestProjectsList:
+    def test_lists_projects(self, api_stub: str) -> None:
+        _StubHandler.response_body = []  # type: ignore[assignment]
+        rc = cli(["projects", "list", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "GET"
+        assert req["path"] == "/api/projects"
+
+
+# ---------------------------------------------------------------------------
+# atc projects create
+# ---------------------------------------------------------------------------
+
+
+class TestProjectsCreate:
+    def test_creates_project(self, api_stub: str) -> None:
+        _StubHandler.response_body = {"id": "proj-1", "name": "Test", "status": "active"}
+        rc = cli([
+            "projects", "create",
+            "--name", "Test Project",
+            "--description", "A test project",
+            "--api", api_stub,
+        ])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects"
+        assert req["body"]["name"] == "Test Project"
+        assert req["body"]["description"] == "A test project"
+
+    def test_creates_project_name_only(self, api_stub: str) -> None:
+        _StubHandler.response_body = {"id": "proj-2", "name": "Minimal", "status": "active"}
+        rc = cli(["projects", "create", "--name", "Minimal", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["body"]["name"] == "Minimal"
+        assert "description" not in req["body"]
+
+    def test_name_required(self) -> None:
+        with pytest.raises(SystemExit):
+            cli(["projects", "create"])
+
+
+# ---------------------------------------------------------------------------
+# atc projects show
+# ---------------------------------------------------------------------------
+
+
+class TestProjectsShow:
+    def test_shows_project(self, api_stub: str) -> None:
+        _StubHandler.response_body = {"id": "proj-1", "name": "Test", "status": "active"}
+        rc = cli(["projects", "show", "proj-1", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "GET"
+        assert req["path"] == "/api/projects/proj-1"
+
+
+# ---------------------------------------------------------------------------
+# atc leader start
+# ---------------------------------------------------------------------------
+
+
+class TestLeaderStart:
+    def test_starts_leader(self, api_stub: str) -> None:
+        _StubHandler.response_body = {"status": "started", "session_id": "sess-1"}
+        rc = cli(["leader", "start", "--project-id", "proj-1", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects/proj-1/leader/start"
+
+    def test_starts_leader_with_goal(self, api_stub: str) -> None:
+        _StubHandler.response_body = {"status": "started", "session_id": "sess-2"}
+        rc = cli([
+            "leader", "start",
+            "--project-id", "proj-1",
+            "--goal", "Build a calculator",
+            "--api", api_stub,
+        ])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["body"]["goal"] == "Build a calculator"
+
+    def test_project_id_required(self) -> None:
+        with pytest.raises(SystemExit):
+            cli(["leader", "start"])
+
+
+# ---------------------------------------------------------------------------
+# atc leader stop
+# ---------------------------------------------------------------------------
+
+
+class TestLeaderStop:
+    def test_stops_leader(self, api_stub: str) -> None:
+        rc = cli(["leader", "stop", "--project-id", "proj-1", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects/proj-1/leader/stop"
+
+
+# ---------------------------------------------------------------------------
+# atc ace create
+# ---------------------------------------------------------------------------
+
+
+class TestAceCreate:
+    def test_creates_ace(self, api_stub: str) -> None:
+        _StubHandler.response_body = {"id": "sess-1", "name": "frontend-ace", "status": "idle"}
+        rc = cli([
+            "ace", "create",
+            "--project-id", "proj-1",
+            "--name", "frontend-ace",
+            "--api", api_stub,
+        ])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects/proj-1/aces"
+        assert req["body"]["name"] == "frontend-ace"
+
+    def test_project_id_and_name_required(self) -> None:
+        with pytest.raises(SystemExit):
+            cli(["ace", "create"])
+
+
+# ---------------------------------------------------------------------------
+# atc ace list
+# ---------------------------------------------------------------------------
+
+
+class TestAceList:
+    def test_lists_aces(self, api_stub: str) -> None:
+        _StubHandler.response_body = []  # type: ignore[assignment]
+        rc = cli(["ace", "list", "--project-id", "proj-1", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "GET"
+        assert req["path"] == "/api/projects/proj-1/aces"
