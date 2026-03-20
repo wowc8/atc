@@ -44,6 +44,13 @@ export default function LeaderConsole({
     enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
 
+  // Reset auto-start flag when the project changes so Leader
+  // can auto-start for a newly navigated-to project.
+  useEffect(() => {
+    autoStarted.current = false;
+    userStopped.current = false;
+  }, [projectId]);
+
   // Auto-start for claude_code provider when viewing a project.
   // Respects userStopped ref to prevent re-starting after manual Stop.
   // Note: does NOT require `leader` to exist — handleStart() creates one if needed.
@@ -52,7 +59,7 @@ export default function LeaderConsole({
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isClaudeCode, isIdle, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isClaudeCode, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
     userStopped.current = false;

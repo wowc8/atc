@@ -64,6 +64,13 @@ export default function TowerPanel() {
     enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
   });
 
+  // Reset auto-start flag when the resolved project changes so Tower
+  // can auto-start for a newly created or newly navigated-to project.
+  useEffect(() => {
+    autoStarted.current = false;
+    userStopped.current = false;
+  }, [resolvedProjectId]);
+
   // Auto-start Tower session for claude_code provider.
   // Respects userStopped ref to prevent re-starting after manual Stop.
   useEffect(() => {

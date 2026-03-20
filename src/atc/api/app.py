@@ -94,6 +94,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     ws_hub.on_input(_on_ws_input)
 
+    # Send initial terminal content when a client subscribes to a terminal channel.
+    # This captures the current tmux pane content so the terminal isn't blank on load.
+    async def _on_terminal_subscribe(ws: Any, channel: str) -> None:
+        session_id = channel.removeprefix("terminal:")
+        if not session_id:
+            return
+        try:
+            content = await pty_pool.capture_pane(session_id)
+            if content and content.strip():
+                await ws_hub.send_to(ws, channel, content)
+        except (ValueError, RuntimeError):
+            # No PTY reader or capture failed — skip silently
+            pass
+
+    ws_hub.on_subscribe(_on_terminal_subscribe)
+
     # Auto-start PTY readers when sessions are created with a tmux pane
     async def _on_session_created(data: dict[str, Any]) -> None:
         session_id = data.get("session_id", "")

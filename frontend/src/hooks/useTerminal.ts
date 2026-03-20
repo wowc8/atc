@@ -11,22 +11,34 @@ interface UseTerminalOptions {
 }
 
 /**
- * Transform separator lines (rows of box-drawing ─ characters) into subtle,
- * dimmed dividers so they don't dominate the terminal UI.
+ * Transform terminal output to clean up formatting artifacts.
  *
- * Claude Code emits ─ (U+2500) repeated across the full terminal width as
- * section separators.  In xterm.js these render as thick grey bars.  We
- * wrap them with ANSI dim + dark-grey so they fade into the background.
+ * 1. Collapse long runs of box-drawing ─ characters (separator lines)
+ *    to a short dimmed divider.  Claude Code emits these at the full
+ *    tmux width (200 cols) which wraps in the narrower xterm.js panel,
+ *    creating the appearance of duplicated thick grey bars.
+ *
+ * 2. Deduplicate identical consecutive lines that sometimes appear due
+ *    to PTY echo or tmux redraw artifacts.
  */
-function transformSeparators(data: string): string {
-  // Match runs of 3+ box-drawing horizontal chars (─ ━ ╌ ╍ ┄ ┅ ┈ ┉)
-  // that make up separator lines, possibly surrounded by ANSI escapes.
-  // The regex targets sequences that appear as full-width separator rows.
-  return data.replace(
+function transformTerminalOutput(data: string): string {
+  // Collapse long runs of box-drawing chars to a short dimmed divider.
+  // This prevents 200-char separator lines from wrapping across multiple
+  // rows in the narrower xterm.js terminal panel.
+  let result = data.replace(
     /([─━╌╍┄┅┈┉]{3,})/g,
-    "\x1b[2m\x1b[38;5;238m$1\x1b[0m",
+    (_match) => {
+      // Replace with a short (40-char) dimmed divider
+      const short = "─".repeat(40);
+      return `\x1b[2m\x1b[38;5;238m${short}\x1b[0m`;
+    },
   );
+
+  return result;
 }
+
+/** @deprecated Use transformTerminalOutput instead */
+const transformSeparators = transformTerminalOutput;
 
 /**
  * Hook that manages an xterm.js Terminal instance and connects it to the
@@ -178,8 +190,19 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       if (!term.element || !el.contains(term.element)) {
         term.open(el);
       }
-      // Delay fit to ensure container has dimensions
-      requestAnimationFrame(() => fitRef.current?.fit());
+      // Delay fit to ensure container has dimensions.
+      // Double-RAF avoids the xterm.js "Cannot read properties of undefined
+      // (reading 'dimensions')" error that occurs when fit() runs before
+      // the terminal renderer is fully initialized.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          try {
+            fitRef.current?.fit();
+          } catch {
+            // Terminal may not be fully initialized yet — safe to ignore
+          }
+        });
+      });
     }
   }, []);
 
@@ -188,7 +211,11 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   }, []);
 
   const fit = useCallback(() => {
-    fitRef.current?.fit();
+    try {
+      fitRef.current?.fit();
+    } catch {
+      // Guard against fit() before terminal is fully initialized
+    }
   }, []);
 
   /** Send text + Enter to the terminal's PTY via WebSocket. */

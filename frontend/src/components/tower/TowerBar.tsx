@@ -9,6 +9,8 @@ function StatusDot({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
     idle: "var(--color-text-muted)",
     planning: "var(--color-accent)",
+    managing: "var(--color-status-green)",
+    complete: "var(--color-status-green)",
     warning: "var(--color-status-amber)",
     error: "var(--color-status-red)",
   };
@@ -25,7 +27,10 @@ export default function TowerBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { state } = useAppContext();
-  const { brainStatus, usage, notifications, projects, failureLogs } = state;
+  const { brainStatus, towerDetail, usage, notifications, projects, failureLogs } = state;
+  // Use towerDetail.state for the status dot — brainStatus.status is a
+  // legacy field that doesn't update when tower transitions happen.
+  const towerState = towerDetail.state ?? brainStatus.status;
   const [logViewerOpen, setLogViewerOpen] = useState(false);
   const [settingsPaneOpen, setSettingsPaneOpen] = useState(false);
 
@@ -47,8 +52,8 @@ export default function TowerBar() {
           </button>
 
           <div className="tower-bar__status">
-            <StatusDot status={brainStatus.status} />
-            <span className="tower-bar__status-text">{brainStatus.status}</span>
+            <StatusDot status={towerState} />
+            <span className="tower-bar__status-text">{towerState}</span>
           </div>
         </div>
 

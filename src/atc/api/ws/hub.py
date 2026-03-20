@@ -34,6 +34,7 @@ class WsHub:
         self._clients: dict[WebSocket, set[str]] = {}
         self._input_callback: Any | None = None
         self._heartbeat_callback: Any | None = None
+        self._subscribe_callback: Any | None = None
 
     @property
     def client_count(self) -> int:
@@ -53,6 +54,16 @@ class WsHub:
         """
         self._heartbeat_callback = callback
 
+    def on_subscribe(self, callback: Any) -> None:
+        """Register a callback invoked when a client subscribes to a channel.
+
+        Callback signature: ``async def cb(ws: WebSocket, channel: str) -> None``
+
+        Used to send initial terminal content when a client subscribes to a
+        ``terminal:*`` channel.
+        """
+        self._subscribe_callback = callback
+
     async def connect(self, ws: WebSocket) -> None:
         """Accept a new WebSocket connection."""
         await ws.accept()
@@ -68,6 +79,14 @@ class WsHub:
         """Subscribe a client to one or more channels."""
         if ws in self._clients:
             self._clients[ws].update(channels)
+
+    async def send_to(self, ws: WebSocket, channel: str, data: Any) -> None:
+        """Send a message to a specific client."""
+        frame = json.dumps({"channel": channel, "data": data})
+        try:
+            await ws.send_text(frame)
+        except Exception:
+            self.disconnect(ws)
 
     async def broadcast(self, channel: str, data: Any) -> None:
         """Send a message to all clients subscribed to *channel*."""
@@ -104,6 +123,14 @@ class WsHub:
 
                 if channel == "subscribe" and isinstance(data, list):
                     self.subscribe(ws, data)
+                    # Send initial content for terminal channels
+                    if self._subscribe_callback:
+                        for ch in data:
+                            if ch.startswith("terminal:"):
+                                try:
+                                    await self._subscribe_callback(ws, ch)
+                                except Exception:
+                                    logger.debug("Subscribe callback error for %s", ch)
                 elif channel == "heartbeat" and isinstance(data, dict) and self._heartbeat_callback:
                     session_id = data.get("session_id", "")
                     if session_id:
