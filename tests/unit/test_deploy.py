@@ -133,6 +133,7 @@ class TestDeployAceFiles:
         settings = json.loads(result.settings_path.read_text())
         assert settings["model"] == "opus"
         assert settings["autoMemoryEnabled"] is False
+        assert settings["hasTrustDialogAccepted"] is True
 
     def test_settings_has_permissions(self, ace_spec: AceDeploySpec, staging_root: Path) -> None:
         result = deploy_ace_files(ace_spec, staging_root=staging_root)
