@@ -52,6 +52,11 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Buffer for data received before the terminal is opened (attached to DOM).
+  // xterm.js throws "Cannot read properties of undefined (reading 'dimensions')"
+  // when write() is called on a terminal that hasn't been opened yet.
+  const pendingWritesRef = useRef<string[]>([]);
+  const termOpenRef = useRef(false);
 
   // Create terminal once
   useEffect(() => {
@@ -88,13 +93,16 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     // If container already mounted, open immediately
     if (containerRef.current) {
       term.open(containerRef.current);
-      fit.fit();
+      termOpenRef.current = true;
+      try { fit.fit(); } catch { /* not ready */ }
     }
 
     return () => {
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      termOpenRef.current = false;
+      pendingWritesRef.current = [];
     };
   }, [enabled]);
 
@@ -143,7 +151,14 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
           if (msg.channel === channel && msg.data) {
             const raw =
               typeof msg.data === "string" ? msg.data : JSON.stringify(msg.data);
-            termRef.current?.write(transformSeparators(raw));
+            const transformed = transformSeparators(raw);
+            // Buffer writes if terminal isn't opened yet to avoid xterm.js
+            // "dimensions" error from syncScrollArea on unopened terminals.
+            if (termOpenRef.current && termRef.current) {
+              termRef.current.write(transformed);
+            } else {
+              pendingWritesRef.current.push(transformed);
+            }
           }
         } catch {
           /* ignore malformed */
@@ -196,6 +211,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       if (!term.element || !el.contains(term.element)) {
         term.open(el);
       }
+      termOpenRef.current = true;
       // Delay fit to ensure container has dimensions.
       // Double-RAF avoids the xterm.js "Cannot read properties of undefined
       // (reading 'dimensions')" error that occurs when fit() runs before
@@ -206,6 +222,14 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
             fitRef.current?.fit();
           } catch {
             // Terminal may not be fully initialized yet — safe to ignore
+          }
+          // Flush any data that arrived before the terminal was opened
+          const pending = pendingWritesRef.current;
+          if (pending.length > 0 && termRef.current) {
+            for (const data of pending) {
+              termRef.current.write(data);
+            }
+            pendingWritesRef.current = [];
           }
         });
       });
