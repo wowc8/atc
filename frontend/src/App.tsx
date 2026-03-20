@@ -7,6 +7,7 @@ import { useUpdater } from "./hooks/useUpdater";
 import Dashboard from "./pages/Dashboard";
 import ProjectView from "./pages/ProjectView";
 import UsagePage from "./pages/UsagePage";
+import ContextPage from "./pages/ContextPage";
 
 function Layout() {
   const updater = useUpdater();
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/projects/:id" element={<ProjectView />} />
             <Route path="/usage" element={<UsagePage />} />
+            <Route path="/context" element={<ContextPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

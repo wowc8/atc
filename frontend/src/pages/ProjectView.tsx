@@ -65,8 +65,7 @@ export default function ProjectView() {
             <ContextHub
               scope="project"
               projectId={project.id}
-              showScopeTabs
-              availableScopes={["project", "global"]}
+              showScopeTabs={false}
             />
           </div>
         </aside>

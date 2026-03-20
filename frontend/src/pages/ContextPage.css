@@ -1,0 +1,9 @@
+.context-page {
+  padding: var(--space-4);
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.context-page h1 {
+  margin-bottom: var(--space-4);
+}
