@@ -89,7 +89,10 @@ type Action =
   | { type: "SET_TOWER_PROGRESS"; payload: TowerProgress }
   | { type: "SET_HEARTBEATS"; payload: Record<string, SessionHeartbeat> }
   | { type: "UPDATE_HEARTBEAT"; payload: SessionHeartbeat }
-  | { type: "UPDATE_SESSION_STATUS"; payload: { session_id: string; status: string } };
+  | { type: "UPDATE_SESSION_STATUS"; payload: { session_id: string; status: string } }
+  | { type: "ADD_PROJECT"; payload: Project }
+  | { type: "UPDATE_PROJECT"; payload: Project }
+  | { type: "REMOVE_PROJECT"; payload: string };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -170,6 +173,29 @@ function reducer(state: AppState, action: Action): AppState {
             ? { ...s, status: action.payload.status as Session["status"] }
             : s,
         ),
+      };
+    case "ADD_PROJECT":
+      // Avoid duplicates — if project already exists, update it instead
+      if (state.projects.some((p) => p.id === action.payload.id)) {
+        return {
+          ...state,
+          projects: state.projects.map((p) =>
+            p.id === action.payload.id ? action.payload : p,
+          ),
+        };
+      }
+      return { ...state, projects: [...state.projects, action.payload] };
+    case "UPDATE_PROJECT":
+      return {
+        ...state,
+        projects: state.projects.map((p) =>
+          p.id === action.payload.id ? action.payload : p,
+        ),
+      };
+    case "REMOVE_PROJECT":
+      return {
+        ...state,
+        projects: state.projects.filter((p) => p.id !== action.payload),
       };
   }
 }
@@ -283,6 +309,12 @@ export function AppProvider({ children }: AppProviderProps) {
           type: "UPDATE_SESSION_STATUS",
           payload: { session_id: data.session_id, status: data.new_status },
         });
+      } else if (data.project_created && data.project) {
+        dispatch({ type: "ADD_PROJECT", payload: data.project as Project });
+      } else if (data.project_updated && data.project) {
+        dispatch({ type: "UPDATE_PROJECT", payload: data.project as Project });
+      } else if (data.project_deleted && typeof data.project_id === "string") {
+        dispatch({ type: "REMOVE_PROJECT", payload: data.project_id });
       } else {
         dispatch({ type: "SET_STATE", payload: data as Partial<AppState> });
       }

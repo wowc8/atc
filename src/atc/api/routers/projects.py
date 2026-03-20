@@ -72,6 +72,10 @@ async def _get_event_bus(request: Request):  # noqa: ANN202
     return getattr(request.app.state, "event_bus", None)
 
 
+async def _get_ws_hub(request: Request):  # noqa: ANN202
+    return getattr(request.app.state, "ws_hub", None)
+
+
 @router.get("", response_model=list[ProjectResponse])
 async def list_projects(request: Request) -> list[ProjectResponse]:
     db = await _get_db(request)
@@ -103,7 +107,20 @@ async def create_project(body: CreateProjectRequest, request: Request) -> Projec
         # Project was created but leader failed — don't leave the user hanging
         # Return the project anyway; leader can be created later.
 
-    return ProjectResponse(**project.__dict__)
+    resp = ProjectResponse(**project.__dict__)
+
+    # Broadcast project creation to all connected WebSocket clients
+    ws_hub = await _get_ws_hub(request)
+    if ws_hub is not None:
+        try:
+            await ws_hub.broadcast("state", {
+                "project_created": True,
+                "project": resp.model_dump(),
+            })
+        except Exception:
+            logger.debug("Failed to broadcast project_created via WebSocket")
+
+    return resp
 
 
 @router.delete("/{project_id}", status_code=204)
@@ -115,6 +132,17 @@ async def delete_project(project_id: str, request: Request) -> None:
         raise HTTPException(status_code=404, detail="Project not found")
     await db_ops.delete_project(db, project_id)
 
+    # Broadcast project deletion to all connected WebSocket clients
+    ws_hub = await _get_ws_hub(request)
+    if ws_hub is not None:
+        try:
+            await ws_hub.broadcast("state", {
+                "project_deleted": True,
+                "project_id": project_id,
+            })
+        except Exception:
+            logger.debug("Failed to broadcast project_deleted via WebSocket")
+
 
 @router.patch("/{project_id}/archive", response_model=ProjectResponse)
 async def archive_project(project_id: str, request: Request) -> ProjectResponse:
@@ -125,7 +153,20 @@ async def archive_project(project_id: str, request: Request) -> ProjectResponse:
         raise HTTPException(status_code=404, detail="Project not found")
     await db_ops.archive_project(db, project_id)
     project = await db_ops.get_project(db, project_id)
-    return ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
+    resp = ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
+
+    # Broadcast project update to all connected WebSocket clients
+    ws_hub = await _get_ws_hub(request)
+    if ws_hub is not None:
+        try:
+            await ws_hub.broadcast("state", {
+                "project_updated": True,
+                "project": resp.model_dump(),
+            })
+        except Exception:
+            logger.debug("Failed to broadcast project_updated via WebSocket")
+
+    return resp
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -164,7 +205,20 @@ async def update_project_provider(
 
     await db_ops.update_project_agent_provider(db, project_id, body.agent_provider)
     project = await db_ops.get_project(db, project_id)
-    return ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
+    resp = ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
+
+    # Broadcast project update to all connected WebSocket clients
+    ws_hub = await _get_ws_hub(request)
+    if ws_hub is not None:
+        try:
+            await ws_hub.broadcast("state", {
+                "project_updated": True,
+                "project": resp.model_dump(),
+            })
+        except Exception:
+            logger.debug("Failed to broadcast project_updated via WebSocket")
+
+    return resp
 
 
 @router.get("/{project_id}/manager", response_model=LeaderResponse)
