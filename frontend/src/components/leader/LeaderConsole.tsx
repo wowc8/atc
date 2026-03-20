@@ -23,7 +23,6 @@ export default function LeaderConsole({
   const { state, dispatch } = useAppContext();
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
@@ -126,25 +125,6 @@ export default function LeaderConsole({
     }
   }
 
-  const [sendError, setSendError] = useState<string | null>(null);
-
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    if (!message.trim()) return;
-    const text = message.trim();
-    setMessage("");
-    setSendError(null);
-    try {
-      await api.post(`/projects/${projectId}/leader/message`, {
-        message: text,
-      });
-    } catch (err) {
-      console.error("Failed to send message:", err);
-      setSendError("Failed to send — leader may need restart");
-      setMessage(text);
-    }
-  }
-
   return (
     <div className="leader-console" data-testid="leader-console">
       <div className="leader-console__header">
@@ -207,33 +187,7 @@ export default function LeaderConsole({
       )}
 
       {(isRunning || (isClaudeCode && !!terminalChannel)) && (
-        <>
-          <div className="leader-console__terminal" ref={attachRef} />
-
-          <form
-            className="leader-console__input"
-            onSubmit={handleSendMessage}
-          >
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Send message to leader..."
-            />
-            <button
-              type="submit"
-              className="btn btn-sm btn-primary"
-              disabled={!message.trim()}
-            >
-              Send
-            </button>
-            {sendError && (
-              <span className="leader-console__send-error" title={sendError}>
-                !
-              </span>
-            )}
-          </form>
-        </>
+        <div className="leader-console__terminal" ref={attachRef} />
       )}
     </div>
   );

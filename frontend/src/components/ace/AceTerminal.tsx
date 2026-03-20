@@ -1,5 +1,3 @@
-import { useState } from "react";
-import { api } from "../../utils/api";
 import { useTerminal } from "../../hooks/useTerminal";
 import type { Session } from "../../types";
 import "./AceTerminal.css";
@@ -9,8 +7,6 @@ interface AceTerminalProps {
 }
 
 export default function AceTerminal({ session }: AceTerminalProps) {
-  const [message, setMessage] = useState("");
-
   const isActive =
     session.status === "working" ||
     session.status === "waiting" ||
@@ -25,39 +21,9 @@ export default function AceTerminal({ session }: AceTerminalProps) {
     enabled: showTerminal,
   });
 
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    if (!message.trim()) return;
-    try {
-      await api.post(`/aces/${session.id}/message`, {
-        message: message.trim(),
-      });
-      setMessage("");
-    } catch (err) {
-      console.error("Failed to send message:", err);
-    }
-  }
-
   return (
     <div className="ace-terminal" data-testid="ace-terminal">
       <div className="ace-terminal__view" ref={attachRef} />
-
-      <form className="ace-terminal__input" onSubmit={handleSendMessage}>
-        <input
-          type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder={`Send to ${session.name}...`}
-          disabled={!isActive}
-        />
-        <button
-          type="submit"
-          className="btn btn-sm btn-primary"
-          disabled={!message.trim() || !isActive}
-        >
-          Send
-        </button>
-      </form>
     </div>
   );
 }

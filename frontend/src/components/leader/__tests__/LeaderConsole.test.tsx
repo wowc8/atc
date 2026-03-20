@@ -109,20 +109,6 @@ describe("LeaderConsole", () => {
     expect(screen.getByText("Build the feature")).toBeInTheDocument();
   });
 
-  it("shows message input when running", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
-    expect(screen.getByPlaceholderText("Send message to leader...")).toBeInTheDocument();
-  });
-
-  it("hides message input when idle", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} />,
-    );
-    expect(screen.queryByPlaceholderText("Send message to leader...")).not.toBeInTheDocument();
-  });
-
   it("shows status badge for leader", () => {
     renderWithProviders(
       <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
@@ -181,46 +167,6 @@ describe("LeaderConsole", () => {
         expect(onRefresh).toHaveBeenCalled();
       });
     }
-  });
-
-  it("disables Send button when message is empty", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
-    const sendBtn = screen.getByText("Send");
-    expect(sendBtn).toBeDisabled();
-  });
-
-  it("enables Send button when message is typed", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
-    const input = screen.getByPlaceholderText("Send message to leader...");
-    await user.type(input, "hello");
-    const sendBtn = screen.getByText("Send");
-    expect(sendBtn).not.toBeDisabled();
-  });
-
-  it("clears message after successful send", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ status: "sent" }), { status: 200 }),
-      ),
-    );
-
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
-
-    const input = screen.getByPlaceholderText("Send message to leader...");
-    await user.type(input, "hello");
-    await user.click(screen.getByText("Send"));
-
-    await waitFor(() => {
-      expect(input).toHaveValue("");
-    });
   });
 
   it("shows Starting... while loading on start", async () => {

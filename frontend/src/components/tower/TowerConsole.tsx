@@ -10,7 +10,7 @@ import "./TowerConsole.css";
  *
  * For claude_code provider: auto-starts as an open terminal on app load.
  * For other providers: shows goal form with Start button.
- * Running: Full PTY terminal + message input bar.
+ * Running: Full PTY terminal (type directly into the terminal).
  */
 export default function TowerConsole() {
   const { state, dispatch } = useAppContext();
@@ -19,8 +19,6 @@ export default function TowerConsole() {
   const [goal, setGoal] = useState("");
   const [projectId, setProjectId] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const messageInputRef = useRef<HTMLInputElement>(null);
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
@@ -124,24 +122,6 @@ export default function TowerConsole() {
       await api.post("/tower/complete");
     } catch (err) {
       console.error("Failed to mark Tower goal complete:", err);
-    }
-  }
-
-  const [sendError, setSendError] = useState<string | null>(null);
-
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    if (!message.trim()) return;
-    const text = message.trim();
-    setMessage("");
-    setSendError(null);
-    messageInputRef.current?.focus();
-    try {
-      await api.post("/tower/message", { message: text });
-    } catch (err) {
-      console.error("Failed to send message to Tower:", err);
-      setSendError("Failed to send message");
-      setMessage(text);
     }
   }
 
@@ -261,39 +241,13 @@ export default function TowerConsole() {
         </div>
       )}
 
-      {/* Running: terminal + message input */}
+      {/* Running: terminal (input via xterm.js) */}
       {(isRunning || (isClaudeCode && !!terminalChannel)) && (
-        <>
-          <div
-            className="tower-console__terminal"
-            ref={attachRef}
-            data-testid="tower-console-terminal"
-          />
-
-          <form className="tower-console__input" onSubmit={handleSendMessage}>
-            <input
-              ref={messageInputRef}
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Send message to Tower..."
-              data-testid="tower-console-message"
-            />
-            <button
-              type="submit"
-              className="btn btn-sm btn-primary"
-              disabled={!message.trim()}
-              data-testid="tower-console-send"
-            >
-              Send
-            </button>
-            {sendError && (
-              <span className="tower-console__send-error" title={sendError}>
-                !
-              </span>
-            )}
-          </form>
-        </>
+        <div
+          className="tower-console__terminal"
+          ref={attachRef}
+          data-testid="tower-console-terminal"
+        />
       )}
     </div>
   );
