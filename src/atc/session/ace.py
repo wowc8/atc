@@ -107,6 +107,34 @@ async def _spawn_pane(
     return pane_id
 
 
+async def _accept_trust_dialog(pane_id: str, *, timeout: float = 8.0) -> bool:
+    """Accept the Claude Code trust dialog if it appears.
+
+    Polls the pane output for the trust dialog prompt and sends Enter
+    to accept it.  Returns ``True`` if the dialog was detected and accepted,
+    ``False`` if no dialog appeared within *timeout* seconds.
+    """
+    poll_interval = 0.5
+    elapsed = 0.0
+    while elapsed < timeout:
+        try:
+            output = await _capture_pane(pane_id)
+            if "trust this folder" in output.lower():
+                # Dialog is showing — send Enter to accept option 1
+                await _tmux_run("send-keys", "-t", pane_id, "Enter")
+                logger.info("Pane %s: accepted trust dialog", pane_id)
+                return True
+            # Claude Code already started (no trust dialog)
+            if "claude code" in output.lower():
+                return False
+        except RuntimeError:
+            pass
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+    logger.debug("Pane %s: no trust dialog detected within %.1fs", pane_id, timeout)
+    return False
+
+
 async def _kill_pane(pane_id: str) -> None:
     """Kill a tmux pane by id."""
     try:
@@ -311,6 +339,7 @@ async def create_ace(
             launch_command,
             working_dir=effective_working_dir,
         )
+        await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         # Step 4a: success → idle

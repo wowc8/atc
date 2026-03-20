@@ -16,6 +16,7 @@ from atc.agents.factory import get_launch_command
 from atc.leader.leader import _build_manager_deploy_spec
 from atc.session.ace import (
     ATC_TMUX_SESSION,
+    _accept_trust_dialog,
     _ensure_tmux_session,
     _kill_pane,
     _pane_is_alive,
@@ -175,6 +176,7 @@ async def reconnect_session(
             launch_cmd,
             working_dir=working_dir,
         )
+        await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session_id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session_id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
@@ -221,9 +223,7 @@ async def reconnect_all(
 def _log_reconnect_working_dir(working_dir: str, session_id: str) -> None:
     """Log working_dir contents during reconnection for runtime debugging."""
     logger.warning(
-        "=== RECONNECT DEBUG session=%s ===\n"
-        "  working_dir: %s\n"
-        "  exists: %s",
+        "=== RECONNECT DEBUG session=%s ===\n" "  working_dir: %s\n" "  exists: %s",
         session_id,
         working_dir,
         os.path.isdir(working_dir),

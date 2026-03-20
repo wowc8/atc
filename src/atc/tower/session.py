@@ -18,6 +18,7 @@ from atc.agents.deploy import _DEFAULT_STAGING_ROOT, TowerDeploySpec, deploy_tow
 from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
+    _accept_trust_dialog,
     _ensure_tmux_session,
     _kill_pane,
     _pane_is_alive,
@@ -138,6 +139,7 @@ async def start_tower_session(
             launch_cmd,
             working_dir=working_dir,
         )
+        await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
@@ -202,9 +204,7 @@ async def send_tower_message(
 
     # Reject sends to sessions that are clearly not running
     if current in (SessionStatus.ERROR, SessionStatus.DISCONNECTED):
-        raise ValueError(
-            f"Tower session is {current.value} — stop and restart"
-        )
+        raise ValueError(f"Tower session is {current.value} — stop and restart")
 
     if current in (SessionStatus.IDLE, SessionStatus.WAITING):
         await transition(session.id, current, SessionStatus.WORKING, event_bus)
@@ -224,9 +224,7 @@ def _log_working_dir_contents(working_dir: str, session_id: str, caller: str) ->
     path that will be passed as -c to tmux (i.e. where Claude Code starts).
     """
     logger.warning(
-        "=== TOWER DEBUG [%s] session=%s ===\n"
-        "  working_dir: %s\n"
-        "  working_dir exists: %s",
+        "=== TOWER DEBUG [%s] session=%s ===\n" "  working_dir: %s\n" "  working_dir exists: %s",
         caller,
         session_id,
         working_dir,

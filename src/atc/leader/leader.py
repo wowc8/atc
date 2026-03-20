@@ -19,6 +19,7 @@ from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
 from atc.agents.factory import get_launch_command
 from atc.session.ace import (
     ATC_TMUX_SESSION,
+    _accept_trust_dialog,
     _ensure_tmux_session,
     _kill_pane,
     _send_keys,
@@ -33,7 +34,6 @@ if TYPE_CHECKING:
     from atc.core.events import EventBus
 
 logger = logging.getLogger(__name__)
-
 
 
 def _build_manager_deploy_spec(
@@ -144,6 +144,7 @@ async def start_leader(
             launch_cmd,
             working_dir=working_dir,
         )
+        await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
@@ -234,9 +235,7 @@ async def send_leader_message(
 
     # Reject sends to sessions that are clearly not running
     if current in (SessionStatus.ERROR, SessionStatus.DISCONNECTED):
-        raise ValueError(
-            f"Leader session is {current.value} — stop and restart the leader"
-        )
+        raise ValueError(f"Leader session is {current.value} — stop and restart the leader")
 
     if current in (SessionStatus.IDLE, SessionStatus.WAITING):
         await transition(session.id, current, SessionStatus.WORKING, event_bus)
@@ -246,8 +245,6 @@ async def send_leader_message(
     from atc.session.ace import _pane_is_alive
 
     if not await _pane_is_alive(session.tmux_pane):
-        raise ValueError(
-            "Leader tmux pane is dead — stop and restart the leader"
-        )
+        raise ValueError("Leader tmux pane is dead — stop and restart the leader")
 
     await _send_keys(session.tmux_pane, message)
