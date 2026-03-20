@@ -126,6 +126,10 @@ def deploy_ace_files(
     # Ensure the staging directory is a git repo so Claude Code finds settings
     _ensure_git_repo(root)
 
+    # Write trust acceptance to the user-level per-project settings so Claude
+    # Code skips the "Do you trust this project?" dialog.
+    _write_user_trust_settings(root)
+
     # CLAUDE.md
     claude_md = _build_ace_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
@@ -174,6 +178,10 @@ def deploy_manager_files(
     # Ensure the staging directory is a git repo so Claude Code finds settings
     _ensure_git_repo(root)
 
+    # Write trust acceptance to the user-level per-project settings so Claude
+    # Code skips the "Do you trust this project?" dialog.
+    _write_user_trust_settings(root)
+
     # CLAUDE.md
     claude_md = _build_manager_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
@@ -221,6 +229,10 @@ def deploy_tower_files(
 
     # Ensure the staging directory is a git repo so Claude Code finds settings
     _ensure_git_repo(root)
+
+    # Write trust acceptance to the user-level per-project settings so Claude
+    # Code skips the "Do you trust this project?" dialog.
+    _write_user_trust_settings(root)
 
     # CLAUDE.md
     claude_md = _build_tower_claude_md(spec)
@@ -536,6 +548,7 @@ def _build_settings(
     return {
         "model": model,
         "hasTrustDialogAccepted": True,
+        "enableAllProjectMcpServers": True,
         "autoMemoryEnabled": False,
         "spinnerTipsEnabled": False,
         "permissions": {
@@ -739,6 +752,51 @@ def _ensure_git_repo(root: Path) -> None:
             capture_output=True,
         )
         logger.debug("Initialized git repo at %s", root)
+
+
+def _write_user_trust_settings(root: Path) -> None:
+    """Write trust acceptance to the user-level per-project settings.
+
+    Claude Code stores per-project trust decisions at::
+
+        ~/.claude/projects/<encoded-path>/settings.local.json
+
+    where ``<encoded-path>`` is the resolved project path with ``/`` replaced
+    by ``-``.  Writing ``hasTrustDialogAccepted`` at the project level
+    (``.claude/settings.local.json``) is **not** sufficient — Claude Code only
+    reads trust acceptance from the user-level location.
+
+    This function creates the user-level settings file so Claude Code skips
+    the "Do you trust this project?" dialog entirely.
+    """
+    # Resolve symlinks (e.g. /tmp → /private/tmp on macOS) to match
+    # the path Claude Code uses internally.
+    resolved = root.resolve()
+    encoded_path = str(resolved).replace("/", "-")
+
+    claude_home = Path.home() / ".claude"
+    user_project_dir = claude_home / "projects" / encoded_path
+    user_settings_path = user_project_dir / "settings.local.json"
+
+    trust_settings = {
+        "hasTrustDialogAccepted": True,
+        "enableAllProjectMcpServers": True,
+    }
+
+    # Merge with existing settings if the file already exists
+    if user_settings_path.exists():
+        try:
+            existing = json.loads(user_settings_path.read_text())
+            existing.update(trust_settings)
+            trust_settings = existing
+        except (json.JSONDecodeError, OSError):
+            pass  # overwrite if corrupt
+
+    user_project_dir.mkdir(parents=True, exist_ok=True)
+    user_settings_path.write_text(json.dumps(trust_settings, indent=2))
+    logger.debug(
+        "Wrote user-level trust settings for %s → %s", resolved, user_settings_path
+    )
 
 
 def _write_file(path: Path, content: str) -> str:

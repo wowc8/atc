@@ -215,6 +215,31 @@ class TestDeployAceFiles:
         settings = json.loads(local_path.read_text())
         assert settings["hasTrustDialogAccepted"] is True
 
+    def test_settings_has_enable_all_project_mcp_servers(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        settings = json.loads(result.settings_path.read_text())
+        assert settings["enableAllProjectMcpServers"] is True
+
+    def test_writes_user_level_trust_settings(
+        self, ace_spec: AceDeploySpec, staging_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deploy should write trust settings to ~/.claude/projects/<encoded>/settings.local.json."""
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+
+        # Find the user-level project settings
+        encoded_path = str(result.root.resolve()).replace("/", "-")
+        user_settings = fake_home / ".claude" / "projects" / encoded_path / "settings.local.json"
+        assert user_settings.exists(), f"Expected {user_settings} to exist"
+        settings = json.loads(user_settings.read_text())
+        assert settings["hasTrustDialogAccepted"] is True
+        assert settings["enableAllProjectMcpServers"] is True
+
     def test_initializes_git_repo(self, ace_spec: AceDeploySpec, staging_root: Path) -> None:
         result = deploy_ace_files(ace_spec, staging_root=staging_root)
         assert (result.root / ".git").exists()
@@ -348,6 +373,23 @@ class TestDeployManagerFiles:
         settings = json.loads(local_path.read_text())
         assert settings["hasTrustDialogAccepted"] is True
 
+    def test_writes_user_level_trust_settings(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deploy should write trust settings to ~/.claude/projects/<encoded>/settings.local.json."""
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+
+        encoded_path = str(result.root.resolve()).replace("/", "-")
+        user_settings = fake_home / ".claude" / "projects" / encoded_path / "settings.local.json"
+        assert user_settings.exists()
+        settings = json.loads(user_settings.read_text())
+        assert settings["hasTrustDialogAccepted"] is True
+        assert settings["enableAllProjectMcpServers"] is True
+
     def test_initializes_git_repo(
         self, manager_spec: ManagerDeploySpec, staging_root: Path
     ) -> None:
@@ -461,6 +503,23 @@ class TestDeployTowerFiles:
         assert local_path.exists()
         settings = json.loads(local_path.read_text())
         assert settings["hasTrustDialogAccepted"] is True
+
+    def test_writes_user_level_trust_settings(
+        self, tower_spec: TowerDeploySpec, staging_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deploy should write trust settings to ~/.claude/projects/<encoded>/settings.local.json."""
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        result = deploy_tower_files(tower_spec, staging_root=staging_root)
+
+        encoded_path = str(result.root.resolve()).replace("/", "-")
+        user_settings = fake_home / ".claude" / "projects" / encoded_path / "settings.local.json"
+        assert user_settings.exists()
+        settings = json.loads(user_settings.read_text())
+        assert settings["hasTrustDialogAccepted"] is True
+        assert settings["enableAllProjectMcpServers"] is True
 
     def test_initializes_git_repo(
         self, tower_spec: TowerDeploySpec, staging_root: Path
