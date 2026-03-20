@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite
 
 from atc.state.models import (
+    ContextEntry,
     FeatureFlag,
     Leader,
     Project,
@@ -339,16 +340,24 @@ CREATE TABLE IF NOT EXISTS session_heartbeats (
 
 CREATE TABLE IF NOT EXISTS context_entries (
     id          TEXT PRIMARY KEY,
-    project_id  TEXT NOT NULL REFERENCES projects(id),
+    scope       TEXT NOT NULL,
+    project_id  TEXT REFERENCES projects(id),
+    session_id  TEXT REFERENCES sessions(id),
     key         TEXT NOT NULL,
     entry_type  TEXT NOT NULL,
     value       TEXT NOT NULL,
+    restricted  BOOLEAN DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    updated_by  TEXT NOT NULL,
+    updated_by  TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    UNIQUE(project_id, key)
+    updated_at  TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_context_entries_unique_key
+    ON context_entries(scope, COALESCE(project_id, ''), COALESCE(session_id, ''), key);
+CREATE INDEX IF NOT EXISTS idx_context_entries_scope ON context_entries(scope);
+CREATE INDEX IF NOT EXISTS idx_context_entries_project_id ON context_entries(project_id);
+CREATE INDEX IF NOT EXISTS idx_context_entries_session_id ON context_entries(session_id);
 
 CREATE TABLE IF NOT EXISTS app_events (
     id          TEXT PRIMARY KEY,
@@ -1274,4 +1283,256 @@ async def is_feature_enabled(db: aiosqlite.Connection, key: str) -> bool:
     """Check if a feature flag is enabled. Returns False if flag doesn't exist."""
     flag = await get_feature_flag(db, key)
     return flag.enabled if flag is not None else False
+
+
+# ---------------------------------------------------------------------------
+# ContextEntry CRUD
+# ---------------------------------------------------------------------------
+
+_VALID_CONTEXT_SCOPES = {"global", "project", "tower", "leader", "ace"}
+
+
+def _row_to_context_entry(row: aiosqlite.Row) -> ContextEntry:
+    """Convert a DB row to a ContextEntry dataclass."""
+    d = dict(row)
+    d["restricted"] = bool(d.get("restricted", 0))
+    return ContextEntry(**d)
+
+
+async def create_context_entry(
+    db: aiosqlite.Connection,
+    scope: str,
+    key: str,
+    entry_type: str,
+    value: str,
+    *,
+    project_id: str | None = None,
+    session_id: str | None = None,
+    restricted: bool = False,
+    position: int = 0,
+    updated_by: str = "",
+) -> ContextEntry:
+    """Insert a new context entry."""
+    if scope not in _VALID_CONTEXT_SCOPES:
+        raise ValueError(f"Invalid scope: {scope}")
+    now = _now()
+    entry = ContextEntry(
+        id=_uuid(),
+        key=key,
+        entry_type=entry_type,
+        value=value,
+        scope=scope,
+        project_id=project_id,
+        session_id=session_id,
+        restricted=restricted,
+        position=position,
+        updated_by=updated_by,
+        created_at=now,
+        updated_at=now,
+    )
+    await db.execute(
+        """INSERT INTO context_entries
+           (id, scope, project_id, session_id, key, entry_type, value,
+            restricted, position, updated_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            entry.id,
+            entry.scope,
+            entry.project_id,
+            entry.session_id,
+            entry.key,
+            entry.entry_type,
+            entry.value,
+            int(entry.restricted),
+            entry.position,
+            entry.updated_by,
+            entry.created_at,
+            entry.updated_at,
+        ),
+    )
+    await db.commit()
+    return entry
+
+
+async def get_context_entry(
+    db: aiosqlite.Connection,
+    entry_id: str,
+) -> ContextEntry | None:
+    """Fetch a single context entry by id."""
+    cursor = await db.execute(
+        "SELECT * FROM context_entries WHERE id = ?",
+        (entry_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _row_to_context_entry(row)
+
+
+async def list_context_entries_by_scope(
+    db: aiosqlite.Connection,
+    scope: str,
+    *,
+    project_id: str | None = None,
+    session_id: str | None = None,
+) -> list[ContextEntry]:
+    """List context entries filtered by scope and optionally project/session."""
+    conditions = ["scope = ?"]
+    params: list[Any] = [scope]
+    if project_id is not None:
+        conditions.append("project_id = ?")
+        params.append(project_id)
+    if session_id is not None:
+        conditions.append("session_id = ?")
+        params.append(session_id)
+    where = " AND ".join(conditions)
+    cursor = await db.execute(
+        f"SELECT * FROM context_entries WHERE {where} ORDER BY position, created_at",
+        params,
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_context_entry(r) for r in rows]
+
+
+async def list_context_entries_by_project(
+    db: aiosqlite.Connection,
+    project_id: str,
+) -> list[ContextEntry]:
+    """List all context entries associated with a project (any scope)."""
+    cursor = await db.execute(
+        "SELECT * FROM context_entries WHERE project_id = ? ORDER BY position, created_at",
+        (project_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_context_entry(r) for r in rows]
+
+
+async def update_context_entry(
+    db: aiosqlite.Connection,
+    entry_id: str,
+    *,
+    value: str | None = None,
+    entry_type: str | None = None,
+    position: int | None = None,
+    restricted: bool | None = None,
+    updated_by: str | None = None,
+) -> ContextEntry | None:
+    """Update a context entry. Returns None if not found."""
+    existing = await get_context_entry(db, entry_id)
+    if existing is None:
+        return None
+
+    sets: list[str] = []
+    params: list[Any] = []
+    if value is not None:
+        sets.append("value = ?")
+        params.append(value)
+    if entry_type is not None:
+        sets.append("entry_type = ?")
+        params.append(entry_type)
+    if position is not None:
+        sets.append("position = ?")
+        params.append(position)
+    if restricted is not None:
+        sets.append("restricted = ?")
+        params.append(int(restricted))
+    if updated_by is not None:
+        sets.append("updated_by = ?")
+        params.append(updated_by)
+
+    if not sets:
+        return existing
+
+    sets.append("updated_at = ?")
+    params.append(_now())
+    params.append(entry_id)
+
+    await db.execute(
+        f"UPDATE context_entries SET {', '.join(sets)} WHERE id = ?",
+        params,
+    )
+    await db.commit()
+    return await get_context_entry(db, entry_id)
+
+
+async def delete_context_entry(
+    db: aiosqlite.Connection,
+    entry_id: str,
+) -> bool:
+    """Delete a context entry by id. Returns True if deleted."""
+    cursor = await db.execute(
+        "DELETE FROM context_entries WHERE id = ?",
+        (entry_id,),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def get_context_for_agent(
+    db: aiosqlite.Connection,
+    scope: str,
+    *,
+    project_id: str | None = None,
+    session_id: str | None = None,
+    parent_session_id: str | None = None,
+) -> list[ContextEntry]:
+    """Return context entries visible to an agent based on inheritance rules.
+
+    Inheritance:
+      - ace:    global + project + leader (parent_session_id) + own ace entries
+      - leader: global + project + own leader entries
+      - tower:  global + own tower entries
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if scope == "ace":
+        # Ace sees: global, project (for its project_id), leader (parent), own ace
+        parts = ["scope = 'global'"]
+        part_params: list[Any] = []
+        if project_id is not None:
+            parts.append("(scope = 'project' AND project_id = ?)")
+            part_params.append(project_id)
+        if parent_session_id is not None:
+            parts.append("(scope = 'leader' AND session_id = ?)")
+            part_params.append(parent_session_id)
+        if session_id is not None:
+            parts.append("(scope = 'ace' AND session_id = ?)")
+            part_params.append(session_id)
+        conditions.append(f"({' OR '.join(parts)})")
+        params.extend(part_params)
+
+    elif scope == "leader":
+        # Leader sees: global, project (for its project_id), own leader entries
+        parts = ["scope = 'global'"]
+        part_params = []
+        if project_id is not None:
+            parts.append("(scope = 'project' AND project_id = ?)")
+            part_params.append(project_id)
+        if session_id is not None:
+            parts.append("(scope = 'leader' AND session_id = ?)")
+            part_params.append(session_id)
+        conditions.append(f"({' OR '.join(parts)})")
+        params.extend(part_params)
+
+    elif scope == "tower":
+        # Tower sees: global, own tower entries
+        parts = ["scope = 'global'"]
+        part_params = []
+        if session_id is not None:
+            parts.append("(scope = 'tower' AND session_id = ?)")
+            part_params.append(session_id)
+        conditions.append(f"({' OR '.join(parts)})")
+        params.extend(part_params)
+
+    else:
+        raise ValueError(f"Invalid agent scope: {scope}")
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    cursor = await db.execute(
+        f"SELECT * FROM context_entries WHERE {where} ORDER BY position, created_at",
+        params,
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_context_entry(r) for r in rows]
 

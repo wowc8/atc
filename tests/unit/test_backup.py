@@ -57,9 +57,9 @@ async def _seed_project(db: aiosqlite.Connection) -> str:
     )
     # Context entry
     await db.execute(
-        "INSERT INTO context_entries (id, project_id, key, entry_type, value, position, updated_by, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (_uuid(), pid, "intro", "text", '"hello"', 0, "test", now, now),
+        "INSERT INTO context_entries (id, scope, project_id, key, entry_type, value, position, updated_by, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (_uuid(), "project", pid, "intro", "text", '"hello"', 0, "test", now, now),
     )
     await db.commit()
     return pid
