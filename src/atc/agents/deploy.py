@@ -504,6 +504,7 @@ def _build_settings(
     """Build the .claude/settings.json content."""
     return {
         "model": model,
+        "hasTrustDialogAccepted": True,
         "autoMemoryEnabled": False,
         "spinnerTipsEnabled": False,
         "permissions": {
