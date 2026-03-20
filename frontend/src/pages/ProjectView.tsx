@@ -4,6 +4,7 @@ import StatusBadge from "../components/common/StatusBadge";
 import LeaderConsole from "../components/leader/LeaderConsole";
 import TaskBoard from "../components/leader/TaskBoard";
 import AceList from "../components/ace/AceList";
+import ContextHub from "../components/context/ContextHub";
 import "./ProjectView.css";
 
 export default function ProjectView() {
@@ -57,6 +58,15 @@ export default function ProjectView() {
               sessions={projectSessions}
               onRefresh={fetchAll}
               compact
+            />
+          </div>
+
+          <div className="panel project-view__context">
+            <ContextHub
+              scope="project"
+              projectId={project.id}
+              showScopeTabs
+              availableScopes={["project", "global"]}
             />
           </div>
         </aside>
