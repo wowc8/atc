@@ -26,7 +26,7 @@ from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
 
 if TYPE_CHECKING:
-    import aiosqlite
+    import aiosqlite  # type: ignore[import-not-found]
 
     from atc.core.events import EventBus
 
@@ -154,15 +154,15 @@ async def reconnect_session(
             from atc.agents.deploy import deploy_manager_files
 
             leader = await db_ops.get_leader_by_project(conn, session.project_id)
-            spec = _build_manager_deploy_spec(
+            mgr_spec = _build_manager_deploy_spec(
                 leader_id=leader.id if leader else session_id,
                 project_name=project.name if project else "",
-                goal=leader.goal if leader else "",
+                goal=(leader.goal or "") if leader else "",
                 repo_path=working_dir,
                 github_repo=project.github_repo if project else None,
             )
-            spec.session_id = session_id
-            deployed = deploy_manager_files(spec)
+            mgr_spec.session_id = session_id
+            deployed = deploy_manager_files(mgr_spec)
             working_dir = str(deployed.root)
             logger.info("Re-deployed manager config for %s → %s", session_id, deployed.root)
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from time import sleep
 from typing import TYPE_CHECKING, Any
 
-import aiosqlite
+import aiosqlite  # type: ignore[import-not-found]
 
 from atc.state.models import (
     ContextEntry,
@@ -501,7 +501,7 @@ async def archive_project(
         (now, project_id),
     )
     await db.commit()
-    return cursor.rowcount > 0
+    return bool(cursor.rowcount > 0)
 
 
 async def delete_project(
@@ -534,7 +534,7 @@ async def delete_project(
 
     cursor = await db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     await db.commit()
-    return cursor.rowcount > 0
+    return bool(cursor.rowcount > 0)
 
 
 # ---------------------------------------------------------------------------
@@ -856,13 +856,13 @@ async def update_task_graph(
     if title is not None:
         sets.append("title = ?")
         params.append(title)
-    if description is not ...:
+    if description is not ...:  # type: ignore[comparison-overlap]
         sets.append("description = ?")
         params.append(description)
-    if assigned_ace_id is not ...:
+    if assigned_ace_id is not ...:  # type: ignore[comparison-overlap]
         sets.append("assigned_ace_id = ?")
         params.append(assigned_ace_id)
-    if dependencies is not ...:
+    if dependencies is not ...:  # type: ignore[comparison-overlap]
         sets.append("dependencies = ?")
         params.append(json.dumps(dependencies) if dependencies is not None else None)
 
@@ -916,7 +916,7 @@ async def delete_task_graph(
         (task_graph_id,),
     )
     await db.commit()
-    return cursor.rowcount > 0
+    return bool(cursor.rowcount > 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1152,7 +1152,7 @@ async def record_heartbeat(
         (now, now, session_id),
     )
     await db.commit()
-    return cursor.rowcount > 0
+    return bool(cursor.rowcount > 0)
 
 
 async def get_heartbeat(
@@ -1205,7 +1205,8 @@ async def deregister_heartbeat(
         (session_id,),
     )
     await db.commit()
-    return cursor.rowcount > 0
+    return bool(cursor.rowcount > 0)
+
 
 # ---------------------------------------------------------------------------
 # Feature flag helpers
@@ -1297,10 +1298,10 @@ async def update_feature_flag(
     if name is not None:
         sets.append("name = ?")
         params.append(name)
-    if description is not ...:
+    if description is not ...:  # type: ignore[comparison-overlap]
         sets.append("description = ?")
         params.append(description)
-    if metadata is not ...:
+    if metadata is not ...:  # type: ignore[comparison-overlap]
         sets.append("metadata = ?")
         params.append(metadata)
 
@@ -1323,7 +1324,7 @@ async def delete_feature_flag(db: aiosqlite.Connection, key: str) -> bool:
     """Delete a feature flag by key. Returns True if deleted."""
     cursor = await db.execute("DELETE FROM feature_flags WHERE key = ?", (key,))
     await db.commit()
-    return cursor.rowcount > 0
+    return bool(cursor.rowcount > 0)
 
 
 async def is_feature_enabled(db: aiosqlite.Connection, key: str) -> bool:
@@ -1512,7 +1513,7 @@ async def delete_context_entry(
         (entry_id,),
     )
     await db.commit()
-    return cursor.rowcount > 0
+    return bool(cursor.rowcount > 0)
 
 
 async def get_context_for_agent(
@@ -1582,4 +1583,3 @@ async def get_context_for_agent(
     )
     rows = await cursor.fetchall()
     return [_row_to_context_entry(r) for r in rows]
-

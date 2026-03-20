@@ -29,7 +29,7 @@ from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
 
 if TYPE_CHECKING:
-    import aiosqlite
+    import aiosqlite  # type: ignore[import-not-found]
 
     from atc.core.events import EventBus
 

@@ -20,7 +20,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from atc.session.state_machine import (
     SessionStatus,
@@ -29,7 +29,7 @@ from atc.session.state_machine import (
 from atc.state import db as db_ops
 
 if TYPE_CHECKING:
-    import aiosqlite
+    import aiosqlite  # type: ignore[import-not-found]
 
     from atc.core.events import EventBus
 
@@ -283,7 +283,7 @@ async def create_ace(
     event_bus: EventBus | None = None,
     working_dir: str | None = None,
     launch_command: str | None = None,
-    deploy_spec_kwargs: dict | None = None,
+    deploy_spec_kwargs: dict[str, Any] | None = None,
 ) -> str:
     """Create an ace session (DB-first). Returns the session id.
 
