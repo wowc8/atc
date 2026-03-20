@@ -4,6 +4,8 @@ import { useAppContext } from "../context/AppContext";
 import StatusBadge from "../components/common/StatusBadge";
 import TimeAgo from "../components/common/TimeAgo";
 import CreateProjectModal from "../components/common/CreateProjectModal";
+import ConfirmPopover from "../components/common/ConfirmPopover";
+import { api, ApiError } from "../utils/api";
 import "./Dashboard.css";
 
 export default function Dashboard() {
@@ -11,8 +13,32 @@ export default function Dashboard() {
   const { state, fetchAll } = useAppContext();
   const { projects, sessions, usage, notifications } = state;
   const [showCreate, setShowCreate] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const activeProjects = projects.filter((p) => p.status === "active");
+  const archivedProjects = projects.filter((p) => p.status === "archived");
+
+  const handleDelete = async (projectId: string) => {
+    try {
+      setError(null);
+      await api.delete(`/projects/${projectId}`);
+      await fetchAll();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Failed to delete project";
+      setError(msg);
+    }
+  };
+
+  const handleArchive = async (projectId: string) => {
+    try {
+      setError(null);
+      await api.patch(`/projects/${projectId}/archive`, {});
+      await fetchAll();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Failed to archive project";
+      setError(msg);
+    }
+  };
 
   return (
     <div className="dashboard" data-testid="dashboard-page">
@@ -94,6 +120,12 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {error && (
+        <div className="dashboard__error panel" style={{ color: "var(--color-danger)", marginBottom: "var(--space-4)" }}>
+          {error}
+        </div>
+      )}
+
       {/* Project cards */}
       <section className="dashboard__projects">
         <h2>Projects</h2>
@@ -111,11 +143,60 @@ export default function Dashboard() {
         ) : (
           <div className="dashboard__project-grid">
             {activeProjects.map((project) => (
-              <button
-                key={project.id}
-                className="panel dashboard__project-card"
-                onClick={() => navigate(`/projects/${project.id}`)}
-              >
+              <div key={project.id} className="panel dashboard__project-card">
+                <div
+                  className="dashboard__project-clickable"
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                >
+                  <div className="dashboard__project-header">
+                    <h3>{project.name}</h3>
+                    <StatusBadge status={project.status} size="sm" />
+                  </div>
+                  {project.description && (
+                    <p className="dashboard__project-desc">
+                      {project.description}
+                    </p>
+                  )}
+                  <div className="dashboard__project-meta">
+                    <span>
+                      {
+                        sessions.filter((s) => s.project_id === project.id)
+                          .length
+                      }{" "}
+                      sessions
+                    </span>
+                    <TimeAgo datetime={project.updated_at} />
+                  </div>
+                </div>
+                <div className="dashboard__project-actions">
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => void handleArchive(project.id)}
+                  >
+                    Archive
+                  </button>
+                  <ConfirmPopover
+                    message={`Are you sure you want to delete "${project.name}"? This will remove all tasks and context associated with this project.`}
+                    confirmLabel="Delete"
+                    variant="danger"
+                    onConfirm={() => void handleDelete(project.id)}
+                  >
+                    <button className="btn btn-sm btn-danger">Delete</button>
+                  </ConfirmPopover>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Archived projects */}
+      {archivedProjects.length > 0 && (
+        <section className="dashboard__projects">
+          <h2>Archived</h2>
+          <div className="dashboard__project-grid">
+            {archivedProjects.map((project) => (
+              <div key={project.id} className="panel dashboard__project-card dashboard__project-card--archived">
                 <div className="dashboard__project-header">
                   <h3>{project.name}</h3>
                   <StatusBadge status={project.status} size="sm" />
@@ -125,21 +206,21 @@ export default function Dashboard() {
                     {project.description}
                   </p>
                 )}
-                <div className="dashboard__project-meta">
-                  <span>
-                    {
-                      sessions.filter((s) => s.project_id === project.id)
-                        .length
-                    }{" "}
-                    sessions
-                  </span>
-                  <TimeAgo datetime={project.updated_at} />
+                <div className="dashboard__project-actions">
+                  <ConfirmPopover
+                    message={`Permanently delete "${project.name}"? This cannot be undone.`}
+                    confirmLabel="Delete"
+                    variant="danger"
+                    onConfirm={() => void handleDelete(project.id)}
+                  >
+                    <button className="btn btn-sm btn-danger">Delete</button>
+                  </ConfirmPopover>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       <CreateProjectModal
         open={showCreate}

@@ -490,6 +490,53 @@ async def update_project_agent_provider(
     await db.commit()
 
 
+async def archive_project(
+    db: aiosqlite.Connection,
+    project_id: str,
+) -> bool:
+    """Set a project's status to 'archived'. Returns True if updated."""
+    now = _now()
+    cursor = await db.execute(
+        "UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ?",
+        (now, project_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def delete_project(
+    db: aiosqlite.Connection,
+    project_id: str,
+) -> bool:
+    """Hard-delete a project and all dependent rows. Returns True if deleted."""
+    import contextlib
+
+    # Delete in dependency order to avoid FK violations.
+    dependent_tables = [
+        ("task_assignments", "task_graph_id IN (SELECT id FROM task_graphs WHERE project_id = ?)"),
+        ("session_heartbeats", "session_id IN (SELECT id FROM sessions WHERE project_id = ?)"),
+        ("context_entries", "project_id = ?"),
+        ("task_graphs", "project_id = ?"),
+        ("tasks", "project_id = ?"),
+        ("sessions", "project_id = ?"),
+        ("leaders", "project_id = ?"),
+        ("project_budgets", "project_id = ?"),
+        ("usage_events", "project_id = ?"),
+        ("github_prs", "project_id = ?"),
+        ("notifications", "project_id = ?"),
+        ("app_events", "project_id = ?"),
+        ("failure_logs", "project_id = ?"),
+        ("tower_memory", "project_id = ?"),
+    ]
+    for table, where in dependent_tables:
+        with contextlib.suppress(sqlite3.OperationalError):
+            await db.execute(f"DELETE FROM {table} WHERE {where}", (project_id,))  # noqa: S608
+
+    cursor = await db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    await db.commit()
+    return cursor.rowcount > 0
+
+
 # ---------------------------------------------------------------------------
 # Leader helpers
 # ---------------------------------------------------------------------------

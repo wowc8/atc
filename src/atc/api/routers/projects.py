@@ -106,6 +106,28 @@ async def create_project(body: CreateProjectRequest, request: Request) -> Projec
     return ProjectResponse(**project.__dict__)
 
 
+@router.delete("/{project_id}", status_code=204)
+async def delete_project(project_id: str, request: Request) -> None:
+    """Hard-delete a project and all associated data."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await db_ops.delete_project(db, project_id)
+
+
+@router.patch("/{project_id}/archive", response_model=ProjectResponse)
+async def archive_project(project_id: str, request: Request) -> ProjectResponse:
+    """Archive a project (hides from dashboard but preserves data)."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await db_ops.archive_project(db, project_id)
+    project = await db_ops.get_project(db, project_id)
+    return ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
+
+
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: str, request: Request) -> ProjectResponse:
     db = await _get_db(request)
