@@ -25,14 +25,11 @@ function transformTerminalOutput(data: string): string {
   // Collapse long runs of box-drawing chars to a short dimmed divider.
   // This prevents 200-char separator lines from wrapping across multiple
   // rows in the narrower xterm.js terminal panel.
-  let result = data.replace(
-    /([─━╌╍┄┅┈┉]{3,})/g,
-    (_match) => {
-      // Replace with a short (40-char) dimmed divider
-      const short = "─".repeat(40);
-      return `\x1b[2m\x1b[38;5;238m${short}\x1b[0m`;
-    },
-  );
+  let result = data.replace(/([─━╌╍┄┅┈┉]{3,})/g, (_match) => {
+    // Replace with a short (40-char) dimmed divider
+    const short = "─".repeat(40);
+    return `\x1b[2m\x1b[38;5;238m${short}\x1b[0m`;
+  });
 
   return result;
 }
@@ -52,6 +49,11 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Buffer for data received before the terminal is opened (attached to DOM).
+  // xterm.js throws "Cannot read properties of undefined (reading 'dimensions')"
+  // when write() is called on a terminal that hasn't been opened yet.
+  const pendingWritesRef = useRef<string[]>([]);
+  const termOpenRef = useRef(false);
 
   // Create terminal once
   useEffect(() => {
@@ -60,7 +62,8 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      fontFamily: '"SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace',
+      fontFamily:
+        '"SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace',
       theme: {
         background: "#0d1117",
         foreground: "#e6edf3",
@@ -88,13 +91,20 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     // If container already mounted, open immediately
     if (containerRef.current) {
       term.open(containerRef.current);
-      fit.fit();
+      termOpenRef.current = true;
+      try {
+        fit.fit();
+      } catch {
+        /* not ready */
+      }
     }
 
     return () => {
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      termOpenRef.current = false;
+      pendingWritesRef.current = [];
     };
   }, [enabled]);
 
@@ -142,8 +152,17 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
           const msg = JSON.parse(evt.data);
           if (msg.channel === channel && msg.data) {
             const raw =
-              typeof msg.data === "string" ? msg.data : JSON.stringify(msg.data);
-            termRef.current?.write(transformSeparators(raw));
+              typeof msg.data === "string"
+                ? msg.data
+                : JSON.stringify(msg.data);
+            const transformed = transformSeparators(raw);
+            // Buffer writes if terminal isn't opened yet to avoid xterm.js
+            // "dimensions" error from syncScrollArea on unopened terminals.
+            if (termOpenRef.current && termRef.current) {
+              termRef.current.write(transformed);
+            } else {
+              pendingWritesRef.current.push(transformed);
+            }
           }
         } catch {
           /* ignore malformed */
@@ -196,6 +215,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       if (!term.element || !el.contains(term.element)) {
         term.open(el);
       }
+      termOpenRef.current = true;
       // Delay fit to ensure container has dimensions.
       // Double-RAF avoids the xterm.js "Cannot read properties of undefined
       // (reading 'dimensions')" error that occurs when fit() runs before
@@ -206,6 +226,14 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
             fitRef.current?.fit();
           } catch {
             // Terminal may not be fully initialized yet — safe to ignore
+          }
+          // Flush any data that arrived before the terminal was opened
+          const pending = pendingWritesRef.current;
+          if (pending.length > 0 && termRef.current) {
+            for (const data of pending) {
+              termRef.current.write(data);
+            }
+            pendingWritesRef.current = [];
           }
         });
       });
