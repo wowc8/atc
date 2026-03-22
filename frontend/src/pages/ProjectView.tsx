@@ -3,9 +3,9 @@ import { useParams } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import StatusBadge from "../components/common/StatusBadge";
 import LeaderConsole from "../components/leader/LeaderConsole";
-import AceConsole from "../components/ace/AceConsole";
 import TaskBoard from "../components/leader/TaskBoard";
 import AceList from "../components/ace/AceList";
+import AceConsole from "../components/ace/AceConsole";
 import ContextHub from "../components/context/ContextHub";
 import "./ProjectView.css";
 
@@ -19,10 +19,10 @@ export default function ProjectView() {
   const leader = id ? leaders[id] : undefined;
   const projectTaskGraphs = id ? (taskGraphs[id] ?? []) : [];
 
-  // null = show Leader, string = show that Ace full-screen
+  // null = collapsed Ace list, string = expanded Ace panel with tabs
   const [expandedAceId, setExpandedAceId] = useState<string | null>(null);
 
-  // If the expanded ace was removed, fall back to leader view
+  // If the expanded Ace was removed, collapse back to list
   const expandedAceExists =
     expandedAceId !== null &&
     projectSessions.some((s) => s.id === expandedAceId);
@@ -49,9 +49,9 @@ export default function ProjectView() {
         )}
       </div>
 
-      {/* Main 60/40 layout */}
+      {/* Main layout: left col always shows tasks+aces+context, right always shows leader */}
       <div className="project-view__layout">
-        {/* Left column — Tasks + Aces + Context */}
+        {/* Left column */}
         <aside className="project-view__left">
           <div className="panel project-view__tasks">
             <TaskBoard
@@ -61,16 +61,29 @@ export default function ProjectView() {
             />
           </div>
 
-          <div className="panel project-view__aces">
-            <AceList
-              projectId={project.id}
-              sessions={projectSessions}
-              onRefresh={fetchAll}
-              onExpand={(sessionId) => setExpandedAceId(sessionId)}
-              compact
-            />
+          {/* Aces panel: collapses to list or expands to tabbed console IN-PLACE */}
+          <div className={`panel project-view__aces${activeAceId ? " project-view__aces--expanded" : ""}`}>
+            {activeAceId ? (
+              <AceConsole
+                projectId={project.id}
+                sessions={projectSessions}
+                activeAceId={activeAceId}
+                onRefresh={fetchAll}
+                onSelectAce={(sid) => setExpandedAceId(sid)}
+                onCollapse={() => setExpandedAceId(null)}
+              />
+            ) : (
+              <AceList
+                projectId={project.id}
+                sessions={projectSessions}
+                onRefresh={fetchAll}
+                onExpand={(sid) => setExpandedAceId(sid)}
+                compact
+              />
+            )}
           </div>
 
+          {/* Context hub — always visible */}
           <div className="panel project-view__context">
             <ContextHub
               scope="project"
@@ -80,25 +93,15 @@ export default function ProjectView() {
           </div>
         </aside>
 
-        {/* Right column — Leader or expanded Ace */}
+        {/* Right column — Leader always here */}
         <main className="project-view__right">
-          <div className="panel project-view__console">
-            {activeAceId !== null ? (
-              <AceConsole
-                projectId={project.id}
-                sessions={projectSessions}
-                activeAceId={activeAceId}
-                onRefresh={fetchAll}
-                onSelectAce={(id) => setExpandedAceId(id)}
-              />
-            ) : (
-              <LeaderConsole
-                projectId={project.id}
-                leader={leader}
-                project={project}
-                onRefresh={fetchAll}
-              />
-            )}
+          <div className="panel project-view__leader">
+            <LeaderConsole
+              projectId={project.id}
+              leader={leader}
+              project={project}
+              onRefresh={fetchAll}
+            />
           </div>
         </main>
       </div>
