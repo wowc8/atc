@@ -43,7 +43,7 @@ cleardb: ## Full reset: kill backend, delete DB, reinstall package, restart dev 
 		echo "  (no atc.db found)"; \
 	fi
 	@echo "→ Reinstalling editable package (ensures src/ changes are live)..."
-	@pip install -e ".[dev]" --quiet
+	@$(VENV)/bin/pip install -e ".[dev]" --quiet
 	@echo "✓ Package reinstalled"
 	@echo "→ Starting dev servers..."
 	@$(MAKE) dev
