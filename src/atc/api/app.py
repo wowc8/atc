@@ -303,6 +303,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("Failed to restore TowerController state from DB")
 
+    # 8b. Auto-start Tower if it's still idle after restore attempt.
+    # Tower should always be running when the app starts — no manual click required.
+    try:
+        if tower_controller._state == TowerState.IDLE:
+            logger.info("Tower is idle after startup — auto-starting session")
+            await tower_controller.start_session()
+            logger.info("Tower auto-started: session=%s", tower_controller._current_session_id)
+    except Exception:
+        logger.exception("Tower auto-start failed — Tower will start in idle state")
+
     # 9. Start resource monitor
     from atc.tracking.resources import ResourceMonitor
 
