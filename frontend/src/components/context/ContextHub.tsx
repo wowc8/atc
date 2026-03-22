@@ -73,6 +73,15 @@ export default function ContextHub({
     void fetchEntries();
   }, [fetchEntries]);
 
+  // Poll for new entries every 5s so context seeded by Tower/Leader shows up
+  // without requiring a page reload.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void fetchEntries();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchEntries]);
+
   // Update scope when initialScope prop changes
   useEffect(() => {
     setActiveScope(initialScope);
@@ -180,7 +189,7 @@ export default function ContextHub({
       {loading ? (
         <p className="context-hub__loading">Loading...</p>
       ) : entries.length === 0 ? (
-        <p className="context-hub__empty">No context entries yet.</p>
+        <p className="context-hub__empty">No context entries yet — they'll appear automatically when a goal is submitted.</p>
       ) : (
         <div className="context-hub__entries" data-testid="context-hub-entries">
           {entries.map((entry) => (
