@@ -94,7 +94,8 @@ type Action =
   | { type: "UPDATE_PROJECT"; payload: Project }
   | { type: "REMOVE_PROJECT"; payload: string }
   | { type: "ADD_SESSION"; payload: Session }
-  | { type: "REMOVE_SESSION"; payload: string };
+  | { type: "REMOVE_SESSION"; payload: string }
+  | { type: "SET_PROJECT_TASK_GRAPHS"; payload: { projectId: string; taskGraphs: TaskGraph[] } };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -214,6 +215,14 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         sessions: state.sessions.filter((s) => s.id !== action.payload),
+      };
+    case "SET_PROJECT_TASK_GRAPHS":
+      return {
+        ...state,
+        taskGraphs: {
+          ...state.taskGraphs,
+          [action.payload.projectId]: action.payload.taskGraphs,
+        },
       };
   }
 }
@@ -335,6 +344,11 @@ export function AppProvider({ children }: AppProviderProps) {
         dispatch({ type: "REMOVE_PROJECT", payload: data.project_id });
       } else if (data.session_created && data.session) {
         dispatch({ type: "ADD_SESSION", payload: data.session as Session });
+      } else if (data.task_graphs_updated && data.project_id && Array.isArray(data.task_graphs)) {
+        dispatch({
+          type: "SET_PROJECT_TASK_GRAPHS",
+          payload: { projectId: data.project_id as string, taskGraphs: data.task_graphs as TaskGraph[] },
+        });
       } else {
         dispatch({ type: "SET_STATE", payload: data as Partial<AppState> });
       }

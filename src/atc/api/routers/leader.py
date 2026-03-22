@@ -179,6 +179,28 @@ async def decompose(
     if result.error:
         raise HTTPException(status_code=422, detail=result.error)
 
+    # Broadcast task graphs to frontend so TaskBoard updates immediately
+    ws_hub = getattr(request.app.state, "ws_hub", None)
+    if ws_hub is not None:
+        tg_data = [
+            {
+                "id": tg.id,
+                "title": tg.title,
+                "description": tg.description,
+                "status": tg.status,
+                "dependencies": tg.dependencies,
+                "project_id": project_id,
+                "assigned_ace_id": tg.assigned_ace_id,
+                "created_at": tg.created_at,
+                "updated_at": tg.updated_at,
+            }
+            for tg in result.task_graphs
+        ]
+        await ws_hub.broadcast(
+            "state",
+            {"task_graphs_updated": True, "project_id": project_id, "task_graphs": tg_data},
+        )
+
     return DecomposeResponse(
         project_id=result.project_id,
         goal=result.goal,
