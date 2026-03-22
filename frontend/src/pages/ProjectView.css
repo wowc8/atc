@@ -63,14 +63,14 @@
   flex-shrink: 0;
 }
 
-/* Right column: leader full height */
+/* Right column: leader or ace console, full height */
 .project-view__right {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.project-view__leader {
+.project-view__console {
   flex: 1;
   display: flex;
   flex-direction: column;
