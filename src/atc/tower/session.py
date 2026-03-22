@@ -36,18 +36,51 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_tower_project_id(conn: "aiosqlite.Connection") -> str:
+    """Return a project_id suitable for anchoring a Tower session.
+
+    Tower sessions require a project_id due to the DB FK constraint, but
+    Tower itself is global (not project-scoped).  When no explicit project_id
+    is supplied we use the first active project, or create a sentinel
+    'Tower Workspace' project so Tower can start on a clean DB.
+    """
+    cursor = await conn.execute(
+        "SELECT id FROM projects WHERE status = 'active' ORDER BY position ASC, created_at ASC LIMIT 1"
+    )
+    row = await cursor.fetchone()
+    if row:
+        return row[0]
+
+    # No projects yet — create a sentinel project so Tower can boot
+    project = await db_ops.create_project(
+        conn,
+        "Tower Workspace",
+        description="Auto-created by Tower on first start. Safe to delete once you add real projects.",
+    )
+    await conn.commit()
+    logger.info("Created sentinel Tower Workspace project %s", project.id)
+    return project.id
+
+
 async def start_tower_session(
-    conn: aiosqlite.Connection,
-    project_id: str,
+    conn: "aiosqlite.Connection",
+    project_id: str | None = None,
     *,
-    event_bus: EventBus | None = None,
+    event_bus: "EventBus | None" = None,
 ) -> str:
-    """Start Tower's own Claude Code session for a project.
+    """Start Tower's own Claude Code session.
+
+    Tower is global — not project-scoped — but the sessions table requires a
+    project_id FK.  When project_id is omitted we resolve one automatically
+    (first active project, or a sentinel 'Tower Workspace' project).
 
     Creates a session of type ``tower``, spawns a tmux pane running
     ``claude``, and returns the session id.  This session is independent
     of the Leader session.
     """
+    if project_id is None:
+        project_id = await _resolve_tower_project_id(conn)
+
     project = await db_ops.get_project(conn, project_id)
     name = f"tower-{project.name}" if project else f"tower-{project_id[:8]}"
 
