@@ -41,6 +41,10 @@ cleardb: ## Full reset: kill ALL dev processes, nuke venv + DB, rebuild from scr
 	@lsof -ti:8420 | xargs kill -9 2>/dev/null || true
 	@lsof -ti:5173,5174,5175,5176,5177 | xargs kill -9 2>/dev/null || true
 	@sleep 1
+	@echo "→ Ensuring git remote uses HTTPS (not SSH)..."
+	@git remote set-url origin https://github.com/wowc8/atc.git
+	@echo "→ Pulling latest code..."
+	@git pull origin main
 	@if [ -f atc.db ]; then \
 		rm atc.db && echo "✓ atc.db deleted"; \
 	else \
