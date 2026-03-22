@@ -32,3 +32,15 @@ format: ## Auto-format Python and frontend code
 clean: ## Remove build artifacts and venv
 	rm -rf $(VENV) frontend/node_modules dist/ build/ *.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+cleardb: ## Delete the local SQLite database (fresh start, preserves .env and backups)
+	@if [ -f atc.db ]; then \
+		rm atc.db && echo "✓ atc.db deleted — migrations will run fresh on next 'make dev'"; \
+	else \
+		echo "No atc.db found, nothing to do."; \
+	fi
+
+clearcache: ## Remove Python __pycache__, .pytest_cache, and frontend .vite cache
+	find . -type d -name __pycache__ -not -path "./.venv/*" -exec rm -rf {} + 2>/dev/null || true
+	rm -rf .pytest_cache frontend/.vite frontend/node_modules/.vite
+	@echo "✓ Caches cleared"
