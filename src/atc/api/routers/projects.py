@@ -42,6 +42,7 @@ class ProjectResponse(BaseModel):
     repo_path: str | None = None
     github_repo: str | None = None
     agent_provider: str = "claude_code"
+    position: int = 0
     created_at: str
     updated_at: str
 
@@ -156,6 +157,64 @@ async def archive_project(project_id: str, request: Request) -> ProjectResponse:
     resp = ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
 
     # Broadcast project update to all connected WebSocket clients
+    ws_hub = await _get_ws_hub(request)
+    if ws_hub is not None:
+        try:
+            await ws_hub.broadcast("state", {
+                "project_updated": True,
+                "project": resp.model_dump(),
+            })
+        except Exception:
+            logger.debug("Failed to broadcast project_updated via WebSocket")
+
+    return resp
+
+
+class ReorderPositionItem(BaseModel):
+    id: str
+    position: int
+
+
+class ReorderProjectsRequest(BaseModel):
+    positions: list[ReorderPositionItem]
+
+
+@router.patch("/reorder", response_model=list[ProjectResponse])
+async def reorder_projects(body: ReorderProjectsRequest, request: Request) -> list[ProjectResponse]:
+    """Bulk-update project positions for drag-to-reorder."""
+    db = await _get_db(request)
+    pairs: list[tuple[str, int]] = [(item.id, item.position) for item in body.positions]
+    await db_ops.update_project_positions(db, pairs)
+    projects = await db_ops.list_projects(db)
+    return [ProjectResponse(**p.__dict__) for p in projects]
+
+
+class UpdateProjectStatusRequest(BaseModel):
+    status: str
+
+
+@router.put("/{project_id}", response_model=ProjectResponse)
+async def update_project_status(
+    project_id: str,
+    body: UpdateProjectStatusRequest,
+    request: Request,
+) -> ProjectResponse:
+    """Update a project's status (e.g. active|paused|archived via board drag)."""
+    valid_statuses = {"active", "paused", "archived"}
+    if body.status not in valid_statuses:
+        allowed = ", ".join(sorted(valid_statuses))
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status {body.status!r}. Must be one of: {allowed}",
+        )
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await db_ops.update_project_status(db, project_id, body.status)
+    project = await db_ops.get_project(db, project_id)
+    resp = ProjectResponse(**project.__dict__)  # type: ignore[union-attr]
+
     ws_hub = await _get_ws_hub(request)
     if ws_hub is not None:
         try:

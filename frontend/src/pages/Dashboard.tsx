@@ -1,22 +1,43 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
-import StatusBadge from "../components/common/StatusBadge";
-import TimeAgo from "../components/common/TimeAgo";
 import CreateProjectModal from "../components/common/CreateProjectModal";
 import ConfirmPopover from "../components/common/ConfirmPopover";
+import ProjectGridView from "../components/dashboard/ProjectGridView";
+import ProjectRowView from "../components/dashboard/ProjectRowView";
+import ProjectBoardView from "../components/dashboard/ProjectBoardView";
 import { api, ApiError } from "../utils/api";
+import type { Project } from "../types";
 import "./Dashboard.css";
 
+type ViewMode = "grid" | "row" | "board";
+
+const VIEW_PREF_KEY = "atc_dashboard_view";
+
+function loadViewPref(): ViewMode {
+  const stored = localStorage.getItem(VIEW_PREF_KEY);
+  if (stored === "grid" || stored === "row" || stored === "board") return stored;
+  return "grid";
+}
+
 export default function Dashboard() {
-  const navigate = useNavigate();
   const { state, fetchAll } = useAppContext();
-  const { projects, sessions, usage, notifications } = state;
+  const { projects, sessions, tasks, leaders, github, usage, notifications } = state;
+
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>(loadViewPref);
+  // Local order state for optimistic drag-to-reorder
+  const [orderedProjects, setOrderedProjects] = useState<Project[]>(projects);
 
-  const activeProjects = projects.filter((p) => p.status === "active");
-  const archivedProjects = projects.filter((p) => p.status === "archived");
+  // Sync orderedProjects when global state changes (new project created, etc.)
+  const latestIds = projects.map((p) => p.id).join(",");
+  const orderedIds = orderedProjects.map((p) => p.id).join(",");
+  const displayProjects = latestIds === orderedIds ? orderedProjects : projects;
+
+  const handleViewChange = (v: ViewMode) => {
+    setView(v);
+    localStorage.setItem(VIEW_PREF_KEY, v);
+  };
 
   const handleDelete = async (projectId: string) => {
     try {
@@ -40,14 +61,21 @@ export default function Dashboard() {
     }
   };
 
+  const handleReorder = (reordered: Project[]) => {
+    setOrderedProjects(reordered);
+  };
+
+  const handleProjectsChange = (updated: Project[]) => {
+    setOrderedProjects(updated);
+  };
+
+  const archivedProjects = displayProjects.filter((p) => p.status === "archived");
+
   return (
     <div className="dashboard" data-testid="dashboard-page">
       <div className="dashboard__header">
         <h1>Dashboard</h1>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowCreate(true)}
-        >
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
           + New Project
         </button>
       </div>
@@ -112,24 +140,55 @@ export default function Dashboard() {
             <span className="dashboard__stat-label">unread</span>
           </div>
           <div className="dashboard__stat">
-            <span className="dashboard__stat-value">
-              {notifications.length}
-            </span>
+            <span className="dashboard__stat-value">{notifications.length}</span>
             <span className="dashboard__stat-label">total</span>
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="dashboard__error panel" style={{ color: "var(--color-danger)", marginBottom: "var(--space-4)" }}>
+        <div
+          className="dashboard__error panel"
+          style={{ color: "var(--color-danger)", marginBottom: "var(--space-4)" }}
+        >
           {error}
         </div>
       )}
 
-      {/* Project cards */}
+      {/* Projects section with view toggle */}
       <section className="dashboard__projects">
-        <h2>Projects</h2>
-        {activeProjects.length === 0 ? (
+        <div className="dashboard__projects-header">
+          <h2>Projects</h2>
+          <div className="view-toggle" role="group" aria-label="View mode">
+            <button
+              className={`view-toggle__btn${view === "grid" ? " view-toggle__btn--active" : ""}`}
+              onClick={() => handleViewChange("grid")}
+              title="Grid view"
+              aria-pressed={view === "grid"}
+            >
+              ⊞ Grid
+            </button>
+            <button
+              className={`view-toggle__btn${view === "row" ? " view-toggle__btn--active" : ""}`}
+              onClick={() => handleViewChange("row")}
+              title="Row view"
+              aria-pressed={view === "row"}
+            >
+              ☰ Row
+            </button>
+            <button
+              className={`view-toggle__btn${view === "board" ? " view-toggle__btn--active" : ""}`}
+              onClick={() => handleViewChange("board")}
+              title="Board view"
+              aria-pressed={view === "board"}
+            >
+              ▦ Board
+            </button>
+          </div>
+        </div>
+
+        {displayProjects.filter((p) => p.status !== "archived").length === 0 &&
+        view !== "board" ? (
           <div className="dashboard__empty">
             <p>No active projects.</p>
             <button
@@ -140,71 +199,53 @@ export default function Dashboard() {
               Create your first project
             </button>
           </div>
+        ) : view === "grid" ? (
+          <ProjectGridView
+            projects={displayProjects}
+            sessions={sessions}
+            tasks={tasks}
+            leaders={leaders}
+            github={github}
+            onReorder={handleReorder}
+            onArchive={handleArchive}
+            onDelete={handleDelete}
+          />
+        ) : view === "row" ? (
+          <ProjectRowView
+            projects={displayProjects}
+            sessions={sessions}
+            tasks={tasks}
+            leaders={leaders}
+            github={github}
+            onReorder={handleReorder}
+          />
         ) : (
-          <div className="dashboard__project-grid">
-            {activeProjects.map((project) => (
-              <div key={project.id} className="panel dashboard__project-card">
-                <div
-                  className="dashboard__project-clickable"
-                  onClick={() => navigate(`/projects/${project.id}`)}
-                >
-                  <div className="dashboard__project-header">
-                    <h3>{project.name}</h3>
-                    <StatusBadge status={project.status} size="sm" />
-                  </div>
-                  {project.description && (
-                    <p className="dashboard__project-desc">
-                      {project.description}
-                    </p>
-                  )}
-                  <div className="dashboard__project-meta">
-                    <span>
-                      {
-                        sessions.filter((s) => s.project_id === project.id)
-                          .length
-                      }{" "}
-                      sessions
-                    </span>
-                    <TimeAgo datetime={project.updated_at} />
-                  </div>
-                </div>
-                <div className="dashboard__project-actions">
-                  <button
-                    className="btn btn-sm"
-                    onClick={() => void handleArchive(project.id)}
-                  >
-                    Archive
-                  </button>
-                  <ConfirmPopover
-                    message={`Are you sure you want to delete "${project.name}"? This will remove all tasks and context associated with this project.`}
-                    confirmLabel="Delete"
-                    variant="danger"
-                    onConfirm={() => void handleDelete(project.id)}
-                  >
-                    <button className="btn btn-sm btn-danger">Delete</button>
-                  </ConfirmPopover>
-                </div>
-              </div>
-            ))}
-          </div>
+          <ProjectBoardView
+            projects={displayProjects}
+            sessions={sessions}
+            tasks={tasks}
+            leaders={leaders}
+            github={github}
+            onProjectsChange={handleProjectsChange}
+          />
         )}
       </section>
 
-      {/* Archived projects */}
-      {archivedProjects.length > 0 && (
-        <section className="dashboard__projects">
+      {/* Archived projects — only shown outside board view (board has its own column) */}
+      {view !== "board" && archivedProjects.length > 0 && (
+        <section className="dashboard__projects" style={{ marginTop: "var(--space-8)" }}>
           <h2>Archived</h2>
           <div className="dashboard__project-grid">
             {archivedProjects.map((project) => (
-              <div key={project.id} className="panel dashboard__project-card dashboard__project-card--archived">
+              <div
+                key={project.id}
+                className="panel dashboard__project-card dashboard__project-card--archived"
+              >
                 <div className="dashboard__project-header">
                   <h3>{project.name}</h3>
-                  <StatusBadge status={project.status} size="sm" />
                 </div>
                 {project.description && (
-                  <p className="dashboard__project-desc">
-                    {project.description}
-                  </p>
+                  <p className="dashboard__project-desc">{project.description}</p>
                 )}
                 <div className="dashboard__project-actions">
                   <ConfirmPopover
