@@ -33,7 +33,7 @@ clean: ## Remove build artifacts and venv
 	rm -rf $(VENV) frontend/node_modules dist/ build/ *.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-cleardb: ## Full reset: kill ALL dev processes, delete DB, reinstall package, restart dev servers
+cleardb: ## Full reset: kill ALL dev processes, nuke venv + DB, rebuild from scratch, restart
 	@echo "→ Killing all ATC dev processes (uvicorn, vite, node)..."
 	@pkill -f "uvicorn" 2>/dev/null || true
 	@pkill -f "vite" 2>/dev/null || true
@@ -46,9 +46,12 @@ cleardb: ## Full reset: kill ALL dev processes, delete DB, reinstall package, re
 	else \
 		echo "  (no atc.db found)"; \
 	fi
-	@echo "→ Reinstalling editable package (ensures src/ changes are live)..."
+	@echo "→ Nuking .venv to ensure a clean Python environment..."
+	@rm -rf $(VENV)
+	@echo "→ Rebuilding venv and installing all deps..."
+	@python3 -m venv $(VENV)
 	@$(VENV)/bin/pip install -e ".[dev]" --quiet
-	@echo "✓ Package reinstalled"
+	@echo "✓ venv rebuilt and package installed fresh"
 	@echo "→ Starting dev servers..."
 	@$(MAKE) dev
 
