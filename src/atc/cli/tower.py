@@ -44,6 +44,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     )
     memory_parser.set_defaults(handler=_handle_memory)
 
+    # atc tower cost <session_id> <input_tokens> <output_tokens> <model>
+    cost_parser = tower_sub.add_parser(
+        "cost", help="Report explicit cost for a session (primary source)"
+    )
+    cost_parser.add_argument("session_id", help="Session ID to attribute cost to")
+    cost_parser.add_argument("input_tokens", type=int, help="Input token count")
+    cost_parser.add_argument("output_tokens", type=int, help="Output token count")
+    cost_parser.add_argument("model", help="Model name (e.g. claude-sonnet-4-6)")
+    cost_parser.add_argument(
+        "--api", default=_DEFAULT_API, help="ATC API base URL",
+    )
+    cost_parser.set_defaults(handler=_handle_cost)
+
     tower_parser.set_defaults(handler=lambda _: tower_parser.print_help() or 1)
 
 
@@ -96,3 +109,15 @@ def _handle_cancel(args: argparse.Namespace) -> int:
 
 def _handle_memory(args: argparse.Namespace) -> int:
     return _get_json(f"{args.api}/api/tower/memory")
+
+
+def _handle_cost(args: argparse.Namespace) -> int:
+    return _post_json(
+        f"{args.api}/api/tower/cost",
+        {
+            "session_id": args.session_id,
+            "input_tokens": args.input_tokens,
+            "output_tokens": args.output_tokens,
+            "model": args.model,
+        },
+    )

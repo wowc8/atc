@@ -64,6 +64,12 @@ class CostTracker:
         self._stats_path = stats_path
         self._last_snapshot: dict[str, Any] = {}
         self._task: asyncio.Task[None] | None = None
+        # Sessions that report costs explicitly via atc-tower cost CLI.
+        # Stats-cache polling is skipped for these to avoid double-counting.
+        self._has_explicit_reporting: set[str] = set()
+
+        # Subscribe to explicit cost reports from the atc-tower cost CLI
+        self._event_bus.subscribe("cost_reported", self._on_cost_reported)
 
     async def start(self) -> None:
         """Start the background polling loop."""
@@ -112,6 +118,14 @@ class CostTracker:
             return
 
         session_id, project_id = await self._find_active_session()
+
+        # Skip attribution if this session reports costs explicitly — avoid double-counting
+        if session_id is not None and session_id in self._has_explicit_reporting:
+            logger.debug(
+                "Skipping stats-cache attribution for session %s (explicit reporting active)",
+                session_id,
+            )
+            return
 
         for model, counts in delta.items():
             in_tok = counts.get("input_tokens", 0)
@@ -216,6 +230,97 @@ class CostTracker:
                     models[model]["output_tokens"] += int(sess.get("output_tokens", 0))
 
         return models
+
+    async def record_explicit(
+        self,
+        session_id: str,
+        input_tokens: int,
+        output_tokens: int,
+        model: str,
+        cost_usd: float,
+    ) -> None:
+        """Record explicitly-reported cost from the atc-tower cost CLI.
+
+        Marks the session as having explicit reporting so the stats-cache
+        polling loop skips it and avoids double-counting.
+        """
+        self._has_explicit_reporting.add(session_id)
+
+        project_id: str | None = None
+        try:
+            cursor = await self._db.execute(
+                "SELECT project_id FROM sessions WHERE id = ?", (session_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                project_id = str(row[0])
+        except Exception:
+            logger.debug(
+                "Failed to find project for explicit cost: session=%s", session_id
+            )
+
+        now = datetime.now(UTC).isoformat()
+        event_id = str(uuid.uuid4())
+
+        await self._db.execute(
+            """INSERT INTO usage_events
+               (id, project_id, session_id, event_type, model,
+                input_tokens, output_tokens, cost_usd, recorded_at)
+               VALUES (?, ?, ?, 'ai_cost', ?, ?, ?, ?, ?)""",
+            (event_id, project_id, session_id, model, input_tokens, output_tokens, cost_usd, now),
+        )
+        await self._db.commit()
+
+        if self._ws_hub:
+            await self._ws_hub.broadcast(
+                "costs",
+                {
+                    "event_id": event_id,
+                    "model": model,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cost_usd": cost_usd,
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "recorded_at": now,
+                    "source": "explicit",
+                },
+            )
+
+        await self._event_bus.publish(
+            "cost_recorded",
+            {
+                "model": model,
+                "cost_usd": cost_usd,
+                "project_id": project_id,
+                "source": "explicit",
+            },
+        )
+
+        logger.debug(
+            "Explicit cost recorded: session=%s model=%s in=%d out=%d cost=$%.4f",
+            session_id,
+            model,
+            input_tokens,
+            output_tokens,
+            cost_usd,
+        )
+
+    async def _on_cost_reported(self, data: dict[str, Any]) -> None:
+        """Handle cost_reported event fired by the atc-tower cost CLI endpoint."""
+        session_id = data.get("session_id")
+        input_tokens = int(data.get("input_tokens", 0))
+        output_tokens = int(data.get("output_tokens", 0))
+        model = str(data.get("model", _FALLBACK_MODEL))
+        cost_usd = float(
+            data.get("cost_usd") or calculate_cost(model, input_tokens, output_tokens)
+        )
+
+        if not session_id:
+            logger.warning("cost_reported event missing session_id — ignoring")
+            return
+
+        await self.record_explicit(session_id, input_tokens, output_tokens, model, cost_usd)
 
     async def _find_active_session(self) -> tuple[str | None, str | None]:
         """Return (session_id, project_id) for the most recently active session."""

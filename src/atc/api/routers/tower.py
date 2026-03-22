@@ -34,6 +34,13 @@ class MessageRequest(BaseModel):
     message: str
 
 
+class CostRequest(BaseModel):
+    session_id: str
+    input_tokens: int
+    output_tokens: int
+    model: str
+
+
 class TowerStatusResponse(BaseModel):
     status: str
     active_projects: int
@@ -197,6 +204,30 @@ async def get_progress(request: Request) -> TowerProgressResponse:
     tower = _get_tower(request)
     progress = await tower.get_progress()
     return TowerProgressResponse(**progress)
+
+
+@router.post("/cost")
+async def report_cost(body: CostRequest, request: Request) -> dict[str, str]:
+    """Record explicit cost for a session (primary source over stats-cache).
+
+    Called by ``atc tower cost <session_id> <input_tokens> <output_tokens> <model>``.
+    Fires a ``cost_reported`` event on the event bus so CostTracker records it
+    and suppresses double-counting from stats-cache polling.
+    """
+    event_bus = getattr(request.app.state, "event_bus", None)
+    if event_bus is None:
+        raise HTTPException(status_code=503, detail="Event bus not initialized")
+
+    await event_bus.publish(
+        "cost_reported",
+        {
+            "session_id": body.session_id,
+            "input_tokens": body.input_tokens,
+            "output_tokens": body.output_tokens,
+            "model": body.model,
+        },
+    )
+    return {"status": "recorded", "session_id": body.session_id}
 
 
 @router.get("/memory", response_model=list[MemoryEntry])

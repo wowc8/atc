@@ -83,9 +83,16 @@ class TowerController:
         self._leader_output_lines: list[str] = []
         self._max_output_lines = 200
 
+        # Budget constraint flag — set when budget_warning fires, cleared on budget_ok
+        self._budget_constrained = False
+
         # Subscribe to leader session events for monitoring
         self._event_bus.subscribe("session_status_changed", self._on_session_status_changed)
         self._event_bus.subscribe("pty_output", self._on_leader_output)
+
+        # Subscribe to budget events for proactive slowdown
+        self._event_bus.subscribe("budget_warning", self._on_budget_warning)
+        self._event_bus.subscribe("budget_ok", self._on_budget_ok)
 
     @property
     def state(self) -> TowerState:
@@ -216,6 +223,12 @@ class TowerController:
         allowed = (TowerState.IDLE, TowerState.COMPLETE, TowerState.ERROR, TowerState.MANAGING)
         if self._state not in allowed:
             raise TowerBusyError(self._state, project_id)
+
+        if self._budget_constrained:
+            logger.warning(
+                "Skipping new Ace spawn — budget constrained (project %s)", project_id
+            )
+            raise BudgetConstrainedError(project_id)
 
         # Reset to idle first if coming from complete/error
         if self._state in (TowerState.COMPLETE, TowerState.ERROR):
@@ -464,6 +477,19 @@ class TowerController:
                     },
                 )
 
+    async def _on_budget_warning(self, data: dict[str, Any]) -> None:
+        """Handle budget_warning event — pause new Ace spawns."""
+        project_id = data.get("project_id", "unknown")
+        self._budget_constrained = True
+        logger.warning(
+            "Budget at warn threshold for project %s — pausing new Ace spawns", project_id
+        )
+
+    async def _on_budget_ok(self, data: dict[str, Any]) -> None:
+        """Handle budget_ok event — resume new Ace spawns."""
+        self._budget_constrained = False
+        logger.info("Budget back below threshold — resuming Ace spawns")
+
     async def _on_session_status_changed(self, data: dict[str, Any]) -> None:
         """Monitor Leader session status changes for error detection."""
         session_id = data.get("session_id")
@@ -509,4 +535,14 @@ class TowerBusyError(Exception):
         self.project_id = project_id
         super().__init__(
             f"Tower is busy (state={state.value}), cannot accept goal for {project_id}"
+        )
+
+
+class BudgetConstrainedError(Exception):
+    """Raised when a new Ace spawn is blocked due to budget warning threshold."""
+
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(
+            f"Budget constrained — new Ace spawns paused for project {project_id}"
         )
