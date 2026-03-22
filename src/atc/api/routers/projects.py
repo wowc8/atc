@@ -309,6 +309,39 @@ async def start_leader(
         )
     except RuntimeError as exc:
         raise CreationFailedError(str(exc)) from None
+
+    # Seed goal and project metadata into context hub so the Context panel
+    # populates regardless of whether Tower or CLI started the Leader.
+    if body.goal:
+        from atc.state import db as db_ops
+        seed = [("goal", "text", body.goal)]
+        cursor = await db.execute(
+            "SELECT name, description, repo_path, github_repo FROM projects WHERE id = ?",
+            (project_id,),
+        )
+        row = await cursor.fetchone()
+        if row:
+            if row[1]: seed.append(("project_description", "text", row[1]))
+            if row[2]: seed.append(("repo_path", "text", row[2]))
+            if row[3]: seed.append(("github_repo", "text", row[3]))
+        for key, etype, val in seed:
+            try:
+                await db_ops.create_context_entry(
+                    db, scope="project", key=key, entry_type=etype,
+                    value=val, project_id=project_id, updated_by="leader-start",
+                )
+                await db.commit()
+            except Exception:
+                try:
+                    await db.execute(
+                        "UPDATE context_entries SET value=?, updated_at=datetime('now')"
+                        " WHERE project_id=? AND key=? AND scope='project'",
+                        (val, project_id, key),
+                    )
+                    await db.commit()
+                except Exception:
+                    pass
+
     return {"status": "started", "session_id": session_id}
 
 
