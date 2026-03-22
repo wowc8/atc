@@ -63,6 +63,15 @@ class SentryConfig(BaseModel):
     environment: str = "development"
 
 
+class QALoopConfig(BaseModel):
+    enabled: bool = True
+    poll_interval_seconds: int = 30
+    max_iterations: int = 5
+    task_poll_interval_seconds: int = 10
+    test_timeout_seconds: int = 300
+    task_wait_timeout_seconds: int = 3600
+
+
 class AgentProviderConfig(BaseModel):
     """Configuration for the agent provider abstraction layer."""
 
@@ -87,6 +96,7 @@ class Settings(BaseSettings):
     logging: LoggingConfig = LoggingConfig()
     sentry: SentryConfig = SentryConfig()
     agent_provider: AgentProviderConfig = AgentProviderConfig()
+    qa_loop: QALoopConfig = QALoopConfig()
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

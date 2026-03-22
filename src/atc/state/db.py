@@ -26,6 +26,7 @@ from atc.state.models import (
     Leader,
     Project,
     ProjectBudget,
+    QALoopRun,
     Session,
     SessionHeartbeat,
     TaskAssignment,
@@ -413,12 +414,28 @@ CREATE TABLE IF NOT EXISTS github_prs (
     title           TEXT,
     status          TEXT,
     ci_status       TEXT,
+    qa_status       TEXT NOT NULL DEFAULT 'pending',
     url             TEXT,
     updated_at      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_github_prs_project_status
     ON github_prs(project_id, status);
+
+CREATE TABLE IF NOT EXISTS qa_loop_runs (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id),
+    pr_id           TEXT NOT NULL REFERENCES github_prs(id),
+    iteration       INTEGER NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'running',
+    failure_count   INTEGER NOT NULL DEFAULT 0,
+    test_output     TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_qa_loop_runs_pr_id ON qa_loop_runs(pr_id);
+CREATE INDEX IF NOT EXISTS idx_qa_loop_runs_project_id ON qa_loop_runs(project_id);
 """
 
 
@@ -539,6 +556,7 @@ async def delete_project(
         ("leaders", "project_id = ?"),
         ("project_budgets", "project_id = ?"),
         ("usage_events", "project_id = ?"),
+        ("qa_loop_runs", "project_id = ?"),
         ("github_prs", "project_id = ?"),
         ("notifications", "project_id = ?"),
         ("app_events", "project_id = ?"),
@@ -1778,7 +1796,8 @@ async def upsert_github_pr(
     """Upsert a GitHub PR row."""
     now = _now()
     await db.execute(
-        """INSERT INTO github_prs (id, project_id, number, title, status, ci_status, url, updated_at)
+        """INSERT INTO github_prs
+           (id, project_id, number, title, status, ci_status, url, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              title     = excluded.title,
@@ -1793,3 +1812,147 @@ async def upsert_github_pr(
     row = await cursor.fetchone()
     assert row is not None  # noqa: S101
     return _row_to_github_pr(row)
+
+
+async def get_prs_needing_qa(
+    db: aiosqlite.Connection,
+    *,
+    project_id: str | None = None,
+) -> list[GitHubPR]:
+    """Return PRs with qa_status in ('pending', 'needs_rerun')."""
+    if project_id is not None:
+        cursor = await db.execute(
+            "SELECT * FROM github_prs"
+            " WHERE qa_status IN ('pending', 'needs_rerun') AND project_id = ?"
+            " ORDER BY number DESC",
+            (project_id,),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT * FROM github_prs"
+            " WHERE qa_status IN ('pending', 'needs_rerun')"
+            " ORDER BY number DESC",
+        )
+    rows = await cursor.fetchall()
+    return [_row_to_github_pr(r) for r in rows]
+
+
+async def update_pr_qa_status(
+    db: aiosqlite.Connection,
+    pr_id: str,
+    qa_status: str,
+) -> None:
+    """Update the qa_status of a github_prs row."""
+    await db.execute(
+        "UPDATE github_prs SET qa_status = ?, updated_at = ? WHERE id = ?",
+        (qa_status, _now(), pr_id),
+    )
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# QALoopRun helpers
+# ---------------------------------------------------------------------------
+
+
+def _row_to_qa_loop_run(row: aiosqlite.Row) -> QALoopRun:
+    return QALoopRun(**dict(row))
+
+
+async def create_qa_loop_run(
+    db: aiosqlite.Connection,
+    project_id: str,
+    pr_id: str,
+    iteration: int,
+) -> QALoopRun:
+    """Insert a new qa_loop_runs row with status='running'."""
+    now = _now()
+    run = QALoopRun(
+        id=_uuid(),
+        project_id=project_id,
+        pr_id=pr_id,
+        iteration=iteration,
+        status="running",
+        failure_count=0,
+        created_at=now,
+        updated_at=now,
+    )
+    await db.execute(
+        """INSERT INTO qa_loop_runs
+           (id, project_id, pr_id, iteration, status, failure_count,
+            test_output, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            run.id,
+            run.project_id,
+            run.pr_id,
+            run.iteration,
+            run.status,
+            run.failure_count,
+            run.test_output,
+            run.created_at,
+            run.updated_at,
+        ),
+    )
+    await db.commit()
+    return run
+
+
+async def update_qa_loop_run(
+    db: aiosqlite.Connection,
+    run_id: str,
+    *,
+    status: str | None = None,
+    failure_count: int | None = None,
+    test_output: str | None = None,
+) -> None:
+    """Update fields on a qa_loop_runs row."""
+    sets: list[str] = []
+    params: list[Any] = []
+    if status is not None:
+        sets.append("status = ?")
+        params.append(status)
+    if failure_count is not None:
+        sets.append("failure_count = ?")
+        params.append(failure_count)
+    if test_output is not None:
+        sets.append("test_output = ?")
+        params.append(test_output)
+    if not sets:
+        return
+    sets.append("updated_at = ?")
+    params.append(_now())
+    params.append(run_id)
+    await db.execute(
+        f"UPDATE qa_loop_runs SET {', '.join(sets)} WHERE id = ?",  # noqa: S608
+        params,
+    )
+    await db.commit()
+
+
+async def get_latest_qa_loop_run(
+    db: aiosqlite.Connection,
+    pr_id: str,
+) -> QALoopRun | None:
+    """Return the most recent qa_loop_run for a PR, or None."""
+    cursor = await db.execute(
+        "SELECT * FROM qa_loop_runs WHERE pr_id = ? ORDER BY iteration DESC LIMIT 1",
+        (pr_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _row_to_qa_loop_run(row)
+
+
+async def list_qa_loop_runs(
+    db: aiosqlite.Connection,
+    pr_id: str,
+) -> list[QALoopRun]:
+    """Return all qa_loop_runs for a PR ordered by iteration."""
+    cursor = await db.execute(
+        "SELECT * FROM qa_loop_runs WHERE pr_id = ? ORDER BY iteration ASC",
+        (pr_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_qa_loop_run(r) for r in rows]

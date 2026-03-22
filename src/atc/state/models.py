@@ -118,7 +118,21 @@ class GitHubPR:
     title: str | None = None
     status: str | None = None  # open|merged|closed
     ci_status: str | None = None  # pending|running|success|failure
+    qa_status: str = "pending"  # pending|running|passed|failed|escalated|needs_rerun
     url: str | None = None
+    updated_at: str = ""
+
+
+@dataclass
+class QALoopRun:
+    id: str
+    project_id: str
+    pr_id: str
+    iteration: int
+    status: str  # running|passed|failed
+    failure_count: int = 0
+    test_output: str | None = None  # raw pytest output
+    created_at: str = ""
     updated_at: str = ""
 
 
