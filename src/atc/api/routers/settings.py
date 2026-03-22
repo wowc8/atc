@@ -303,3 +303,64 @@ async def send_sentry_report(
 
     event_id = capture_message(body.message, level="error", **extra)
     return SendReportResponse(sent=event_id is not None, event_id=event_id)
+
+
+# ---------------------------------------------------------------------------
+# Resource limits settings
+# ---------------------------------------------------------------------------
+
+class ResourceLimitsResponse(BaseModel):
+    max_concurrent_aces: int
+    cpu_throttle_threshold: float
+    ram_throttle_threshold: float
+    cpu_pause_threshold: float
+    ram_pause_threshold: float
+
+
+class ResourceLimitsUpdate(BaseModel):
+    max_concurrent_aces: int | None = None
+    cpu_throttle_threshold: float | None = None
+    ram_throttle_threshold: float | None = None
+    cpu_pause_threshold: float | None = None
+    ram_pause_threshold: float | None = None
+
+
+@router.get("/resource-limits", response_model=ResourceLimitsResponse)
+async def get_resource_limits(request: Request) -> ResourceLimitsResponse:
+    """Get current resource limit settings."""
+    settings = request.app.state.settings
+    cfg = settings.resource_monitor
+    return ResourceLimitsResponse(
+        max_concurrent_aces=cfg.max_concurrent_aces,
+        cpu_throttle_threshold=cfg.cpu_throttle_threshold,
+        ram_throttle_threshold=cfg.ram_throttle_threshold,
+        cpu_pause_threshold=cfg.cpu_pause_threshold,
+        ram_pause_threshold=cfg.ram_pause_threshold,
+    )
+
+
+@router.put("/resource-limits", response_model=ResourceLimitsResponse)
+async def update_resource_limits(
+    body: ResourceLimitsUpdate,
+    request: Request,
+) -> ResourceLimitsResponse:
+    """Update resource limit settings (persisted in memory until restart)."""
+    settings = request.app.state.settings
+    cfg = settings.resource_monitor
+    if body.max_concurrent_aces is not None:
+        cfg.max_concurrent_aces = max(1, min(body.max_concurrent_aces, 20))
+    if body.cpu_throttle_threshold is not None:
+        cfg.cpu_throttle_threshold = body.cpu_throttle_threshold
+    if body.ram_throttle_threshold is not None:
+        cfg.ram_throttle_threshold = body.ram_throttle_threshold
+    if body.cpu_pause_threshold is not None:
+        cfg.cpu_pause_threshold = body.cpu_pause_threshold
+    if body.ram_pause_threshold is not None:
+        cfg.ram_pause_threshold = body.ram_pause_threshold
+    return ResourceLimitsResponse(
+        max_concurrent_aces=cfg.max_concurrent_aces,
+        cpu_throttle_threshold=cfg.cpu_throttle_threshold,
+        ram_throttle_threshold=cfg.ram_throttle_threshold,
+        cpu_pause_threshold=cfg.cpu_pause_threshold,
+        ram_pause_threshold=cfg.ram_pause_threshold,
+    )

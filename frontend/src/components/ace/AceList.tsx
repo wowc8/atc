@@ -12,6 +12,7 @@ interface AceListProps {
   projectId: string;
   sessions: Session[];
   onRefresh: () => void;
+  onExpand?: (sessionId: string) => void;
   compact?: boolean;
 }
 
@@ -19,6 +20,7 @@ export default function AceList({
   projectId,
   sessions,
   onRefresh,
+  onExpand,
   compact = false,
 }: AceListProps) {
   const { state } = useAppContext();
@@ -27,8 +29,15 @@ export default function AceList({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
   const selectedSession = sessions.find((s) => s.id === selectedId);
+  const taskGraphs = state.taskGraphs[projectId] ?? [];
+
+  function getTaskTitle(session: Session): string | null {
+    const tg = taskGraphs.find((t) => t.assigned_ace_id === session.id);
+    return tg ? tg.title : null;
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -40,6 +49,7 @@ export default function AceList({
         name: newName.trim(),
       });
       setNewName("");
+      setShowCreate(false);
       setSelectedId(created.id);
       onRefresh();
     } catch (err) {
@@ -89,7 +99,11 @@ export default function AceList({
   }
 
   function isRunning(s: Session) {
-    return s.status === "working" || s.status === "waiting" || s.status === "connecting";
+    return (
+      s.status === "working" ||
+      s.status === "waiting" ||
+      s.status === "connecting"
+    );
   }
 
   if (compact) {
@@ -97,7 +111,16 @@ export default function AceList({
       <div className="ace-list ace-list--compact" data-testid="ace-list">
         <div className="ace-list__header">
           <h3>Aces</h3>
-          <span className="ace-list__count">{sessions.length}</span>
+          {sessions.length > 0 && (
+            <span className="ace-list__count">{sessions.length}</span>
+          )}
+          <button
+            className="ace-list__add-btn"
+            onClick={() => setShowCreate((v) => !v)}
+            title="Add ace"
+          >
+            {showCreate ? "✕" : "+"}
+          </button>
         </div>
 
         {error && (
@@ -106,41 +129,73 @@ export default function AceList({
           </div>
         )}
 
-        {sessions.length === 0 ? (
-          <p className="ace-list__empty">No aces yet.</p>
-        ) : (
-          <div className="ace-list__mini-grid">
-            {sessions.map((session) => (
-              <div key={session.id} className="ace-list__mini-card">
-                <div className="ace-list__mini-header">
-                  <span className="ace-list__mini-name">{session.name}</span>
-                  <StatusBadge status={session.status} size="sm" />
-                  <HealthIndicator health={state.heartbeats[session.id]?.health} />
-                </div>
-                <div className="ace-list__mini-terminal">
-                  <AceTerminal key={session.id} session={session} />
-                </div>
-              </div>
-            ))}
-          </div>
+        {showCreate && (
+          <form className="ace-list__create" onSubmit={handleCreate}>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Ace name…"
+              disabled={creating}
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="btn btn-sm btn-primary"
+              disabled={creating || !newName.trim()}
+            >
+              {creating ? "…" : "Add"}
+            </button>
+          </form>
         )}
 
-        <form className="ace-list__create" onSubmit={handleCreate}>
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="New ace name..."
-            disabled={creating}
-          />
-          <button
-            type="submit"
-            className="btn btn-sm btn-primary"
-            disabled={creating || !newName.trim()}
-          >
-            {creating ? "..." : "+ Add"}
-          </button>
-        </form>
+        {sessions.length === 0 ? (
+          <div className="ace-list__empty">
+            <span className="ace-list__empty-icon">⬡</span>
+            <span>No aces yet</span>
+          </div>
+        ) : (
+          <div className="ace-list__cards">
+            {sessions.map((session) => {
+              const taskTitle = getTaskTitle(session);
+              return (
+                <div
+                  key={session.id}
+                  className={`ace-list__card${isRunning(session) ? " ace-list__card--running" : ""}`}
+                >
+                  <div className="ace-list__card-header">
+                    <div className="ace-list__card-identity">
+                      <span className="ace-list__card-name">{session.name}</span>
+                      <StatusBadge status={session.status} size="sm" />
+                      <HealthIndicator
+                        health={state.heartbeats[session.id]?.health}
+                      />
+                    </div>
+                    {onExpand && (
+                      <button
+                        className="ace-list__expand-btn"
+                        onClick={() => onExpand(session.id)}
+                        title={`Expand ${session.name}`}
+                      >
+                        ⤢
+                      </button>
+                    )}
+                  </div>
+
+                  {taskTitle && (
+                    <div className="ace-list__card-task" title={taskTitle}>
+                      {taskTitle}
+                    </div>
+                  )}
+
+                  <div className="ace-list__card-terminal">
+                    <AceTerminal key={session.id} session={session} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

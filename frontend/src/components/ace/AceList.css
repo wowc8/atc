@@ -4,6 +4,7 @@
   gap: var(--space-3);
 }
 
+/* ── Header ────────────────────────────────────────────── */
 .ace-list__header {
   display: flex;
   align-items: center;
@@ -15,6 +16,7 @@
   color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  flex: 1;
 }
 
 .ace-list__count {
@@ -25,6 +27,25 @@
   border-radius: var(--radius-sm);
 }
 
+/* Small "+" toggle button, right-aligned in the header */
+.ace-list__add-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  line-height: 1;
+  padding: 2px 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.ace-list__add-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* ── Error banner ──────────────────────────────────────── */
 .ace-list__error {
   font-size: var(--text-sm);
   color: var(--color-danger, #f85149);
@@ -34,6 +55,7 @@
   padding: var(--space-2) var(--space-3);
 }
 
+/* ── Create form (inline, subtle) ──────────────────────── */
 .ace-list__create {
   display: flex;
   gap: var(--space-2);
@@ -55,6 +77,129 @@
   border-color: var(--color-accent);
 }
 
+/* ── Empty state ───────────────────────────────────────── */
+.ace-list__empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.ace-list__empty-icon {
+  font-size: var(--text-base);
+  opacity: 0.4;
+}
+
+/* ── Compact cards grid ─────────────────────────────────── */
+.ace-list__cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ace-list__card {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-surface);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ace-list__card:hover {
+  border-color: var(--color-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.ace-list__card--running {
+  border-color: var(--color-accent-muted, rgba(88, 166, 255, 0.3));
+}
+
+.ace-list__card--running:hover {
+  border-color: var(--color-accent);
+}
+
+/* Card header row */
+.ace-list__card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  background: var(--color-bg-surface);
+}
+
+.ace-list__card-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ace-list__card-name {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Expand button */
+.ace-list__expand-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.ace-list__expand-btn:hover {
+  color: var(--color-accent);
+  background: var(--color-accent-muted, rgba(88, 166, 255, 0.1));
+}
+
+/* Task assignment label */
+.ace-list__card-task {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding: 0 var(--space-2) var(--space-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+
+/* Terminal preview */
+.ace-list__card-terminal {
+  height: 120px;
+  overflow: hidden;
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+}
+
+.ace-list__card-terminal .ace-terminal {
+  flex: 1;
+  min-height: 0;
+}
+
+.ace-list__card-terminal .ace-terminal__view {
+  min-height: 100px;
+  border: none;
+  border-radius: 0;
+  flex: 1;
+}
+
+/* ── Full (non-compact) list styles ────────────────────── */
 .ace-list__tabs {
   display: flex;
   flex-direction: column;
@@ -105,64 +250,7 @@
   min-height: 250px;
 }
 
-.ace-list__empty {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  padding: var(--space-4) 0;
-}
-
-/* Compact / mini grid layout */
+/* Compact empty override (kept for legacy use) */
 .ace-list--compact .ace-list__empty {
-  padding: var(--space-2) 0;
-}
-
-.ace-list__mini-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-3);
-}
-
-.ace-list__mini-card {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.ace-list__mini-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-bg-surface);
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.ace-list__mini-name {
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text);
-  font-family: var(--font-mono);
-}
-
-.ace-list__mini-terminal {
-  height: 150px;
-  display: flex;
-  flex-direction: column;
-}
-
-.ace-list__mini-terminal .ace-terminal__view {
-  min-height: 100px;
-  border: none;
-  border-radius: 0;
-}
-
-.ace-list__mini-terminal .ace-terminal__input {
-  padding: var(--space-1) var(--space-2);
-}
-
-.ace-list__mini-terminal .ace-terminal__input input {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-1);
 }
