@@ -276,3 +276,143 @@ async def send_leader_message(
             status_code=409, detail=f"Leader pane unavailable: {e}"
         ) from None
     return {"status": "sent"}
+
+
+# ---------------------------------------------------------------------------
+# Budget endpoints
+# ---------------------------------------------------------------------------
+
+
+class BudgetResponse(BaseModel):
+    project_id: str
+    daily_token_limit: int | None = None
+    monthly_cost_limit: float | None = None
+    warn_threshold: float
+    current_status: str
+    updated_at: str
+
+
+class UpdateBudgetRequest(BaseModel):
+    daily_token_limit: int | None = None
+    monthly_cost_limit: float | None = None
+    warn_threshold: float = 0.8
+
+
+@router.get("/{project_id}/budget", response_model=BudgetResponse)
+async def get_budget(project_id: str, request: Request) -> BudgetResponse:
+    """Return budget config and current status for a project."""
+    db = await _get_db(request)
+    budget = await db_ops.get_project_budget(db, project_id)
+    if budget is None:
+        # Return default unconfigured budget
+        from datetime import UTC, datetime
+
+        return BudgetResponse(
+            project_id=project_id,
+            daily_token_limit=None,
+            monthly_cost_limit=None,
+            warn_threshold=0.8,
+            current_status="ok",
+            updated_at=datetime.now(UTC).isoformat(),
+        )
+    return BudgetResponse(**budget.__dict__)
+
+
+@router.put("/{project_id}/budget", response_model=BudgetResponse)
+async def update_budget(
+    project_id: str,
+    body: UpdateBudgetRequest,
+    request: Request,
+) -> BudgetResponse:
+    """Create or update the budget limits for a project."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    budget = await db_ops.upsert_project_budget(
+        db,
+        project_id,
+        daily_token_limit=body.daily_token_limit,
+        monthly_cost_limit=body.monthly_cost_limit,
+        warn_threshold=body.warn_threshold,
+    )
+    return BudgetResponse(**budget.__dict__)
+
+
+@router.post("/{project_id}/budget/reset")
+async def reset_budget(project_id: str, request: Request) -> dict[str, str]:
+    """Reset the budget status to 'ok' (e.g. after starting a new month)."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await db_ops.update_project_budget_status(db, project_id, "ok")
+    return {"status": "reset"}
+
+
+# ---------------------------------------------------------------------------
+# GitHub endpoints
+# ---------------------------------------------------------------------------
+
+
+class GitHubPRResponse(BaseModel):
+    id: str
+    project_id: str | None
+    number: int
+    title: str | None = None
+    status: str | None = None
+    ci_status: str | None = None
+    url: str | None = None
+    updated_at: str
+
+
+class RateLimitResponse(BaseModel):
+    limit: int
+    remaining: int
+    reset: int
+
+
+@router.get("/{project_id}/github/prs", response_model=list[GitHubPRResponse])
+async def list_github_prs(project_id: str, request: Request) -> list[GitHubPRResponse]:
+    """Return the PR list for a project with CI status badges."""
+    db = await _get_db(request)
+    prs = await db_ops.list_github_prs(db, project_id)
+    return [GitHubPRResponse(**pr.__dict__) for pr in prs]
+
+
+@router.get("/{project_id}/github/rate-limit", response_model=RateLimitResponse)
+async def get_github_rate_limit(project_id: str, request: Request) -> RateLimitResponse:
+    """Return the current GitHub API rate limit for this project's repo."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not project.github_repo:
+        raise HTTPException(status_code=422, detail="Project has no github_repo configured")
+
+    tracker = getattr(request.app.state, "github_tracker", None)
+    if tracker is None:
+        return RateLimitResponse(limit=0, remaining=0, reset=0)
+
+    rl = tracker.get_rate_limit(project.github_repo)
+    if rl is None:
+        return RateLimitResponse(limit=0, remaining=0, reset=0)
+    return RateLimitResponse(**rl)
+
+
+@router.post("/{project_id}/github/sync")
+async def sync_github(project_id: str, request: Request) -> dict[str, str]:
+    """Force a GitHub sync for this project."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not project.github_repo:
+        raise HTTPException(status_code=422, detail="Project has no github_repo configured")
+
+    tracker = getattr(request.app.state, "github_tracker", None)
+    if tracker is None:
+        raise HTTPException(status_code=503, detail="GitHub tracker not running")
+
+    await tracker.poll_project(project_id, project.github_repo)
+    return {"status": "synced"}

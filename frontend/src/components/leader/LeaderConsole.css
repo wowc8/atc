@@ -56,3 +56,225 @@
   background: #0d1117;
 }
 
+.leader-console__loading {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+}
+
+.leader-console__tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-top: var(--space-2);
+  flex-shrink: 0;
+}
+
+.leader-console__tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.leader-console__tab:hover {
+  color: var(--color-text);
+}
+
+.leader-console__tab--active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+.leader-console__tab-content {
+  padding: var(--space-2) 0;
+  flex-shrink: 0;
+}
+
+.leader-console__tasks-placeholder {
+  padding: var(--space-2) 0;
+}
+
+.leader-console__muted {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* GitHub panel */
+.github-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.github-panel__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.github-panel__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.github-panel__empty {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.github-panel__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.github-panel__pr {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  padding: var(--space-1) 0;
+}
+
+.github-panel__pr-number {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  min-width: 32px;
+}
+
+.github-panel__pr-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-panel__pr-link {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.github-panel__pr-link:hover {
+  color: var(--color-text);
+}
+
+/* Budget panel */
+.budget-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.budget-panel__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.budget-panel__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.budget-panel__loading {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.budget-panel__stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.budget-panel__stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.budget-panel__stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.budget-panel__stat-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.budget-panel__stat-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.budget-panel__no-limits {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.budget-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Chart containers */
+.chart-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.chart-period-selector {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.chart-period-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px var(--space-2);
+}
+
+.chart-period-btn--active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.chart-loading,
+.chart-empty {
+  padding: var(--space-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.chart-loading__text,
+.chart-empty__text {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+

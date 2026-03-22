@@ -185,6 +185,38 @@ class TestContextEntriesMigration:
                      created_at, updated_at)
                     VALUES ('e1', 'p1', 'arch', 'text', '"monorepo"', 0, 'user',
                             datetime('now'), datetime('now'));
+                CREATE TABLE IF NOT EXISTS usage_events (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT,
+                    session_id TEXT,
+                    event_type TEXT NOT NULL,
+                    model TEXT,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    cost_usd REAL,
+                    cpu_pct REAL,
+                    ram_mb REAL,
+                    api_calls INTEGER,
+                    recorded_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS project_budgets (
+                    project_id TEXT PRIMARY KEY,
+                    daily_token_limit INTEGER,
+                    monthly_cost_limit REAL,
+                    warn_threshold REAL NOT NULL DEFAULT 0.8,
+                    current_status TEXT NOT NULL DEFAULT 'ok',
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS github_prs (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT,
+                    number INTEGER NOT NULL,
+                    title TEXT,
+                    status TEXT,
+                    ci_status TEXT,
+                    url TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 -- Mark migrations 1-7 as applied so only 008 runs
                 INSERT INTO _migrations (version, filename) VALUES (1, '001_initial_schema.sql');
                 INSERT INTO _migrations (version, filename) VALUES (2, '002_task_graphs.sql');

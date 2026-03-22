@@ -22,12 +22,15 @@ import aiosqlite  # type: ignore[import-not-found]
 from atc.state.models import (
     ContextEntry,
     FeatureFlag,
+    GitHubPR,
     Leader,
     Project,
+    ProjectBudget,
     Session,
     SessionHeartbeat,
     TaskAssignment,
     TaskGraph,
+    UsageEvent,
 )
 
 if TYPE_CHECKING:
@@ -1583,3 +1586,196 @@ async def get_context_for_agent(
     )
     rows = await cursor.fetchall()
     return [_row_to_context_entry(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# UsageEvent helpers
+# ---------------------------------------------------------------------------
+
+
+async def write_usage_event(
+    db: aiosqlite.Connection,
+    event_type: str,
+    *,
+    project_id: str | None = None,
+    session_id: str | None = None,
+    model: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cost_usd: float | None = None,
+    cpu_pct: float | None = None,
+    ram_mb: float | None = None,
+    disk_mb: float | None = None,
+    api_calls: int | None = None,
+) -> UsageEvent:
+    """Insert a usage_events row and return the dataclass."""
+    now = _now()
+    event = UsageEvent(
+        id=_uuid(),
+        event_type=event_type,
+        recorded_at=now,
+        project_id=project_id,
+        session_id=session_id,
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
+        cpu_pct=cpu_pct,
+        ram_mb=ram_mb,
+        disk_mb=disk_mb,
+        api_calls=api_calls,
+    )
+    await db.execute(
+        """INSERT INTO usage_events
+           (id, project_id, session_id, event_type, model,
+            input_tokens, output_tokens, cost_usd,
+            cpu_pct, ram_mb, disk_mb, api_calls, recorded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            event.id,
+            event.project_id,
+            event.session_id,
+            event.event_type,
+            event.model,
+            event.input_tokens,
+            event.output_tokens,
+            event.cost_usd,
+            event.cpu_pct,
+            event.ram_mb,
+            event.disk_mb,
+            event.api_calls,
+            event.recorded_at,
+        ),
+    )
+    await db.commit()
+    return event
+
+
+# ---------------------------------------------------------------------------
+# ProjectBudget helpers
+# ---------------------------------------------------------------------------
+
+
+async def get_project_budget(
+    db: aiosqlite.Connection,
+    project_id: str,
+) -> ProjectBudget | None:
+    """Fetch the budget row for a project, or None if not set."""
+    cursor = await db.execute(
+        "SELECT * FROM project_budgets WHERE project_id = ?",
+        (project_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return ProjectBudget(**dict(row))
+
+
+async def upsert_project_budget(
+    db: aiosqlite.Connection,
+    project_id: str,
+    *,
+    daily_token_limit: int | None = None,
+    monthly_cost_limit: float | None = None,
+    warn_threshold: float = 0.8,
+) -> ProjectBudget:
+    """Insert or update a project budget row."""
+    now = _now()
+    await db.execute(
+        """INSERT INTO project_budgets
+           (project_id, daily_token_limit, monthly_cost_limit, warn_threshold,
+            current_status, updated_at)
+           VALUES (?, ?, ?, ?, 'ok', ?)
+           ON CONFLICT(project_id) DO UPDATE SET
+             daily_token_limit  = excluded.daily_token_limit,
+             monthly_cost_limit = excluded.monthly_cost_limit,
+             warn_threshold     = excluded.warn_threshold,
+             updated_at         = excluded.updated_at""",
+        (project_id, daily_token_limit, monthly_cost_limit, warn_threshold, now),
+    )
+    await db.commit()
+    budget = await get_project_budget(db, project_id)
+    assert budget is not None  # noqa: S101 — we just upserted it
+    return budget
+
+
+async def update_project_budget_status(
+    db: aiosqlite.Connection,
+    project_id: str,
+    status: str,
+) -> None:
+    """Update only the current_status of a project budget."""
+    now = _now()
+    await db.execute(
+        "UPDATE project_budgets SET current_status = ?, updated_at = ? WHERE project_id = ?",
+        (status, now, project_id),
+    )
+    await db.commit()
+
+
+async def list_project_budgets(db: aiosqlite.Connection) -> list[ProjectBudget]:
+    """Return all project budget rows."""
+    cursor = await db.execute("SELECT * FROM project_budgets")
+    rows = await cursor.fetchall()
+    return [ProjectBudget(**dict(r)) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# GitHubPR helpers
+# ---------------------------------------------------------------------------
+
+
+def _row_to_github_pr(row: aiosqlite.Row) -> GitHubPR:
+    return GitHubPR(**dict(row))
+
+
+async def list_github_prs(
+    db: aiosqlite.Connection,
+    project_id: str,
+    *,
+    status: str | None = None,
+) -> list[GitHubPR]:
+    """Return GitHub PRs for a project, optionally filtered by status."""
+    if status:
+        cursor = await db.execute(
+            "SELECT * FROM github_prs WHERE project_id = ? AND status = ? ORDER BY number DESC",
+            (project_id, status),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT * FROM github_prs WHERE project_id = ? ORDER BY number DESC",
+            (project_id,),
+        )
+    rows = await cursor.fetchall()
+    return [_row_to_github_pr(r) for r in rows]
+
+
+async def upsert_github_pr(
+    db: aiosqlite.Connection,
+    pr_id: str,
+    project_id: str,
+    number: int,
+    *,
+    title: str | None = None,
+    status: str | None = None,
+    ci_status: str | None = None,
+    url: str | None = None,
+) -> GitHubPR:
+    """Upsert a GitHub PR row."""
+    now = _now()
+    await db.execute(
+        """INSERT INTO github_prs (id, project_id, number, title, status, ci_status, url, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             title     = excluded.title,
+             status    = excluded.status,
+             ci_status = excluded.ci_status,
+             url       = excluded.url,
+             updated_at = excluded.updated_at""",
+        (pr_id, project_id, number, title, status, ci_status, url, now),
+    )
+    await db.commit()
+    cursor = await db.execute("SELECT * FROM github_prs WHERE id = ?", (pr_id,))
+    row = await cursor.fetchone()
+    assert row is not None  # noqa: S101
+    return _row_to_github_pr(row)

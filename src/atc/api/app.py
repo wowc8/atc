@@ -303,11 +303,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("Failed to restore TowerController state from DB")
 
+    # 9. Start resource monitor
+    from atc.tracking.resources import ResourceMonitor
+
+    resource_monitor = ResourceMonitor(db, event_bus, ws_hub=ws_hub)
+    await resource_monitor.start()
+    app.state.resource_monitor = resource_monitor
+
+    # 10. Start cost tracker
+    from atc.tracking.costs import CostTracker
+
+    cost_tracker = CostTracker(db, event_bus, ws_hub=ws_hub)
+    await cost_tracker.start()
+    app.state.cost_tracker = cost_tracker
+
+    # 11. Start GitHub tracker
+    from atc.tracking.github import GitHubTracker
+
+    github_tracker = GitHubTracker(db, event_bus, ws_hub=ws_hub)
+    await github_tracker.start()
+    app.state.github_tracker = github_tracker
+
+    # 12. Start budget enforcer
+    from atc.tracking.budget import BudgetEnforcer
+
+    budget_enforcer = BudgetEnforcer(db, event_bus, ws_hub=ws_hub)
+    await budget_enforcer.start()
+    app.state.budget_enforcer = budget_enforcer
+
     logger.info("ATC startup complete")
     yield
 
     # Shutdown
     logger.info("ATC shutting down")
+    await budget_enforcer.stop()
+    await github_tracker.stop()
+    await cost_tracker.stop()
+    await resource_monitor.stop()
     await heartbeat_monitor.stop()
     await pty_pool.stop()
     await event_bus.stop()

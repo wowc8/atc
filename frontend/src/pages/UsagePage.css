@@ -5,10 +5,37 @@
   width: 100%;
 }
 
+.usage-page__top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+}
+
 .usage-page h1 {
   font-size: var(--text-2xl);
   font-weight: 600;
-  margin-bottom: var(--space-6);
+}
+
+.usage-page__period-selector {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.usage-page__period-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px var(--space-3);
+}
+
+.usage-page__period-btn--active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
 }
 
 .usage-page__grid {
