@@ -135,8 +135,13 @@ class HeartbeatMonitor:
         """
         recorded = await db_ops.record_heartbeat(self._db, session_id)
         if not recorded:
-            await db_ops.register_heartbeat(self._db, session_id)
-            recorded = True
+            try:
+                await db_ops.register_heartbeat(self._db, session_id)
+                recorded = True
+            except Exception:
+                # Session ID not in sessions table (stale reference after cleardb).
+                # Ignore silently — heartbeat for a non-existent session is harmless.
+                return False
 
         if self._ws_hub:
             now = datetime.now(UTC).isoformat()
