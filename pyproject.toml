@@ -44,6 +44,9 @@ atc = "atc.cli.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/atc"]
 
+[tool.hatch.build.targets.editable]
+path = "src"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
