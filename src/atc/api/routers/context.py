@@ -194,6 +194,31 @@ async def list_project_context(
             db, "project", project_id=project_id,
         )
 
+    # Auto-seed from leader goal if context is empty — handles sessions that
+    # started before context seeding was added, or via CLI paths.
+    if not entries and scope in (None, "project"):
+        leader = await db_ops.get_leader_by_project(db, project_id)
+        if leader and leader.goal:
+            seed_pairs = [("goal", "text", leader.goal)]
+            if project.description:
+                seed_pairs.append(("project_description", "text", project.description))
+            if project.repo_path:
+                seed_pairs.append(("repo_path", "text", project.repo_path))
+            if project.github_repo:
+                seed_pairs.append(("github_repo", "text", project.github_repo))
+            for seed_key, seed_type, seed_val in seed_pairs:
+                try:
+                    await db_ops.create_context_entry(
+                        db, scope="project", key=seed_key, entry_type=seed_type,
+                        value=seed_val, project_id=project_id, updated_by="auto-seed",
+                    )
+                    await db.commit()
+                except Exception:
+                    pass
+            entries = await db_ops.list_context_entries_by_scope(
+                db, "project", project_id=project_id,
+            )
+
     if restricted is not None:
         entries = [e for e in entries if e.restricted is restricted]
     if key is not None:
