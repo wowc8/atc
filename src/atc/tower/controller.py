@@ -17,13 +17,15 @@ The full orchestration loop:
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import json
 import logging
 from typing import TYPE_CHECKING, Any
 
 from atc.leader.context_package import build_context_package
-from atc.leader.leader import start_leader, stop_leader
+from atc.leader.leader import send_leader_message, start_leader, stop_leader
+from atc.state import db as db_ops
 from atc.tower.session import send_tower_message, start_tower_session, stop_tower_session
 
 if TYPE_CHECKING:
@@ -254,6 +256,25 @@ class TowerController:
             )
             await self._db.commit()
 
+            # Persist context_entries to the DB so they are queryable
+            for entry in context_package.get("context_entries", []):
+                try:
+                    await db_ops.create_context_entry(
+                        self._db,
+                        scope="project",
+                        key=entry.get("key", ""),
+                        entry_type=entry.get("entry_type", "text"),
+                        value=entry.get("value", ""),
+                        project_id=project_id,
+                        updated_by="tower",
+                    )
+                except Exception:
+                    logger.debug(
+                        "Context entry key=%r already exists for project %s — skipping",
+                        entry.get("key"),
+                        project_id,
+                    )
+
             # Start the Leader session (separate from Tower's session)
             leader_session_id = await start_leader(
                 self._db,
@@ -283,6 +304,12 @@ class TowerController:
                     "goal": goal,
                     "session_id": leader_session_id,
                 },
+            )
+
+            # Send kickoff and start background verification loop
+            await self._send_leader_kickoff(leader_session_id, goal)
+            asyncio.create_task(
+                self._verify_leader_started(project_id, leader_session_id, goal)
             )
 
             return {
@@ -442,6 +469,77 @@ class TowerController:
             )
 
         return progress
+
+    async def _send_leader_kickoff(self, session_id: str, goal: str) -> None:
+        """Send the initial kickoff message to the Leader pane."""
+        if not self._current_project_id:
+            return
+        try:
+            await send_leader_message(
+                self._db,
+                self._current_project_id,
+                "Start working on your goal now.",
+                event_bus=self._event_bus,
+            )
+            logger.info(
+                "Sent kickoff message to leader session %s (project %s)",
+                session_id,
+                self._current_project_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send kickoff to leader session %s", session_id
+            )
+
+    async def _verify_leader_started(
+        self, project_id: str, session_id: str, goal: str
+    ) -> None:
+        """Background loop: verify the Leader acknowledged and started working.
+
+        Waits ~10s after kickoff, checks for output, and retries the kickoff
+        up to 3 times (30s window each) before giving up and setting ERROR.
+        """
+        max_retries = 3
+        initial_wait = 10
+        retry_wait = 30
+
+        await asyncio.sleep(initial_wait)
+
+        for attempt in range(max_retries):
+            if self._leader_session_id != session_id:
+                # Leader was replaced or cancelled — stop verifying
+                return
+
+            if self._leader_output_lines:
+                logger.info(
+                    "Leader session %s is producing output after kickoff (attempt %d)",
+                    session_id,
+                    attempt + 1,
+                )
+                return
+
+            logger.warning(
+                "Leader session %s has no output yet (attempt %d/%d) — resending kickoff",
+                session_id,
+                attempt + 1,
+                max_retries,
+            )
+            await self._send_leader_kickoff(session_id, goal)
+            await asyncio.sleep(retry_wait)
+
+        # Final check after last retry
+        if self._leader_session_id != session_id:
+            return
+
+        if not self._leader_output_lines:
+            logger.error(
+                "Leader session %s produced no output after %d kickoff attempts — "
+                "setting tower state to ERROR",
+                session_id,
+                max_retries,
+            )
+            if self._state == TowerState.MANAGING:
+                await self._transition(TowerState.ERROR)
 
     async def _on_leader_output(self, data: dict[str, Any]) -> None:
         """Capture PTY output from the Leader session for monitoring.
