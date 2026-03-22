@@ -29,6 +29,16 @@ class TowerConfig(BaseModel):
 class ResourceMonitorConfig(BaseModel):
     enabled: bool = True
     interval_seconds: int = 5
+    # Maximum concurrent Aces across all projects (absolute ceiling)
+    max_concurrent_aces: int = 3
+    # CPU % threshold above which ace spawning is throttled
+    cpu_throttle_threshold: float = 70.0
+    # RAM % threshold above which ace spawning is throttled
+    ram_throttle_threshold: float = 75.0
+    # CPU % threshold above which no new aces are spawned
+    cpu_pause_threshold: float = 85.0
+    # RAM % threshold above which no new aces are spawned
+    ram_pause_threshold: float = 90.0
 
 
 class GitHubConfig(BaseModel):
