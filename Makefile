@@ -33,12 +33,20 @@ clean: ## Remove build artifacts and venv
 	rm -rf $(VENV) frontend/node_modules dist/ build/ *.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-cleardb: ## Delete the local SQLite database (fresh start, preserves .env and backups)
+cleardb: ## Full reset: kill backend, delete DB, reinstall package, restart dev servers
+	@echo "→ Stopping any running backend..."
+	@pkill -f "uvicorn atc" 2>/dev/null || true
+	@sleep 1
 	@if [ -f atc.db ]; then \
-		rm atc.db && echo "✓ atc.db deleted — migrations will run fresh on next 'make dev'"; \
+		rm atc.db && echo "✓ atc.db deleted"; \
 	else \
-		echo "No atc.db found, nothing to do."; \
+		echo "  (no atc.db found)"; \
 	fi
+	@echo "→ Reinstalling editable package (ensures src/ changes are live)..."
+	@pip install -e ".[dev]" --quiet
+	@echo "✓ Package reinstalled"
+	@echo "→ Starting dev servers..."
+	@$(MAKE) dev
 
 clearcache: ## Remove Python __pycache__, .pytest_cache, and frontend .vite cache
 	find . -type d -name __pycache__ -not -path "./.venv/*" -exec rm -rf {} + 2>/dev/null || true
