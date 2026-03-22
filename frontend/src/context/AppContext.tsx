@@ -92,7 +92,9 @@ type Action =
   | { type: "UPDATE_SESSION_STATUS"; payload: { session_id: string; status: string } }
   | { type: "ADD_PROJECT"; payload: Project }
   | { type: "UPDATE_PROJECT"; payload: Project }
-  | { type: "REMOVE_PROJECT"; payload: string };
+  | { type: "REMOVE_PROJECT"; payload: string }
+  | { type: "ADD_SESSION"; payload: Session }
+  | { type: "REMOVE_SESSION"; payload: string };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -196,6 +198,22 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         projects: state.projects.filter((p) => p.id !== action.payload),
+      };
+    case "ADD_SESSION":
+      // Avoid duplicates
+      if (state.sessions.some((s) => s.id === action.payload.id)) {
+        return {
+          ...state,
+          sessions: state.sessions.map((s) =>
+            s.id === action.payload.id ? action.payload : s,
+          ),
+        };
+      }
+      return { ...state, sessions: [...state.sessions, action.payload] };
+    case "REMOVE_SESSION":
+      return {
+        ...state,
+        sessions: state.sessions.filter((s) => s.id !== action.payload),
       };
   }
 }
@@ -315,6 +333,8 @@ export function AppProvider({ children }: AppProviderProps) {
         dispatch({ type: "UPDATE_PROJECT", payload: data.project as Project });
       } else if (data.project_deleted && typeof data.project_id === "string") {
         dispatch({ type: "REMOVE_PROJECT", payload: data.project_id });
+      } else if (data.session_created && data.session) {
+        dispatch({ type: "ADD_SESSION", payload: data.session as Session });
       } else {
         dispatch({ type: "SET_STATE", payload: data as Partial<AppState> });
       }

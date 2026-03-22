@@ -125,10 +125,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_id = data.get("session_id", "")
         if not session_id:
             return
-        # Look up the session to get its tmux_pane (it may not be set yet at
-        # creation time; the pane is spawned right after the event).  We
-        # subscribe to status changes instead to catch the pane_id.
-        pass
+        # Broadcast new session to the frontend so the Aces panel updates
+        # immediately without waiting for the next fetchAll poll.
+        from atc.state import db as db_ops
+
+        session = await db_ops.get_session(db, session_id)
+        if session:
+            await ws_hub.broadcast(
+                "state",
+                {
+                    "session_created": True,
+                    "session": {
+                        "id": session.id,
+                        "project_id": session.project_id,
+                        "session_type": session.session_type,
+                        "name": session.name,
+                        "status": session.status,
+                        "task_id": session.task_id,
+                        "tmux_session": session.tmux_session,
+                        "tmux_pane": session.tmux_pane,
+                        "created_at": session.created_at,
+                        "updated_at": session.updated_at,
+                    },
+                },
+            )
 
     async def _on_session_status_changed(data: dict[str, Any]) -> None:
         session_id = data.get("session_id", "")
