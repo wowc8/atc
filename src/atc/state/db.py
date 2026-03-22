@@ -213,6 +213,7 @@ CREATE TABLE IF NOT EXISTS projects (
     github_repo     TEXT,
     agent_provider  TEXT NOT NULL DEFAULT 'claude_code',
     status          TEXT NOT NULL DEFAULT 'active',
+    position        INTEGER DEFAULT 0,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -481,10 +482,50 @@ CREATE INDEX IF NOT EXISTS idx_backup_log_status ON backup_log(status);
 
 
 async def run_migrations(db_path: str) -> None:
-    """Create all tables (idempotent via IF NOT EXISTS)."""
+    """Create all tables (idempotent via IF NOT EXISTS) and apply ALTER TABLE migrations."""
     async with get_connection(db_path) as db:
         await db.executescript(_SCHEMA_SQL)
         await db.commit()
+
+        # Apply ADD COLUMN migrations idempotently by checking existing columns first.
+        # This handles DBs created before the column was added to _SCHEMA_SQL.
+        _alter_migrations: list[tuple[str, str, str]] = [
+            # (table, column, alter_sql)
+            (
+                "projects",
+                "position",
+                "ALTER TABLE projects ADD COLUMN position INTEGER DEFAULT 0",
+            ),
+            (
+                "github_prs",
+                "qa_status",
+                "ALTER TABLE github_prs ADD COLUMN qa_status TEXT NOT NULL DEFAULT 'pending'",
+            ),
+            (
+                "tower_memory",
+                "embedding",
+                "ALTER TABLE tower_memory ADD COLUMN embedding BLOB",
+            ),
+        ]
+        for table, column, alter_sql in _alter_migrations:
+            cursor = await db.execute(f"PRAGMA table_info({table})")  # noqa: S608
+            cols = await cursor.fetchall()
+            col_names = [row[1] for row in cols]
+            if column not in col_names:
+                logger.info("Applying migration: %s", alter_sql)
+                await db.execute(alter_sql)
+                # Assign sequential positions based on created_at for position column
+                if table == "projects" and column == "position":
+                    await db.execute(
+                        """UPDATE projects
+                           SET position = (
+                               SELECT COUNT(*)
+                               FROM projects p2
+                               WHERE p2.created_at < projects.created_at
+                                 OR (p2.created_at = projects.created_at AND p2.id < projects.id)
+                           )"""
+                    )
+                await db.commit()
 
 
 # ---------------------------------------------------------------------------
