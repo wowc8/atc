@@ -591,11 +591,23 @@ async def get_project(db: aiosqlite.Connection, project_id: str) -> Project | No
     return Project(**dict(row))
 
 
-async def list_projects(db: aiosqlite.Connection) -> list[Project]:
-    """Return all projects ordered by position, then created_at."""
-    cursor = await db.execute(
-        "SELECT * FROM projects ORDER BY position ASC, created_at ASC"
-    )
+async def list_projects(
+    db: aiosqlite.Connection,
+    *,
+    include_system: bool = False,
+) -> list[Project]:
+    """Return all projects ordered by position, then created_at.
+
+    System projects (e.g. the auto-created 'Tower Workspace' sentinel) are
+    excluded by default.  Pass include_system=True to include them.
+    """
+    if include_system:
+        sql = "SELECT * FROM projects ORDER BY position ASC, created_at ASC"
+        params: tuple[()] = ()
+    else:
+        sql = "SELECT * FROM projects WHERE name != ? ORDER BY position ASC, created_at ASC"
+        params = ("Tower Workspace",)
+    cursor = await db.execute(sql, params)
     rows = await cursor.fetchall()
     return [Project(**dict(r)) for r in rows]
 

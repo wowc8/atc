@@ -33,9 +33,13 @@ clean: ## Remove build artifacts and venv
 	rm -rf $(VENV) frontend/node_modules dist/ build/ *.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-cleardb: ## Full reset: kill backend, delete DB, reinstall package, restart dev servers
-	@echo "→ Stopping any running backend..."
-	@pkill -f "uvicorn atc" 2>/dev/null || true
+cleardb: ## Full reset: kill ALL dev processes, delete DB, reinstall package, restart dev servers
+	@echo "→ Killing all ATC dev processes (uvicorn, vite, node)..."
+	@pkill -f "uvicorn" 2>/dev/null || true
+	@pkill -f "vite" 2>/dev/null || true
+	@pkill -f "atc.api.app" 2>/dev/null || true
+	@lsof -ti:8420 | xargs kill -9 2>/dev/null || true
+	@lsof -ti:5173,5174,5175,5176,5177 | xargs kill -9 2>/dev/null || true
 	@sleep 1
 	@if [ -f atc.db ]; then \
 		rm atc.db && echo "✓ atc.db deleted"; \
