@@ -140,8 +140,8 @@ export default function UsagePage() {
   const tokenByDate = tokenData.reduce<Record<string, Record<string, number>>>(
     (acc, d) => {
       if (!acc[d.date]) acc[d.date] = { date: d.date as unknown as number };
-      acc[d.date][`${d.model}_in`] = (acc[d.date][`${d.model}_in`] ?? 0) + d.input_tokens;
-      acc[d.date][`${d.model}_out`] = (acc[d.date][`${d.model}_out`] ?? 0) + d.output_tokens;
+      acc[d.date]![`${d.model}_in`] = (acc[d.date]![`${d.model}_in`] ?? 0) + d.input_tokens;
+      acc[d.date]![`${d.model}_out`] = (acc[d.date]![`${d.model}_out`] ?? 0) + d.output_tokens;
       return acc;
     },
     {},

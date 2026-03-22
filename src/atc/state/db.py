@@ -405,6 +405,20 @@ CREATE INDEX IF NOT EXISTS idx_task_assignments_task_graph
     ON task_assignments(task_graph_id);
 CREATE INDEX IF NOT EXISTS idx_task_assignments_ace_session
     ON task_assignments(ace_session_id);
+
+CREATE TABLE IF NOT EXISTS github_prs (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT REFERENCES projects(id),
+    number          INTEGER NOT NULL,
+    title           TEXT,
+    status          TEXT,
+    ci_status       TEXT,
+    url             TEXT,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_prs_project_status
+    ON github_prs(project_id, status);
 """
 
 
