@@ -25,6 +25,7 @@ from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
+from atc.tracking.resources import ResourceGovernor
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +62,8 @@ class LeaderOrchestrator:
     conn: aiosqlite.Connection
     event_bus: EventBus | None = None
     assignments: dict[str, AceAssignment] = field(default_factory=dict)
-    _max_concurrent_aces: int = 5
+    _max_concurrent_aces: int = 3
+    _governor: ResourceGovernor = field(default_factory=ResourceGovernor)
 
     async def spawn_aces_for_ready_tasks(self) -> list[AceAssignment]:
         """Find ready tasks and spawn Ace sessions for them.
@@ -78,17 +80,18 @@ class LeaderOrchestrator:
         if not ready:
             return []
 
-        # Count currently active Aces
+        # Count currently active Aces (across all assignments for this leader)
         active_count = sum(
             1 for a in self.assignments.values() if a.status in ("assigned", "working")
         )
-        available_slots = max(0, self._max_concurrent_aces - active_count)
+        # Use ResourceGovernor for dynamic ceiling based on system load
+        available_slots = self._governor.available_ace_slots(active_count)
 
         if available_slots == 0:
             logger.info(
-                "Leader %s: all %d Ace slots occupied, waiting for completion",
+                "Leader %s: no Ace slots available (active=%d, system load check)",
                 self.leader_id,
-                self._max_concurrent_aces,
+                active_count,
             )
             return []
 

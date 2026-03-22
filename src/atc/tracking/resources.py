@@ -188,3 +188,84 @@ class ResourceMonitor:
             await self._ws_hub.broadcast("resources", {"snapshot": snapshot})
 
         logger.debug("ResourceMonitor: sampled %d projects", len(snapshot))
+
+
+# ---------------------------------------------------------------------------
+# Resource Governor — dynamic Ace concurrency ceiling
+# ---------------------------------------------------------------------------
+
+class ResourceGovernor:
+    """Computes the dynamic maximum concurrent Aces based on system resources.
+
+    Reads system-wide CPU and RAM utilisation via psutil and returns a ceiling
+    that protects the developer's machine from becoming unresponsive.
+
+    Thresholds (all configurable via ResourceMonitorConfig):
+      - Below throttle: allow up to max_concurrent_aces
+      - Between throttle and pause: reduce ceiling by half (min 1)
+      - Above pause: ceiling = 0 (no new Aces)
+    """
+
+    def __init__(
+        self,
+        max_concurrent_aces: int = 3,
+        cpu_throttle: float = 70.0,
+        ram_throttle: float = 75.0,
+        cpu_pause: float = 85.0,
+        ram_pause: float = 90.0,
+    ) -> None:
+        self._max = max_concurrent_aces
+        self._cpu_throttle = cpu_throttle
+        self._ram_throttle = ram_throttle
+        self._cpu_pause = cpu_pause
+        self._ram_pause = ram_pause
+
+    def get_system_usage(self) -> tuple[float, float]:
+        """Return (cpu_pct, ram_pct) system-wide."""
+        try:
+            import psutil
+            cpu = psutil.cpu_percent(interval=0.1)
+            ram = psutil.virtual_memory().percent
+            return cpu, ram
+        except Exception:
+            return 0.0, 0.0
+
+    def available_ace_slots(self, currently_active: int) -> int:
+        """Return how many new Aces can be spawned right now.
+
+        Args:
+            currently_active: Number of Aces already running across all projects.
+        """
+        cpu, ram = self.get_system_usage()
+
+        # Hard pause — system is struggling
+        if cpu >= self._cpu_pause or ram >= self._ram_pause:
+            logger.warning(
+                "ResourceGovernor: system overloaded (CPU=%.0f%% RAM=%.0f%%) — "
+                "blocking new Ace spawns",
+                cpu, ram,
+            )
+            return 0
+
+        # Throttle — reduce ceiling by half
+        if cpu >= self._cpu_throttle or ram >= self._ram_throttle:
+            ceiling = max(1, self._max // 2)
+            logger.info(
+                "ResourceGovernor: system under load (CPU=%.0f%% RAM=%.0f%%) — "
+                "throttling to %d concurrent Aces",
+                cpu, ram, ceiling,
+            )
+        else:
+            ceiling = self._max
+
+        return max(0, ceiling - currently_active)
+
+    @classmethod
+    def from_config(cls, cfg: "ResourceMonitorConfig") -> "ResourceGovernor":
+        return cls(
+            max_concurrent_aces=cfg.max_concurrent_aces,
+            cpu_throttle=cfg.cpu_throttle_threshold,
+            ram_throttle=cfg.ram_throttle_threshold,
+            cpu_pause=cfg.cpu_pause_threshold,
+            ram_pause=cfg.ram_pause_threshold,
+        )

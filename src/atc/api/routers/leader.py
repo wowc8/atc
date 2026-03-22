@@ -111,11 +111,22 @@ async def _get_or_create_orchestrator(
             detail=f"No leader found for project {project_id}",
         )
 
+    from atc.tracking.resources import ResourceGovernor
+    settings = getattr(request.app.state, "settings", None)
+    if settings is not None:
+        governor = ResourceGovernor.from_config(settings.resource_monitor)
+        max_aces = settings.resource_monitor.max_concurrent_aces
+    else:
+        governor = ResourceGovernor()
+        max_aces = 3
+
     orch = LeaderOrchestrator(
         project_id=project_id,
         leader_id=leader.id,
         conn=db,
         event_bus=event_bus,
+        _max_concurrent_aces=max_aces,
+        _governor=governor,
     )
 
     # Subscribe to session status changes for Ace monitoring
