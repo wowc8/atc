@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -116,7 +116,6 @@ class BudgetEnforcer:
 
         # Get today's token usage
         today = datetime.now(UTC).strftime("%Y-%m-%d")
-        month_start = datetime.now(UTC).strftime("%Y-%m-01")
 
         fractions: list[float] = []
 
@@ -134,13 +133,16 @@ class BudgetEnforcer:
             fractions.append(today_tokens / daily_token_limit)
 
         if monthly_cost_limit is not None and monthly_cost_limit > 0:
+            # Rolling 30-day window avoids month-end spend spike pattern.
+            # Computed in Python so the format matches recorded_at (ISO-8601 with tz).
+            rolling_start = (datetime.now(UTC) - timedelta(days=30)).isoformat()
             cursor = await self._db.execute(
                 """SELECT COALESCE(SUM(COALESCE(cost_usd, 0)), 0)
                    FROM usage_events
                    WHERE project_id = ?
                      AND event_type = 'ai_cost'
                      AND recorded_at >= ?""",
-                (project_id, month_start),
+                (project_id, rolling_start),
             )
             row = await cursor.fetchone()
             month_cost = float(row[0]) if row else 0.0
@@ -203,6 +205,12 @@ class BudgetEnforcer:
             )
             await self._event_bus.publish(
                 "budget_warning",
+                {"project_id": project_id},
+            )
+
+        elif new_status == "ok":
+            await self._event_bus.publish(
+                "budget_ok",
                 {"project_id": project_id},
             )
 
