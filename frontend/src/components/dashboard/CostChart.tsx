@@ -7,7 +7,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 import { api } from "../../utils/api";
 import { useAppContext } from "../../context/AppContext";
@@ -26,21 +25,12 @@ const PERIOD_LABELS: Record<Period, string> = {
   "90d": "90 days",
 };
 
-const PROJECT_COLORS = [
-  "#58a6ff",
-  "#3fb950",
-  "#f78166",
-  "#d2a8ff",
-  "#ffa657",
-  "#79c0ff",
-];
-
 interface Props {
   projectId?: string;
 }
 
 export default function CostChart({ projectId }: Props) {
-  const { state } = useAppContext();
+  useAppContext();
   const [period, setPeriod] = useState<Period>("7d");
   const [data, setData] = useState<CostDataPoint[]>([]);
   const [loading, setLoading] = useState(false);

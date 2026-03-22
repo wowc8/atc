@@ -14,6 +14,10 @@ function getAppVersion(): string {
   }
 }
 
+const backendPort = process.env.VITE_BACKEND_PORT ?? "8420";
+const backendTarget = `http://127.0.0.1:${backendPort}`;
+const wsTarget = `ws://127.0.0.1:${backendPort}`;
+
 export default defineConfig({
   plugins: [react()],
   define: {
@@ -23,11 +27,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8420",
+        target: backendTarget,
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://127.0.0.1:8420",
+        target: wsTarget,
         ws: true,
       },
     },

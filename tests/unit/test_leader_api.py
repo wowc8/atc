@@ -190,6 +190,7 @@ class TestProgressEndpoint:
 
         project, leader = project_with_leader
         tg1 = await create_task_graph(db, project.id, "Done Task")
+        await update_task_graph_status(db, tg1.id, "assigned")
         await update_task_graph_status(db, tg1.id, "in_progress")
         await update_task_graph_status(db, tg1.id, "done")
         await create_task_graph(db, project.id, "Todo Task")

@@ -375,6 +375,7 @@ class TestDeployedFileCleanup:
         tg = await create_task_graph(db, project.id, "Task A")
         from atc.state import db as db_ops
 
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
         await db_ops.update_task_graph_status(db, tg.id, "in_progress")
 
         deploy_root = Path("/tmp/atc-agents/ace-123")
@@ -414,6 +415,7 @@ class TestDeployedFileCleanup:
         tg = await create_task_graph(db, project.id, "Task A")
         from atc.state import db as db_ops
 
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
         await db_ops.update_task_graph_status(db, tg.id, "in_progress")
 
         deploy_root = Path("/tmp/atc-agents/ace-456")
