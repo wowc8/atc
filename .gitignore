@@ -49,3 +49,10 @@ Thumbs.db
 
 # Ruff
 .ruff_cache/
+
+# Runtime artifacts — never commit
+atc.db
+atc.db-shm
+atc.db-wal
+frontend/test-results/
+frontend/tsconfig.tsbuildinfo
