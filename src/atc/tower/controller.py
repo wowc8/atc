@@ -143,7 +143,7 @@ class TowerController:
                 },
             )
 
-    async def start_session(self, project_id: str) -> str:
+    async def start_session(self, project_id: str | None = None) -> str:
         """Start Tower's own Claude Code session (independent from Leader).
 
         Returns the tower session id.  If a session already exists, returns

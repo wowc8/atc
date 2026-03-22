@@ -103,13 +103,12 @@ export default function TowerPanel() {
   const contextLabel = deriveContextLabel(location.pathname, contextProject?.name);
 
   const handleStart = useCallback(async () => {
-    if (!resolvedProjectId) return;
     userStopped.current = false;
     setStarting(true);
     try {
       const res = await api.post<{ session_id?: string }>(
         "/tower/start",
-        { project_id: resolvedProjectId },
+        resolvedProjectId ? { project_id: resolvedProjectId } : {},
       );
       if (res.session_id) {
         dispatch({
@@ -204,7 +203,7 @@ export default function TowerPanel() {
             <button
               className="btn btn-primary btn-sm"
               onClick={handleStart}
-              disabled={starting || !resolvedProjectId}
+              disabled={starting}
               data-testid="tower-panel-start"
             >
               {starting ? "Starting..." : "Start"}

@@ -22,7 +22,7 @@ router = APIRouter()
 
 
 class StartRequest(BaseModel):
-    project_id: str
+    project_id: str | None = None
 
 
 class GoalRequest(BaseModel):
@@ -122,11 +122,12 @@ async def start_tower(body: StartRequest, request: Request) -> dict:
     db = await _get_db(request)
     tower = _get_tower(request)
 
-    # Verify project exists
-    cursor = await db.execute("SELECT id FROM projects WHERE id = ?", (body.project_id,))
-    row = await cursor.fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"Project {body.project_id} not found")
+    # Verify project exists only when a project_id is provided
+    if body.project_id is not None:
+        cursor = await db.execute("SELECT id FROM projects WHERE id = ?", (body.project_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Project {body.project_id} not found")
 
     try:
         session_id = await tower.start_session(body.project_id)
