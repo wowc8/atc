@@ -331,11 +331,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await budget_enforcer.start()
     app.state.budget_enforcer = budget_enforcer
 
+    # 13. Start QA loop controller
+    from atc.qa.loop import QALoopController
+
+    qa_loop = QALoopController(db, event_bus, ws_hub=ws_hub)
+    await qa_loop.start()
+    app.state.qa_loop = qa_loop
+
     logger.info("ATC startup complete")
     yield
 
     # Shutdown
     logger.info("ATC shutting down")
+    await qa_loop.stop()
     await budget_enforcer.stop()
     await github_tracker.stop()
     await cost_tracker.stop()
@@ -376,6 +384,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         heartbeat,
         leader,
         projects,
+        qa,
         task_graphs,
         tasks,
         tower,
@@ -395,6 +404,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(heartbeat.router, prefix="/api", tags=["heartbeat"])
     app.include_router(feature_flags.router, prefix="/api/feature-flags", tags=["feature_flags"])
     app.include_router(context.router, prefix="/api", tags=["context"])
+    app.include_router(qa.router, prefix="/api/qa", tags=["qa"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
