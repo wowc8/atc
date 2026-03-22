@@ -464,6 +464,19 @@ CREATE TABLE IF NOT EXISTS qa_loop_runs (
 
 CREATE INDEX IF NOT EXISTS idx_qa_loop_runs_pr_id ON qa_loop_runs(pr_id);
 CREATE INDEX IF NOT EXISTS idx_qa_loop_runs_project_id ON qa_loop_runs(project_id);
+
+CREATE TABLE IF NOT EXISTS backup_log (
+    id           TEXT PRIMARY KEY,
+    backup_type  TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    path         TEXT,
+    size_bytes   INTEGER,
+    error        TEXT,
+    created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backup_log_created_at ON backup_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_backup_log_status ON backup_log(status);
 """
 
 
