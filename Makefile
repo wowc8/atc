@@ -44,7 +44,7 @@ cleardb: ## Full reset: kill ALL dev processes, nuke venv + DB, rebuild from scr
 	@echo "→ Ensuring git remote uses HTTPS (not SSH)..."
 	@git remote set-url origin https://github.com/wowc8/atc.git
 	@echo "→ Pulling latest code..."
-	@git pull origin main
+	@git pull origin main || echo "⚠ git pull failed (SSH key issue?). Continuing with local code."
 	@if [ -f atc.db ]; then \
 		rm atc.db && echo "✓ atc.db deleted"; \
 	else \
