@@ -905,10 +905,10 @@ _VALID_TASK_GRAPH_STATUSES = {"todo", "assigned", "in_progress", "review", "done
 
 _TASK_GRAPH_TRANSITIONS: dict[str, set[str]] = {
     "todo": {"assigned"},
-    "assigned": {"in_progress", "todo", "error"},
-    "in_progress": {"review", "done", "error"},
+    "assigned": {"in_progress", "todo", "error", "assigned"},  # assigned→assigned is a no-op re-assign
+    "in_progress": {"review", "done", "error", "assigned"},    # allow re-assignment from in_progress
     "review": {"done", "in_progress", "error"},
-    "done": {"todo"},  # re-open for retry
+    "done": {"todo"},   # re-open for retry
     "error": {"todo"},  # retry from scratch
 }
 
