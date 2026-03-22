@@ -13,7 +13,9 @@ interface AceConsoleProps {
   sessions: Session[];
   activeAceId: string;
   onRefresh: () => void;
-  onSelectAce: (id: string | null) => void;
+  onSelectAce: (id: string) => void;
+  /** Collapse back to the Ace list view */
+  onCollapse: () => void;
 }
 
 export default function AceConsole({
@@ -22,6 +24,7 @@ export default function AceConsole({
   activeAceId,
   onRefresh,
   onSelectAce,
+  onCollapse,
 }: AceConsoleProps) {
   const { state } = useAppContext();
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -35,61 +38,43 @@ export default function AceConsole({
   }
 
   function isRunning(s: Session) {
-    return (
-      s.status === "working" ||
-      s.status === "waiting" ||
-      s.status === "connecting"
-    );
+    return s.status === "working" || s.status === "waiting" || s.status === "connecting";
   }
 
   async function handleStart(sessionId: string) {
     setLoadingId(sessionId);
-    try {
-      await api.post(`/aces/${sessionId}/start`, {});
-      onRefresh();
-    } catch (err) {
-      console.error("Failed to start ace:", err);
-    } finally {
-      setLoadingId(null);
-    }
+    try { await api.post(`/aces/${sessionId}/start`, {}); onRefresh(); }
+    catch (err) { console.error("Failed to start ace:", err); }
+    finally { setLoadingId(null); }
   }
 
   async function handleStop(sessionId: string) {
     setLoadingId(sessionId);
-    try {
-      await api.post(`/aces/${sessionId}/stop`);
-      onRefresh();
-    } catch (err) {
-      console.error("Failed to stop ace:", err);
-    } finally {
-      setLoadingId(null);
-    }
+    try { await api.post(`/aces/${sessionId}/stop`); onRefresh(); }
+    catch (err) { console.error("Failed to stop ace:", err); }
+    finally { setLoadingId(null); }
   }
 
   async function handleDelete(sessionId: string) {
     setLoadingId(sessionId);
     try {
       await api.delete(`/aces/${sessionId}`);
-      // Go to leader view after deleting the active ace
-      onSelectAce(null);
+      onCollapse();
       onRefresh();
-    } catch (err) {
-      console.error("Failed to delete ace:", err);
-    } finally {
-      setLoadingId(null);
-    }
+    } catch (err) { console.error("Failed to delete ace:", err); }
+    finally { setLoadingId(null); }
   }
 
   return (
     <div className="ace-console" data-testid="ace-console">
-      {/* Tab bar: Leader + one tab per ace */}
+      {/* Tab bar: collapse button + one tab per Ace */}
       <div className="ace-console__tabs">
         <button
-          className="ace-console__tab ace-console__tab--leader"
-          onClick={() => onSelectAce(null)}
-          title="Return to Leader"
+          className="ace-console__collapse-btn"
+          onClick={onCollapse}
+          title="Collapse to Ace list"
         >
-          ← Leader
+          ↙ Collapse
         </button>
         <div className="ace-console__tab-divider" />
         {sessions.map((s) => (
@@ -112,9 +97,7 @@ export default function AceConsole({
             <div className="ace-console__identity">
               <span className="ace-console__name">{activeSession.name}</span>
               <StatusBadge status={activeSession.status} />
-              <HealthIndicator
-                health={state.heartbeats[activeSession.id]?.health}
-              />
+              <HealthIndicator health={state.heartbeats[activeSession.id]?.health} />
               {getTaskTitle(activeSession) && (
                 <span className="ace-console__task-label">
                   {getTaskTitle(activeSession)}
@@ -137,10 +120,7 @@ export default function AceConsole({
                   onConfirm={() => handleStop(activeSession.id)}
                   variant="danger"
                 >
-                  <button
-                    className="btn btn-sm btn-danger"
-                    disabled={loadingId === activeSession.id}
-                  >
+                  <button className="btn btn-sm btn-danger" disabled={loadingId === activeSession.id}>
                     Stop
                   </button>
                 </ConfirmPopover>
@@ -153,9 +133,7 @@ export default function AceConsole({
               >
                 <button
                   className="btn btn-sm btn-danger"
-                  disabled={
-                    loadingId === activeSession.id || isRunning(activeSession)
-                  }
+                  disabled={loadingId === activeSession.id || isRunning(activeSession)}
                 >
                   Delete
                 </button>

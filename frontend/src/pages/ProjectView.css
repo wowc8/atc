@@ -63,14 +63,29 @@
   flex-shrink: 0;
 }
 
-/* Right column: leader or ace console, full height */
+/* When an Ace is expanded, the panel grows to fill available space */
+.project-view__aces--expanded {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.project-view__aces--expanded .ace-console {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Right column: leader always full height */
 .project-view__right {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.project-view__console {
+.project-view__leader {
   flex: 1;
   display: flex;
   flex-direction: column;
