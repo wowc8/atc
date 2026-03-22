@@ -8,6 +8,7 @@ export interface Project {
   github_repo: string | null;
   agent_provider: "claude_code" | "opencode";
   status: "active" | "paused" | "archived";
+  position: number;
   created_at: string;
   updated_at: string;
 }

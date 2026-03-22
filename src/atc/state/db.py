@@ -503,6 +503,10 @@ async def create_project(
 ) -> Project:
     """Insert a new project row and return the dataclass."""
     now = _now()
+    # Assign position after the last existing project.
+    cursor = await db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM projects")
+    row = await cursor.fetchone()
+    next_position: int = row[0] if row else 0
     project = Project(
         id=_uuid(),
         name=name,
@@ -511,14 +515,15 @@ async def create_project(
         repo_path=repo_path,
         github_repo=github_repo,
         agent_provider=agent_provider,
+        position=next_position,
         created_at=now,
         updated_at=now,
     )
     await db.execute(
         """INSERT INTO projects
            (id, name, description, repo_path, github_repo, agent_provider,
-            status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            status, position, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             project.id,
             project.name,
@@ -527,6 +532,7 @@ async def create_project(
             project.github_repo,
             project.agent_provider,
             project.status,
+            project.position,
             project.created_at,
             project.updated_at,
         ),
@@ -545,10 +551,39 @@ async def get_project(db: aiosqlite.Connection, project_id: str) -> Project | No
 
 
 async def list_projects(db: aiosqlite.Connection) -> list[Project]:
-    """Return all projects."""
-    cursor = await db.execute("SELECT * FROM projects ORDER BY created_at DESC")
+    """Return all projects ordered by position, then created_at."""
+    cursor = await db.execute(
+        "SELECT * FROM projects ORDER BY position ASC, created_at ASC"
+    )
     rows = await cursor.fetchall()
     return [Project(**dict(r)) for r in rows]
+
+
+async def update_project_positions(
+    db: aiosqlite.Connection,
+    positions: list[tuple[str, int]],
+) -> None:
+    """Bulk-update positions for a list of (project_id, position) pairs."""
+    now = _now()
+    await db.executemany(
+        "UPDATE projects SET position = ?, updated_at = ? WHERE id = ?",
+        [(pos, now, pid) for pid, pos in positions],
+    )
+    await db.commit()
+
+
+async def update_project_status(
+    db: aiosqlite.Connection,
+    project_id: str,
+    status: str,
+) -> None:
+    """Update the status of a project (active|paused|archived)."""
+    now = _now()
+    await db.execute(
+        "UPDATE projects SET status = ?, updated_at = ? WHERE id = ?",
+        (status, now, project_id),
+    )
+    await db.commit()
 
 
 async def update_project_agent_provider(
