@@ -85,6 +85,32 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     )
     list_parser.set_defaults(handler=_handle_list)
 
+    # atc ace memory <subcommand>
+    memory_parser = ace_sub.add_parser("memory", help="Ace short-term memory commands")
+    memory_sub = memory_parser.add_subparsers(dest="memory_command")
+
+    # atc ace memory write <session_id> <content>
+    mem_write_parser = memory_sub.add_parser("write", help="Write STM progress snapshot")
+    mem_write_parser.add_argument("session_id", help="Session UUID")
+    mem_write_parser.add_argument("content", help="Progress snapshot content")
+    mem_write_parser.add_argument(
+        "--tool-count", type=int, default=0, help="Current tool call count",
+    )
+    mem_write_parser.add_argument(
+        "--api", default=_DEFAULT_API, help="ATC API base URL",
+    )
+    mem_write_parser.set_defaults(handler=_handle_memory_write)
+
+    # atc ace memory get <session_id>
+    mem_get_parser = memory_sub.add_parser("get", help="Get STM progress snapshot")
+    mem_get_parser.add_argument("session_id", help="Session UUID")
+    mem_get_parser.add_argument(
+        "--api", default=_DEFAULT_API, help="ATC API base URL",
+    )
+    mem_get_parser.set_defaults(handler=_handle_memory_get)
+
+    memory_parser.set_defaults(handler=lambda _: memory_parser.print_help() or 1)
+
     ace_parser.set_defaults(handler=lambda _: ace_parser.print_help() or 1)
 
 
@@ -186,6 +212,51 @@ def _handle_list(args: argparse.Namespace) -> int:
     req = urllib.request.Request(url, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode())
+            print(json.dumps(body, indent=2))
+            return 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode() if exc.fp else str(exc)
+        print(f"Error: {exc.code} — {detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Error: cannot reach ATC API at {args.api} — {exc.reason}", file=sys.stderr)
+        return 1
+
+
+def _handle_memory_write(args: argparse.Namespace) -> int:
+    """POST STM snapshot to /api/memory/ace/{session_id} (via AceSTM write endpoint)."""
+    # The memory write goes through the API so the server can persist it.
+    # We encode it as a PATCH to the STM endpoint that the memory router exposes.
+    url = f"{args.api}/api/memory/ace/{args.session_id}/write"
+    payload = json.dumps({
+        "content": args.content,
+        "tool_call_count": args.tool_count,
+    }).encode()
+    req = urllib.request.Request(
+        url, data=payload, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = json.loads(resp.read().decode())
+            print(json.dumps(body))
+            return 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode() if exc.fp else str(exc)
+        print(f"Error: {exc.code} — {detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Error: cannot reach ATC API at {args.api} — {exc.reason}", file=sys.stderr)
+        return 1
+
+
+def _handle_memory_get(args: argparse.Namespace) -> int:
+    """GET /api/memory/ace/{session_id} to fetch STM snapshot."""
+    url = f"{args.api}/api/memory/ace/{args.session_id}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             body = json.loads(resp.read().decode())
             print(json.dumps(body, indent=2))
             return 0

@@ -654,6 +654,33 @@ curl -sf -X PATCH "$ATC_API/api/aces/$SESSION_ID/status" \
 
 # Send heartbeat
 curl -sf -X POST "$ATC_API/api/heartbeat/$SESSION_ID" >/dev/null 2>&1 || true
+
+# Memory checkpoint: track tool call count and snapshot progress every 5 calls
+TOOL_COUNT_DIR="/tmp/$SESSION_ID"
+mkdir -p "$TOOL_COUNT_DIR"
+TOOL_COUNT_FILE="$TOOL_COUNT_DIR/.tool_count"
+LAST_OUTPUT_FILE="$TOOL_COUNT_DIR/.last_output"
+
+if [[ -f "$TOOL_COUNT_FILE" ]]; then
+  _COUNT=$(cat "$TOOL_COUNT_FILE" 2>/dev/null || echo "0")
+  _COUNT=$(( _COUNT + 1 ))
+else
+  _COUNT=1
+fi
+echo "$_COUNT" > "$TOOL_COUNT_FILE"
+
+# Every 5 tool calls, write a progress snapshot to Ace STM
+if (( _COUNT % 5 == 0 )); then
+  if [[ -f "$LAST_OUTPUT_FILE" ]]; then
+    _CONTENT=$(head -c 500 "$LAST_OUTPUT_FILE" 2>/dev/null || echo "checkpoint at tool call $_COUNT")
+  else
+    _CONTENT="Tool call checkpoint: $_COUNT calls completed"
+  fi
+  curl -sf -X POST "$ATC_API/api/memory/ace/$SESSION_ID/write" \
+    -H "Content-Type: application/json" \
+    -d "{{\\"content\\": \\"$_CONTENT\\", \\"tool_call_count\\": $_COUNT}}" \
+    >/dev/null 2>&1 || true
+fi
 """
 
 _STOP_HOOK_BODY = """

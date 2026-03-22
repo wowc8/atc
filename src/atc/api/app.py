@@ -331,19 +331,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await budget_enforcer.start()
     app.state.budget_enforcer = budget_enforcer
 
-    # 13. Start QA loop controller
-    from atc.qa.loop import QALoopController
+    # 13. Start memory consolidation cron
+    from atc.memory.cron import MemoryCron
 
-    qa_loop = QALoopController(db, event_bus, ws_hub=ws_hub)
-    await qa_loop.start()
-    app.state.qa_loop = qa_loop
+    memory_cron = MemoryCron(db, event_bus, ws_hub=ws_hub)
+    await memory_cron.start()
+    app.state.memory_cron = memory_cron
 
     logger.info("ATC startup complete")
     yield
 
     # Shutdown
     logger.info("ATC shutting down")
-    await qa_loop.stop()
+    await memory_cron.stop()
     await budget_enforcer.stop()
     await github_tracker.stop()
     await cost_tracker.stop()
@@ -383,8 +383,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         feature_flags,
         heartbeat,
         leader,
+        memory,
         projects,
-        qa,
         task_graphs,
         tasks,
         tower,
@@ -404,7 +404,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(heartbeat.router, prefix="/api", tags=["heartbeat"])
     app.include_router(feature_flags.router, prefix="/api/feature-flags", tags=["feature_flags"])
     app.include_router(context.router, prefix="/api", tags=["context"])
-    app.include_router(qa.router, prefix="/api/qa", tags=["qa"])
+    app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
