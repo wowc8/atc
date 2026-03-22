@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAppContext } from "../../context/AppContext";
+import { BackupPanel } from "../settings/BackupPanel";
 import "./SettingsPane.css";
 
 interface Props {
@@ -70,6 +71,8 @@ export default function SettingsPane({ onClose }: Props) {
             </span>
           </div>
         </section>
+
+        <BackupPanel />
 
         <section className="panel settings-pane__section">
           <h3>Tower Status</h3>

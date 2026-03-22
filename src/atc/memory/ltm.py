@@ -349,3 +349,35 @@ class LongTermMemory:
             return {"value": parsed}
         except (json.JSONDecodeError, TypeError):
             return {"value": record.value}
+
+    @staticmethod
+    async def rebuild_embeddings(db: aiosqlite.Connection) -> int:
+        """Re-embed all tower_memory rows where embedding IS NULL.
+
+        Called after a restore to regenerate embeddings with the current model.
+        Returns the number of rows successfully re-embedded.
+        """
+        cursor = await db.execute(
+            "SELECT id, value FROM tower_memory WHERE embedding IS NULL"
+        )
+        rows = await cursor.fetchall()
+        count = 0
+        for row in rows:
+            embedding_floats = await _generate_embedding(str(row["value"]))
+            if embedding_floats is not None:
+                blob = _encode_embedding(embedding_floats)
+                await db.execute(
+                    "UPDATE tower_memory SET embedding = ? WHERE id = ?",
+                    (blob, row["id"]),
+                )
+                count += 1
+
+        if count:
+            await db.commit()
+
+        logger.info(
+            "Embedding rebuild: %d/%d rows re-embedded",
+            count,
+            len(rows),
+        )
+        return count

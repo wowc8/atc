@@ -84,6 +84,26 @@ class AgentProviderConfig(BaseModel):
     plugin_dirs: list[str] = []
 
 
+class BackupConfig(BaseModel):
+    """Configuration for the backup subsystem."""
+
+    auto_backup_enabled: bool = True
+    auto_backup_interval_hours: int = 24
+    local_backup_dir: str = "~/Documents/ATC Backups"
+    keep_last_n: int = 7
+    # Dropbox
+    dropbox_enabled: bool = False
+    dropbox_app_key: str = ""
+    dropbox_app_secret: str = ""
+    dropbox_refresh_token: str | None = None
+    # Google Drive
+    gdrive_enabled: bool = False
+    gdrive_client_id: str = ""
+    gdrive_client_secret: str = ""
+    gdrive_credentials: dict[str, Any] | None = None
+    gdrive_folder_id: str | None = None
+
+
 class Settings(BaseSettings):
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
@@ -97,6 +117,7 @@ class Settings(BaseSettings):
     sentry: SentryConfig = SentryConfig()
     agent_provider: AgentProviderConfig = AgentProviderConfig()
     qa_loop: QALoopConfig = QALoopConfig()
+    backup: BackupConfig = BackupConfig()
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

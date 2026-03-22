@@ -338,11 +338,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await memory_cron.start()
     app.state.memory_cron = memory_cron
 
+    # 14. Start backup service
+    from pathlib import Path as _Path
+
+    from atc.backup.service import BackupService
+
+    backup_cfg = settings.backup
+    backup_service = BackupService(
+        db_path=_Path(db_path),
+        config_path=_Path("config.yaml"),
+        backup_dir=_Path(backup_cfg.local_backup_dir).expanduser(),
+        keep_last_n=backup_cfg.keep_last_n,
+    )
+    app.state.backup_service = backup_service
+    if backup_cfg.auto_backup_enabled:
+        await backup_service.schedule_auto_backup(
+            interval_hours=backup_cfg.auto_backup_interval_hours
+        )
+
     logger.info("ATC startup complete")
     yield
 
     # Shutdown
     logger.info("ATC shutting down")
+    await backup_service.stop_auto_backup()
     await memory_cron.stop()
     await budget_enforcer.stop()
     await github_tracker.stop()
@@ -378,6 +397,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Register routers
     from atc.api.routers import (
         aces,
+        backup,
         context,
         failure_logs,
         feature_flags,
@@ -405,6 +425,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(feature_flags.router, prefix="/api/feature-flags", tags=["feature_flags"])
     app.include_router(context.router, prefix="/api", tags=["context"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
+    app.include_router(backup.router, prefix="/api/backup", tags=["backup"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
