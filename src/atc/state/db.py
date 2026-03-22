@@ -318,9 +318,37 @@ CREATE TABLE IF NOT EXISTS tower_memory (
     key         TEXT NOT NULL UNIQUE,
     value       TEXT NOT NULL,
     project_id  TEXT,
+    embedding   BLOB,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ace_stm (
+    id              TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    tool_call_count INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ace_stm_session_id ON ace_stm(session_id);
+CREATE INDEX IF NOT EXISTS idx_ace_stm_updated_at ON ace_stm(updated_at);
+
+CREATE TABLE IF NOT EXISTS memory_consolidation_runs (
+    id                TEXT PRIMARY KEY,
+    started_at        TEXT NOT NULL,
+    finished_at       TEXT,
+    entries_processed INTEGER NOT NULL DEFAULT 0,
+    entries_written   INTEGER NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'running'
+);
+
+CREATE INDEX IF NOT EXISTS idx_consolidation_runs_started_at
+    ON memory_consolidation_runs(started_at);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS tower_memory_fts
+    USING fts5(memory_id UNINDEXED, key, value);
 
 CREATE TABLE IF NOT EXISTS task_graphs (
     id              TEXT PRIMARY KEY,

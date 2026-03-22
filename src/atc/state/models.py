@@ -174,8 +174,29 @@ class TowerMemory:
     key: str
     value: str  # JSON
     project_id: str | None = None
+    embedding: bytes | None = None
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass
+class AceSTM:
+    id: str
+    session_id: str
+    content: str
+    tool_call_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class ConsolidationRun:
+    id: str
+    started_at: str
+    entries_processed: int = 0
+    entries_written: int = 0
+    status: str = "running"  # running | done | error
+    finished_at: str | None = None
 
 
 @dataclass
