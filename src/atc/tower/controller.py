@@ -256,7 +256,43 @@ class TowerController:
             )
             await self._db.commit()
 
-            # Persist context_entries to the DB so they are queryable
+            # Seed project metadata as context entries so the context panel is
+            # always populated, even on a fresh project with no prior context.
+            seed_entries = [
+                ("goal", "text", goal),
+            ]
+            if context_package.get("description"):
+                seed_entries.append(("project_description", "text", context_package["description"]))
+            if context_package.get("repo_path"):
+                seed_entries.append(("repo_path", "text", context_package["repo_path"]))
+            if context_package.get("github_repo"):
+                seed_entries.append(("github_repo", "text", context_package["github_repo"]))
+
+            for key, entry_type, value in seed_entries:
+                try:
+                    await db_ops.create_context_entry(
+                        self._db,
+                        scope="project",
+                        key=key,
+                        entry_type=entry_type,
+                        value=str(value),
+                        project_id=project_id,
+                        updated_by="tower",
+                    )
+                    await self._db.commit()
+                except Exception:
+                    # Update existing entry if key already exists
+                    try:
+                        await self._db.execute(
+                            "UPDATE context_entries SET value = ?, updated_at = datetime('now')"
+                            " WHERE project_id = ? AND key = ? AND scope = 'project'",
+                            (str(value), project_id, key),
+                        )
+                        await self._db.commit()
+                    except Exception:
+                        logger.debug("Could not seed context entry key=%r", key)
+
+            # Persist any additional context_entries from the context package
             for entry in context_package.get("context_entries", []):
                 try:
                     await db_ops.create_context_entry(
@@ -264,10 +300,11 @@ class TowerController:
                         scope="project",
                         key=entry.get("key", ""),
                         entry_type=entry.get("entry_type", "text"),
-                        value=entry.get("value", ""),
+                        value=str(entry.get("value", "")),
                         project_id=project_id,
                         updated_by="tower",
                     )
+                    await self._db.commit()
                 except Exception:
                     logger.debug(
                         "Context entry key=%r already exists for project %s — skipping",
