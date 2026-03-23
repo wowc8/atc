@@ -107,32 +107,84 @@ async def _spawn_pane(
     return pane_id
 
 
-async def _accept_trust_dialog(pane_id: str, *, timeout: float = 8.0) -> bool:
-    """Accept the Claude Code trust dialog if it appears.
+async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
+    """Accept all Claude Code startup confirmation dialogs.
 
-    Polls the pane output for the trust dialog prompt and sends Enter
-    to accept it.  Returns ``True`` if the dialog was detected and accepted,
-    ``False`` if no dialog appeared within *timeout* seconds.
+    Claude Code (v2+) shows up to two dialogs before becoming interactive:
+
+    Dialog 1 — API key selector (when ANTHROPIC_API_KEY is set):
+        "Detected a custom API key in your environment"
+        "Do you want to use this API key?"
+        ❯ 2. No (recommended)  ← default cursor position
+        → Send Enter to dismiss (keeps OAuth login, ignores the env key)
+
+    Dialog 2 — Bypass permissions confirmation (with --dangerously-skip-permissions):
+        "By proceeding, you accept all responsibility..."
+        ❯ 1. No, exit          ← default cursor position
+          2. Yes, I accept
+        → Send Down then Enter to select "Yes, I accept"
+
+    Legacy dialog — trust this folder:
+        → Send Enter to accept
+
+    Returns True if any dialog was detected and dismissed, False if Claude
+    started without showing any dialog within *timeout* seconds.
     """
     poll_interval = 0.5
     elapsed = 0.0
+    # Track which dialog types we've already handled to avoid re-triggering on
+    # the same pane output while waiting for the screen to clear.
+    dismissed: set[str] = set()
+
     while elapsed < timeout:
         try:
             output = await _capture_pane(pane_id)
-            if "trust this folder" in output.lower():
-                # Dialog is showing — send Enter to accept option 1
+            lowered = output.lower()
+
+            # Claude Code is running — all dialogs cleared
+            if "claude code" in lowered:
+                return bool(dismissed)
+
+            # Dialog 1: API key selector — Enter dismisses (selects "No")
+            if "api_key_selector" not in dismissed and (
+                "do you want to use this api key" in lowered
+                or ("detected" in lowered and "api key" in lowered)
+            ):
                 await _tmux_run("send-keys", "-t", pane_id, "Enter")
-                logger.info("Pane %s: accepted trust dialog", pane_id)
-                return True
-            # Claude Code already started (no trust dialog)
-            if "claude code" in output.lower():
-                return False
+                logger.info("Pane %s: dismissed API key selector dialog", pane_id)
+                dismissed.add("api_key_selector")
+                await asyncio.sleep(1.0)  # wait for next dialog to appear
+                continue
+
+            # Dialog 2: bypass permissions confirmation — Down then Enter selects "Yes"
+            if "bypass_permissions" not in dismissed and (
+                "bypass permissions" in lowered
+                or ("yes, i accept" in lowered and "no, exit" in lowered)
+            ):
+                await _tmux_run("send-keys", "-t", pane_id, "Down")
+                await asyncio.sleep(0.1)
+                await _tmux_run("send-keys", "-t", pane_id, "Enter")
+                logger.info("Pane %s: accepted bypass permissions dialog", pane_id)
+                dismissed.add("bypass_permissions")
+                await asyncio.sleep(1.0)
+                continue
+
+            # Legacy: trust this folder dialog — Enter accepts
+            if "trust_folder" not in dismissed and (
+                "trust this folder" in lowered or "do you trust" in lowered
+            ):
+                await _tmux_run("send-keys", "-t", pane_id, "Enter")
+                logger.info("Pane %s: accepted trust-folder dialog", pane_id)
+                dismissed.add("trust_folder")
+                await asyncio.sleep(1.0)
+                continue
+
         except RuntimeError:
             pass
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
-    logger.debug("Pane %s: no trust dialog detected within %.1fs", pane_id, timeout)
-    return False
+    logger.debug("Pane %s: dialog handling finished after %.1fs", pane_id, timeout)
+    return bool(dismissed)
 
 
 async def _kill_pane(pane_id: str) -> None:
