@@ -23,7 +23,8 @@ fi
 
 # Start backend
 echo "→ Starting backend (uvicorn with reload)..."
-(cd "$ROOT_DIR" && python3 -m uvicorn atc.api.app:create_app --factory --reload --host 127.0.0.1 --port 8420) &
+# PYTHONPATH=src ensures uvicorn always loads from source, not stale site-packages
+(cd "$ROOT_DIR" && PYTHONPATH="$ROOT_DIR/src" python3 -m uvicorn atc.api.app:create_app --factory --reload --host 127.0.0.1 --port 8420) &
 BACKEND_PID=$!
 
 # Start frontend
