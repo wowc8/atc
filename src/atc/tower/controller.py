@@ -508,14 +508,56 @@ class TowerController:
         return progress
 
     async def _send_leader_kickoff(self, session_id: str, goal: str) -> None:
-        """Send the initial kickoff message to the Leader pane."""
+        """Send the initial kickoff message to the Leader pane, including context."""
         if not self._current_project_id:
             return
         try:
-            kickoff_msg = (
-                f"Your goal is: {goal}\n\n"
-                "Begin immediately: decompose this goal into tasks, spawn Aces, and drive to completion."
+            # Fetch project metadata and context entries for a rich kickoff prompt
+            cursor = await self._db.execute(
+                "SELECT name, description, repo_path, github_repo FROM projects WHERE id = ?",
+                (self._current_project_id,),
             )
+            row = await cursor.fetchone()
+            project_name = row[0] if row else "Unknown"
+            description = row[1] if row else None
+            repo_path = row[2] if row else None
+            github_repo = row[3] if row else None
+
+            cursor = await self._db.execute(
+                "SELECT key, value FROM context_entries WHERE project_id = ? AND scope = 'project' ORDER BY created_at ASC",
+                (self._current_project_id,),
+            )
+            context_rows = await cursor.fetchall()
+
+            lines = [
+                f"# Mission Brief — {project_name}",
+                "",
+                f"## Goal",
+                goal,
+                "",
+            ]
+            if description:
+                lines += ["## Project Description", description, ""]
+            if repo_path:
+                lines += [f"## Repository", f"Local path: {repo_path}", ""]
+            if github_repo:
+                lines += [f"GitHub: {github_repo}", ""]
+            if context_rows:
+                lines += ["## Project Context", ""]
+                for key, val in context_rows:
+                    if key not in ("goal", "project_description", "repo_path", "github_repo"):
+                        lines += [f"**{key}:** {val}", ""]
+            lines += [
+                "## Your Instructions",
+                "1. Decompose the goal into well-scoped tasks using the API.",
+                "2. Spawn Aces for each ready task.",
+                "3. Monitor progress and drive to completion.",
+                "4. Report back to Tower when done.",
+                "",
+                "Begin NOW. Do not ask for clarification — start decomposing.",
+            ]
+            kickoff_msg = "\n".join(lines)
+
             await send_leader_message(
                 self._db,
                 self._current_project_id,
