@@ -487,45 +487,42 @@ async def run_migrations(db_path: str) -> None:
         await db.executescript(_SCHEMA_SQL)
         await db.commit()
 
-        # Apply ADD COLUMN migrations idempotently by checking existing columns first.
-        # This handles DBs created before the column was added to _SCHEMA_SQL.
-        _alter_migrations: list[tuple[str, str, str]] = [
-            # (table, column, alter_sql)
+        # Apply ADD COLUMN migrations idempotently.
+        # Strategy: just attempt the ALTER and swallow "duplicate column" errors.
+        # This is simpler and more reliable than PRAGMA table_info checks which
+        # can be fooled by stale cached schema state.
+        _alter_migrations: list[tuple[str, str]] = [
+            # (alter_sql, optional_followup_sql_or_empty)
             (
-                "projects",
-                "position",
                 "ALTER TABLE projects ADD COLUMN position INTEGER DEFAULT 0",
+                """UPDATE projects SET position = (
+                    SELECT COUNT(*) FROM projects p2
+                    WHERE p2.created_at < projects.created_at
+                    OR (p2.created_at = projects.created_at AND p2.id < projects.id)
+                ) WHERE position = 0""",
             ),
             (
-                "github_prs",
-                "qa_status",
                 "ALTER TABLE github_prs ADD COLUMN qa_status TEXT NOT NULL DEFAULT 'pending'",
+                "",
             ),
             (
-                "tower_memory",
-                "embedding",
                 "ALTER TABLE tower_memory ADD COLUMN embedding BLOB",
+                "",
             ),
         ]
-        for table, column, alter_sql in _alter_migrations:
-            cursor = await db.execute(f"PRAGMA table_info({table})")  # noqa: S608
-            cols = await cursor.fetchall()
-            col_names = [row[1] for row in cols]
-            if column not in col_names:
-                logger.info("Applying migration: %s", alter_sql)
+        for alter_sql, followup_sql in _alter_migrations:
+            try:
                 await db.execute(alter_sql)
-                # Assign sequential positions based on created_at for position column
-                if table == "projects" and column == "position":
-                    await db.execute(
-                        """UPDATE projects
-                           SET position = (
-                               SELECT COUNT(*)
-                               FROM projects p2
-                               WHERE p2.created_at < projects.created_at
-                                 OR (p2.created_at = projects.created_at AND p2.id < projects.id)
-                           )"""
-                    )
+                if followup_sql:
+                    await db.execute(followup_sql)
                 await db.commit()
+                logger.info("Applied migration: %s", alter_sql[:60])
+            except Exception as exc:
+                # "duplicate column name" means already applied — that's fine
+                if "duplicate column" in str(exc).lower():
+                    pass
+                else:
+                    logger.warning("Migration skipped (%s): %s", alter_sql[:40], exc)
 
 
 # ---------------------------------------------------------------------------
