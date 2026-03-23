@@ -512,10 +512,14 @@ class TowerController:
         if not self._current_project_id:
             return
         try:
+            kickoff_msg = (
+                f"Your goal is: {goal}\n\n"
+                "Begin immediately: decompose this goal into tasks, spawn Aces, and drive to completion."
+            )
             await send_leader_message(
                 self._db,
                 self._current_project_id,
-                "Start working on your goal now.",
+                kickoff_msg,
                 event_bus=self._event_bus,
             )
             logger.info(
