@@ -16,10 +16,9 @@ interface LeaderConsoleProps {
   onRefresh: () => Promise<void> | void;
 }
 
-type Tab = "tasks" | "github" | "budget";
+type Tab = "github" | "budget";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "tasks", label: "Tasks" },
   { id: "github", label: "GitHub" },
   { id: "budget", label: "Budget" },
 ];
@@ -34,7 +33,7 @@ export default function LeaderConsole({
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>("tasks");
+  const [activeTab, setActiveTab] = useState<Tab>("github");
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
@@ -213,13 +212,6 @@ export default function LeaderConsole({
 
       {/* Tab content */}
       <div className="leader-console__tab-content">
-        {activeTab === "tasks" && (
-          <div className="leader-console__tasks-placeholder">
-            <p className="leader-console__muted">
-              Task board coming soon — tasks tracked in the Tasks panel above.
-            </p>
-          </div>
-        )}
         {activeTab === "github" && (
           <GitHubPanel projectId={projectId} />
         )}
