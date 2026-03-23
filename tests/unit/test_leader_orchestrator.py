@@ -34,6 +34,18 @@ def event_bus() -> EventBus:
     return EventBus()
 
 
+@pytest.fixture(autouse=True)
+def reset_global_ace_counter():
+    """Reset the global Ace counter and lock before each test for isolation."""
+    import atc.leader.orchestrator as orch_mod
+
+    orch_mod._GLOBAL_ACTIVE_ACES = 0
+    orch_mod._GLOBAL_LOCK = None
+    yield
+    orch_mod._GLOBAL_ACTIVE_ACES = 0
+    orch_mod._GLOBAL_LOCK = None
+
+
 @pytest.fixture
 async def project_with_leader(db):
     """Create a project and leader, return (project, leader)."""
@@ -141,7 +153,7 @@ class TestSpawnAces:
         db,
         orchestrator: LeaderOrchestrator,
     ) -> None:
-        orchestrator._max_concurrent_aces = 2
+        orchestrator._governor._max = 2
 
         for i in range(5):
             await create_task_graph(db, orchestrator.project_id, f"Task {i}")
@@ -253,6 +265,48 @@ class TestSpawnAces:
         # Second call -- task is already in self.assignments, so skipped
         assignments2 = await orchestrator.spawn_aces_for_ready_tasks()
         assert len(assignments2) == 0
+
+    async def test_counter_not_inflated_for_already_assigned(
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """Pre-reserved slots must not be counted for already-assigned tasks."""
+        import atc.leader.orchestrator as orch_mod
+
+        tg1 = await create_task_graph(db, orchestrator.project_id, "Task A")
+        await create_task_graph(db, orchestrator.project_id, "Task B")
+
+        # Pre-assign the first task
+        orchestrator.assignments[tg1.id] = AceAssignment(
+            ace_session_id="existing-ace",
+            task_graph_id=tg1.id,
+            task_title="Task A",
+        )
+
+        assignments = await orchestrator.spawn_aces_for_ready_tasks()
+
+        assert len(assignments) == 1
+        assert assignments[0].task_title == "Task B"
+        # Counter should reflect exactly 1 active Ace, not 2
+        assert orch_mod._GLOBAL_ACTIVE_ACES == 1
+
+    async def test_counter_decremented_on_spawn_failure(
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """Counter must return to zero after a failed spawn."""
+        import atc.leader.orchestrator as orch_mod
+
+        mock_create.side_effect = RuntimeError("tmux exploded")
+        await create_task_graph(db, orchestrator.project_id, "Task A")
+
+        assignments = await orchestrator.spawn_aces_for_ready_tasks()
+        assert len(assignments) == 0
+        assert orch_mod._GLOBAL_ACTIVE_ACES == 0
 
 
 # ---------------------------------------------------------------------------
