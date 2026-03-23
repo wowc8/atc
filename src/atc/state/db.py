@@ -604,9 +604,21 @@ async def list_projects(
     else:
         sql = "SELECT * FROM projects WHERE name != ? ORDER BY position ASC, created_at ASC"
         params = ("Tower Workspace",)
-    cursor = await db.execute(sql, params)
-    rows = await cursor.fetchall()
-    return [Project(**dict(r)) for r in rows]
+    try:
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+        return [Project(**dict(r)) for r in rows]
+    except Exception:
+        # Fallback: position column may be missing — add it and retry once
+        try:
+            await db.execute("ALTER TABLE projects ADD COLUMN position INTEGER DEFAULT 0")
+            await db.commit()
+        except Exception:
+            pass  # already exists
+        fallback_sql = sql.replace(" position ASC,", "")
+        cursor = await db.execute(fallback_sql, params)
+        rows = await cursor.fetchall()
+        return [Project(**dict(r)) for r in rows]
 
 
 async def update_project_positions(
