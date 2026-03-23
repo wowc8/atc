@@ -60,10 +60,6 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
     "yes, i trust this folder",
     "no, exit",
     "security guide",
-    # Welcome/tips screen (Claude Code v2+ inline TUI overlay, alternate_on=0)
-    "tips for getting started",
-    "welcome to claude code",
-    "welcome back",
 )
 
 
@@ -179,8 +175,7 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
             output = await _capture_pane(pane_id)
             lowered = output.lower()
 
-            # Dialog 1: API key selector — select "Yes" when using a real key,
-            # otherwise send Enter to dismiss (selects "No", keeps OAuth).
+            # Dialog 1: API key selector — Enter dismisses (selects "No")
             if "api_key_selector" not in dismissed and (
                 "do you want to use this api key" in lowered
                 or ("detected" in lowered and "api key" in lowered)
@@ -226,35 +221,6 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
                 logger.info("Pane %s: accepted trust-folder dialog", pane_id)
                 dismissed.add("trust_folder")
                 await asyncio.sleep(1.0)
-                continue
-
-            # Dialog 4: Welcome / Tips screen (Claude Code v2+ inline overlay).
-            # Shows "Welcome back <name>" or "Welcome to Claude Code" with a
-            # "Tips for getting started" panel.  alternate_on stays 0 (not full
-            # alternate screen) but the overlay intercepts input — Escape clears it.
-            if "welcome_screen" not in dismissed and (
-                "tips for getting started" in lowered
-                or "welcome to claude code" in lowered
-                or ("welcome back" in lowered and "claude code" in lowered)
-            ):
-                await _tmux_run("send-keys", "-t", pane_id, "Escape")
-                logger.info("Pane %s: dismissed welcome/tips screen", pane_id)
-                dismissed.add("welcome_screen")
-                # Poll for up to 3s until the tips panel text is gone from output
-                _clear_elapsed = 0.0
-                while _clear_elapsed < 3.0:
-                    await asyncio.sleep(0.3)
-                    _clear_elapsed += 0.3
-                    try:
-                        _check = await _capture_pane(pane_id)
-                        _check_lower = _check.lower()
-                        if (
-                            "tips for getting started" not in _check_lower
-                            and "welcome to claude code" not in _check_lower
-                        ):
-                            break
-                    except RuntimeError:
-                        break
                 continue
 
             # Claude Code TUI is running — all dialogs cleared.
