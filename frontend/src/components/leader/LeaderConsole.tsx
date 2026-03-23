@@ -193,10 +193,6 @@ export default function LeaderConsole({
         <div className="leader-console__loading">Starting terminal...</div>
       )}
 
-      {leader?.goal && (
-        <p className="leader-console__goal">{leader.goal}</p>
-      )}
-
       {/* Terminal — always keep alive when running */}
       {(isRunning || (isClaudeCode && !!terminalChannel)) && (
         <div className="leader-console__terminal" ref={attachRef} />
