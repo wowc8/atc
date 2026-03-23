@@ -46,6 +46,22 @@ TUI_READY_POLL_INTERVAL = 0.5
 INSTRUCTION_VERIFY_DELAY = 2.0
 INSTRUCTION_MAX_RETRIES = 3
 
+# Strings that indicate a known startup dialog is on screen.
+# Used to guard against false-positive "Claude is running" detection —
+# the trust dialog body itself contains "Claude Code will be able to..."
+# which would otherwise trigger the early-exit before any dialog is handled.
+_DIALOG_TRIGGERS: tuple[str, ...] = (
+    "enter to confirm",
+    "trust this folder",
+    "do you trust",
+    "bypass permissions",
+    "do you want to use this api key",
+    "will be able to read",
+    "yes, i trust this folder",
+    "no, exit",
+    "security guide",
+)
+
 
 # ---------------------------------------------------------------------------
 # tmux helpers (thin wrappers around subprocess)
@@ -141,10 +157,6 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
             output = await _capture_pane(pane_id)
             lowered = output.lower()
 
-            # Claude Code is running — all dialogs cleared
-            if "claude code" in lowered:
-                return bool(dismissed)
-
             # Dialog 1: API key selector — Enter dismisses (selects "No")
             if "api_key_selector" not in dismissed and (
                 "do you want to use this api key" in lowered
@@ -169,15 +181,31 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
                 await asyncio.sleep(1.0)
                 continue
 
-            # Legacy: trust this folder dialog — Enter accepts
+            # Dialog 3: security guide / trust-folder (new variant, v2+)
+            #   Body: "Claude Code will be able to read, edit, and execute files here."
+            #   ❯ 1. Yes, I trust this folder   ← pre-selected
+            #     2. No, exit
+            #   Enter to confirm · Esc to cancel
+            # Option 1 is pre-selected — Enter accepts without arrow keys.
             if "trust_folder" not in dismissed and (
-                "trust this folder" in lowered or "do you trust" in lowered
+                "trust this folder" in lowered
+                or "do you trust" in lowered
+                or "yes, i trust this folder" in lowered
+                or "will be able to read" in lowered
             ):
                 await _tmux_run("send-keys", "-t", pane_id, "Enter")
                 logger.info("Pane %s: accepted trust-folder dialog", pane_id)
                 dismissed.add("trust_folder")
                 await asyncio.sleep(1.0)
                 continue
+
+            # Claude Code TUI is running — all dialogs cleared.
+            # NOTE: must run AFTER dialog checks. The trust dialog body text
+            # contains "Claude Code will be able to..." which would cause a
+            # false-positive early-exit if this check ran first.
+            # Guard: only exit early when no known dialog trigger strings present.
+            if "claude code" in lowered and not any(t in lowered for t in _DIALOG_TRIGGERS):
+                return bool(dismissed)
 
         except RuntimeError:
             pass

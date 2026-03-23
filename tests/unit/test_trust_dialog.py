@@ -116,14 +116,73 @@ async def test_legacy_trust_folder_dismissed_with_enter() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Dialog 3: Security guide / trust-folder (new v2+ variant)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_security_guide_trust_folder_dismissed_with_enter() -> None:
+    """New security guide dialog ('Yes, I trust this folder') is dismissed with Enter."""
+    outputs = [
+        (
+            "Claude Code will be able to read, edit, and execute files here.\n"
+            "Security guide\n"
+            "❯ 1. Yes, I trust this folder\n"
+            "  2. No, exit\n"
+            "Enter to confirm · Esc to cancel"
+        ),
+        "Claude Code — ready",  # second poll: TUI running, no dialog triggers
+    ]
+    with _patch_tmux() as mock_run, patch(
+        "atc.session.ace._capture_pane",
+        new=AsyncMock(side_effect=outputs),
+    ):
+        result = await _accept_trust_dialog("pane-sg1", timeout=5.0)
+
+    assert result is True
+    send_keys_calls = [c for c in mock_run.call_args_list if "send-keys" in c.args]
+    assert any("Enter" in c.args for c in send_keys_calls)
+
+
+@pytest.mark.asyncio
+async def test_security_guide_false_positive_regression() -> None:
+    """Regression: pane containing 'Claude Code will be able to read...' must NOT
+    early-exit before the dialog is handled — the body text contains 'claude code'
+    which previously triggered the 'already running' guard incorrectly."""
+    dialog_text = (
+        "Claude Code will be able to read, edit, and execute files here.\n"
+        "❯ 1. Yes, I trust this folder\n"
+        "  2. No, exit\n"
+        "Enter to confirm"
+    )
+    # Both polls return dialog text; function must dismiss it, not bail out early
+    outputs = [dialog_text, "Claude Code — ready"]
+    with _patch_tmux() as mock_run, patch(
+        "atc.session.ace._capture_pane",
+        new=AsyncMock(side_effect=outputs),
+    ):
+        result = await _accept_trust_dialog("pane-sg2", timeout=5.0)
+
+    assert result is True  # dialog WAS handled — not a false "already running"
+    send_keys_calls = [c for c in mock_run.call_args_list if "send-keys" in c.args]
+    # Enter must have been sent to dismiss the dialog
+    assert any("Enter" in c.args for c in send_keys_calls)
+
+
+# ---------------------------------------------------------------------------
 # Already running / no dialog
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_returns_false_when_already_running() -> None:
-    """Returns False without sending Enter when Claude Code TUI is already up."""
-    with _patch_tmux() as mock_run, _patch_pane("Welcome to Claude Code v2.1"):
+    """Returns False without sending Enter when Claude Code TUI is already up.
+
+    The 'already running' output must NOT contain any dialog trigger strings —
+    otherwise the guard would not fire. This tests clean TUI output with no
+    dialog keywords present.
+    """
+    with _patch_tmux() as mock_run, _patch_pane("Welcome to Claude Code v2.1\n> "):
         result = await _accept_trust_dialog("pane-5")
 
     assert result is False
