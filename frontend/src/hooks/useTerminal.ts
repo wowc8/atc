@@ -174,7 +174,9 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
             // Buffer writes if terminal isn't opened yet to avoid xterm.js
             // "dimensions" error from syncScrollArea on unopened terminals.
             if (termOpenRef.current && termRef.current) {
-              termRef.current.write(transformed);
+              termRef.current.write(transformed, () => {
+                termRef.current?.scrollToBottom();
+              });
             } else {
               pendingWritesRef.current.push(transformed);
             }
@@ -278,6 +280,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
               termRef.current.write(data);
             }
             pendingWritesRef.current = [];
+            termRef.current?.scrollToBottom();
           }
         });
       });
