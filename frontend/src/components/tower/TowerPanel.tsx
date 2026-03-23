@@ -26,6 +26,7 @@ export default function TowerPanel() {
 
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
@@ -41,16 +42,15 @@ export default function TowerPanel() {
     ? projects.find((p) => p.id === routeProjectId)
     : null;
 
-  // Determine which project ID to use: route context, or first active project
+  // Determine which project ID to use: route context, or first active project.
+  // Tower is global — it doesn't require a project to start.
   const resolvedProjectId =
     routeProjectId ??
-    (projects.find((p) => p.status === "active")?.id || "");
+    (projects.find((p) => p.status === "active")?.id ?? null);
 
   const resolvedProject = resolvedProjectId
     ? projects.find((p) => p.id === resolvedProjectId)
     : null;
-
-  const isClaudeCode = resolvedProject?.agent_provider === "claude_code";
 
   // Tower's own terminal channel (NOT the Leader's)
   const terminalChannel = towerDetail.current_session_id
@@ -59,7 +59,7 @@ export default function TowerPanel() {
 
   const { attachRef, fit } = useTerminal({
     channel: terminalChannel,
-    enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
+    enabled: (isRunning || !!terminalChannel) && !!terminalChannel,
   });
 
   // Reset auto-start flag when the resolved project changes so Tower
@@ -69,29 +69,27 @@ export default function TowerPanel() {
     userStopped.current = false;
   }, [resolvedProjectId]);
 
-  // Auto-start Tower session for claude_code provider.
+  // Auto-start Tower session when idle (Tower is global — not provider-gated).
   // Respects userStopped ref to prevent re-starting after manual Stop.
   useEffect(() => {
     if (
-      isClaudeCode &&
       isIdle &&
       !starting &&
       !autoStarted.current &&
-      !userStopped.current &&
-      resolvedProjectId
+      !userStopped.current
     ) {
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isClaudeCode, isIdle, starting, resolvedProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isIdle, starting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-fit terminal when panel expands
   useEffect(() => {
-    if (expanded && (isRunning || (isClaudeCode && !!terminalChannel))) {
+    if (expanded && (isRunning || !!terminalChannel)) {
       const timer = setTimeout(() => fit(), 200);
       return () => clearTimeout(timer);
     }
-  }, [expanded, isRunning, isClaudeCode, terminalChannel, fit]);
+  }, [expanded, isRunning, terminalChannel, fit]);
 
   // Auto-expand when Tower starts running
   useEffect(() => {
@@ -100,11 +98,12 @@ export default function TowerPanel() {
     }
   }, [isRunning]);
 
-  const contextLabel = deriveContextLabel(location.pathname, contextProject?.name);
+  const contextLabel = deriveContextLabel(location.pathname, contextProject?.name ?? resolvedProject?.name);
 
   const handleStart = useCallback(async () => {
     userStopped.current = false;
     setStarting(true);
+    setStartError(null);
     try {
       const res = await api.post<{ session_id?: string }>(
         "/tower/start",
@@ -121,7 +120,9 @@ export default function TowerPanel() {
       }
       setExpanded(true);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("Failed to start tower session:", err);
+      setStartError(msg);
     } finally {
       setStarting(false);
     }
@@ -155,7 +156,7 @@ export default function TowerPanel() {
       ? `Goal: ${towerDetail.current_goal}`
       : "Idle");
 
-  const showTerminal = isRunning || (isClaudeCode && !!terminalChannel);
+  const showTerminal = isRunning || !!terminalChannel;
 
   return (
     <div
@@ -197,6 +198,11 @@ export default function TowerPanel() {
               data-testid="tower-panel-progress"
             >
               {towerProgress.done}/{towerProgress.total} tasks ({towerProgress.progress_pct}%)
+            </span>
+          )}
+          {startError && (
+            <span className="tower-panel__error" title={startError}>
+              ⚠ Start failed
             </span>
           )}
           {!showTerminal && (
@@ -243,7 +249,7 @@ export default function TowerPanel() {
         )}
 
         {/* Loading state for auto-start */}
-        {isClaudeCode && !showTerminal && starting && (
+        {!showTerminal && starting && (
           <div className="tower-panel__loading">Starting Tower terminal...</div>
         )}
 
