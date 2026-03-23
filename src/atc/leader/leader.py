@@ -22,8 +22,8 @@ from atc.session.ace import (
     _accept_trust_dialog,
     _ensure_tmux_session,
     _kill_pane,
-    _send_keys,
     _spawn_pane,
+    send_instruction,
 )
 from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
@@ -130,9 +130,9 @@ async def start_leader(
             deployed.root,
         )
 
-        # Use the staging directory so Claude Code finds the deployed
-        # CLAUDE.md (Leader role/goal) and .claude/settings.json (hooks, model).
-        working_dir = str(deployed.root)
+        # Use repo_path if available so Claude Code starts in the actual repo;
+        # fall back to staging dir so it finds the deployed CLAUDE.md and hooks.
+        working_dir = spec.repo_path or str(deployed.root)
 
         launch_cmd = get_launch_command(
             project.agent_provider if project else "claude_code",
@@ -247,4 +247,4 @@ async def send_leader_message(
     if not await _pane_is_alive(session.tmux_pane):
         raise ValueError("Leader tmux pane is dead — stop and restart the leader")
 
-    await _send_keys(session.tmux_pane, message)
+    await send_instruction(session.tmux_pane, message)

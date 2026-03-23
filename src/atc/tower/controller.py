@@ -602,12 +602,22 @@ class TowerController:
                 return
 
             logger.warning(
-                "Leader session %s has no output yet (attempt %d/%d) — resending kickoff",
+                "Leader session %s has no output yet (attempt %d/%d) — sending nudge",
                 session_id,
                 attempt + 1,
                 max_retries,
             )
-            await self._send_leader_kickoff(session_id, goal)
+            try:
+                await send_leader_message(
+                    self._db,
+                    project_id,
+                    "Please continue with your goal.",
+                    event_bus=self._event_bus,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to send nudge to leader session %s", session_id
+                )
             await asyncio.sleep(retry_wait)
 
         # Final check after last retry
