@@ -111,7 +111,7 @@ class LeaderOrchestrator:
             _GLOBAL_ACTIVE_ACES += slots_to_use
 
         new_assignments: list[AceAssignment] = []
-        for tg in ready[:available_slots]:
+        for tg in ready[:slots_to_use]:
             # Skip if already assigned
             if tg.id in self.assignments:
                 continue
@@ -119,6 +119,9 @@ class LeaderOrchestrator:
             assignment = await self._spawn_ace_for_task(tg.id, tg.title, tg.description)
             if assignment is not None:
                 new_assignments.append(assignment)
+            else:
+                # Spawn failed — return the reserved slot to the global counter
+                _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
 
         return new_assignments
 

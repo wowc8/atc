@@ -119,7 +119,7 @@ class TestProjectCRUD:
 @patch("atc.session.ace._tmux_run", new_callable=AsyncMock)
 @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
 @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-@patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
+@patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
 class TestLeaderLifecycle:
     def test_start_leader(
         self,
@@ -267,7 +267,7 @@ class TestTowerStatus:
         # At least 1 session (the ace; leader session is only created on start)
         assert data["total_sessions"] >= 1
 
-    @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
+    @patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
     @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
     def test_submit_goal(
@@ -299,7 +299,7 @@ class TestTowerStatus:
         )
         assert resp.status_code == 404
 
-    @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
+    @patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
     @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
     def test_submit_goal_twice_while_managing_succeeds(
@@ -327,7 +327,7 @@ class TestTowerStatus:
 
     @patch("atc.tower.session.stop_tower_session", new_callable=AsyncMock)
     @patch("atc.leader.leader._kill_pane", new_callable=AsyncMock)
-    @patch("atc.leader.leader._send_keys", new_callable=AsyncMock)
+    @patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
     @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
     def test_stop_tower(
