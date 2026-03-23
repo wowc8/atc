@@ -612,11 +612,19 @@ async def list_projects(
         # Fallback: position column may be missing — add it and retry once
         try:
             await db.execute("ALTER TABLE projects ADD COLUMN position INTEGER DEFAULT 0")
+            # Backfill positions so ordering is stable after column is added
+            await db.execute(
+                """UPDATE projects SET position = (
+                    SELECT COUNT(*) FROM projects p2
+                    WHERE p2.created_at < projects.created_at
+                    OR (p2.created_at = projects.created_at AND p2.id < projects.id)
+                ) WHERE position = 0"""
+            )
             await db.commit()
         except Exception:
             pass  # already exists
-        fallback_sql = sql.replace(" position ASC,", "")
-        cursor = await db.execute(fallback_sql, params)
+        # Retry with original sql now that column exists
+        cursor = await db.execute(sql, params)
         rows = await cursor.fetchall()
         return [Project(**dict(r)) for r in rows]
 

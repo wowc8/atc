@@ -157,7 +157,9 @@ export default function ProjectView() {
           <h1>{project.name}</h1>
           <StatusBadge status={project.status} />
         </div>
-
+        {project.description && (
+          <p className="project-view__desc">{project.description}</p>
+        )}
       </div>
 
       {/* Main layout: top row (left+right) stacked above full-width context */}
