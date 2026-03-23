@@ -481,48 +481,48 @@ CREATE INDEX IF NOT EXISTS idx_backup_log_status ON backup_log(status);
 """
 
 
+async def _has_column(db: aiosqlite.Connection, table: str, column: str) -> bool:
+    """Return True if `column` exists in `table` (via PRAGMA table_info)."""
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    rows = await cursor.fetchall()
+    return any(row[1] == column for row in rows)
+
+
 async def run_migrations(db_path: str) -> None:
     """Create all tables (idempotent via IF NOT EXISTS) and apply ALTER TABLE migrations."""
     async with get_connection(db_path) as db:
         await db.executescript(_SCHEMA_SQL)
         await db.commit()
 
-        # Apply ADD COLUMN migrations idempotently.
-        # Strategy: just attempt the ALTER and swallow "duplicate column" errors.
-        # This is simpler and more reliable than PRAGMA table_info checks which
-        # can be fooled by stale cached schema state.
-        _alter_migrations: list[tuple[str, str]] = [
-            # (alter_sql, optional_followup_sql_or_empty)
-            (
-                "ALTER TABLE projects ADD COLUMN position INTEGER DEFAULT 0",
+        # --- projects.position ---
+        if not await _has_column(db, "projects", "position"):
+            logger.info("Migration: adding projects.position column")
+            await db.execute("ALTER TABLE projects ADD COLUMN position INTEGER DEFAULT 0")
+            await db.execute(
                 """UPDATE projects SET position = (
                     SELECT COUNT(*) FROM projects p2
                     WHERE p2.created_at < projects.created_at
                     OR (p2.created_at = projects.created_at AND p2.id < projects.id)
-                ) WHERE position = 0""",
-            ),
-            (
-                "ALTER TABLE github_prs ADD COLUMN qa_status TEXT NOT NULL DEFAULT 'pending'",
-                "",
-            ),
-            (
-                "ALTER TABLE tower_memory ADD COLUMN embedding BLOB",
-                "",
-            ),
-        ]
-        for alter_sql, followup_sql in _alter_migrations:
-            try:
-                await db.execute(alter_sql)
-                if followup_sql:
-                    await db.execute(followup_sql)
-                await db.commit()
-                logger.info("Applied migration: %s", alter_sql[:60])
-            except Exception as exc:
-                # "duplicate column name" means already applied — that's fine
-                if "duplicate column" in str(exc).lower():
-                    pass
-                else:
-                    logger.warning("Migration skipped (%s): %s", alter_sql[:40], exc)
+                ) WHERE position = 0"""
+            )
+            await db.commit()
+            logger.info("Migration complete: projects.position backfilled")
+        else:
+            logger.debug("Migration skip: projects.position already exists")
+
+        # --- github_prs.qa_status ---
+        if not await _has_column(db, "github_prs", "qa_status"):
+            logger.info("Migration: adding github_prs.qa_status column")
+            await db.execute(
+                "ALTER TABLE github_prs ADD COLUMN qa_status TEXT NOT NULL DEFAULT 'pending'"
+            )
+            await db.commit()
+
+        # --- tower_memory.embedding ---
+        if not await _has_column(db, "tower_memory", "embedding"):
+            logger.info("Migration: adding tower_memory.embedding column")
+            await db.execute("ALTER TABLE tower_memory ADD COLUMN embedding BLOB")
+            await db.commit()
 
 
 # ---------------------------------------------------------------------------
