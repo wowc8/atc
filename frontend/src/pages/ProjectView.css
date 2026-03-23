@@ -35,15 +35,23 @@
   color: var(--color-text-secondary);
 }
 
-/* Main layout: flex row, resize handle replaces the gap */
+/* Outer layout: column — top row stacked above full-width context */
 .project-view__layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Top row: left + right columns side by side */
+.project-view__top {
   display: flex;
   flex-direction: row;
   flex: 1;
   min-height: 0;
 }
 
-/* Left column: stacked panels separated by row resize handles */
+/* Left column: stacked panels separated by row resize handle */
 .project-view__left {
   display: flex;
   flex-direction: column;
@@ -57,14 +65,15 @@
   overflow-y: auto;
 }
 
+/* Aces fills remaining left-column space after tasks */
 .project-view__aces {
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 120px;
   overflow: hidden;
 }
 
 /* When an Ace is expanded, the panel grows to fill available space */
 .project-view__aces--expanded {
-  flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -77,14 +86,7 @@
   min-height: 0;
 }
 
-/* Context hub fills the remaining left-column space */
-.project-view__context {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-/* Right column: leader always full height */
+/* Right column: leader always full height of top row */
 .project-view__right {
   flex: 1;
   display: flex;
@@ -98,4 +100,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* Context panel: full width, fixed height controlled by JS state */
+.project-view__context {
+  flex-shrink: 0;
+  overflow-y: auto;
 }
