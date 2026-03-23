@@ -1,0 +1,26 @@
+.resize-handle {
+  flex-shrink: 0;
+  background: var(--color-border);
+  transition: background 0.15s;
+  z-index: 10;
+  user-select: none;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--color-accent, var(--color-primary));
+}
+
+/* Horizontal bar — sits between vertically stacked panels */
+.resize-handle--row {
+  width: 100%;
+  height: 4px;
+  cursor: row-resize;
+}
+
+/* Vertical bar — sits between left/right columns */
+.resize-handle--col {
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+}
