@@ -27,6 +27,20 @@ from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
 from atc.tracking.resources import ResourceGovernor
 
+# Global active Ace counter — shared across ALL orchestrator instances so
+# the per-machine limit is enforced even when multiple Leaders spawn Aces
+# simultaneously (each would otherwise see active_count=0).
+_GLOBAL_ACTIVE_ACES: int = 0
+_GLOBAL_LOCK = None  # asyncio.Lock, initialized lazily
+
+
+async def _get_global_lock() -> "asyncio.Lock":
+    import asyncio
+    global _GLOBAL_LOCK
+    if _GLOBAL_LOCK is None:
+        _GLOBAL_LOCK = asyncio.Lock()
+    return _GLOBAL_LOCK
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -80,20 +94,21 @@ class LeaderOrchestrator:
         if not ready:
             return []
 
-        # Count currently active Aces (across all assignments for this leader)
-        active_count = sum(
-            1 for a in self.assignments.values() if a.status in ("assigned", "working")
-        )
-        # Use ResourceGovernor for dynamic ceiling based on system load
-        available_slots = self._governor.available_ace_slots(active_count)
-
-        if available_slots == 0:
-            logger.info(
-                "Leader %s: no Ace slots available (active=%d, system load check)",
-                self.leader_id,
-                active_count,
-            )
-            return []
+        # Use GLOBAL active count so the limit is enforced across all Leaders/projects
+        global _GLOBAL_ACTIVE_ACES
+        lock = await _get_global_lock()
+        async with lock:
+            available_slots = self._governor.available_ace_slots(_GLOBAL_ACTIVE_ACES)
+            if available_slots == 0:
+                logger.info(
+                    "Leader %s: no Ace slots available (global_active=%d, system load check)",
+                    self.leader_id,
+                    _GLOBAL_ACTIVE_ACES,
+                )
+                return []
+            # Reserve slots atomically before spawning
+            slots_to_use = min(available_slots, len([tg for tg in get_ready_tasks(task_graphs) if tg.id not in self.assignments]))
+            _GLOBAL_ACTIVE_ACES += slots_to_use
 
         new_assignments: list[AceAssignment] = []
         for tg in ready[:available_slots]:
@@ -293,6 +308,9 @@ class LeaderOrchestrator:
 
         if assignment is not None:
             assignment.status = "done"
+            # Decrement global counter when an Ace finishes
+            global _GLOBAL_ACTIVE_ACES
+            _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
 
             # Destroy the Ace session (free resources)
             try:
@@ -331,6 +349,11 @@ class LeaderOrchestrator:
     ) -> None:
         """Handle a failed task — update status and clean up Ace."""
         assignment = self.assignments.get(task_graph_id)
+
+        # Decrement global counter when an Ace fails
+        if assignment and assignment.status in ("assigned", "working"):
+            global _GLOBAL_ACTIVE_ACES
+            _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
 
         # Update the assignment record status
         if assignment and assignment.assignment_id:
