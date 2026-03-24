@@ -110,6 +110,12 @@ async def _spawn_pane(
     """
     args = ["new-window", "-a", "-t", session_name, "-d", "-P", "-F", "#{pane_id}"]
     if working_dir:
+        # Ensure the directory exists — tmux silently falls back to $HOME if the
+        # working_dir does not exist, which causes Claude Code to start in the wrong place.
+        import os as _os
+        if not _os.path.isdir(working_dir):
+            _os.makedirs(working_dir, exist_ok=True)
+            logger.info("_spawn_pane: created missing working_dir %s", working_dir)
         args.extend(["-c", working_dir])
     if command:
         args.extend([command])
