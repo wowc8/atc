@@ -132,6 +132,12 @@ async def start_leader(
 
         # Use repo_path if available so Claude Code starts in the actual repo;
         # fall back to staging dir so it finds the deployed CLAUDE.md and hooks.
+        # Ensure the directory exists — tmux silently falls back to $HOME if the
+        # working_dir does not exist, causing Claude Code to start in the wrong place.
+        if spec.repo_path:
+            import os as _os
+            _os.makedirs(spec.repo_path, exist_ok=True)
+            logger.info("Ensured repo_path exists: %s", spec.repo_path)
         working_dir = spec.repo_path or str(deployed.root)
 
         launch_cmd = get_launch_command(

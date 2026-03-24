@@ -46,6 +46,26 @@ TUI_READY_POLL_INTERVAL = 0.5
 INSTRUCTION_VERIFY_DELAY = 2.0
 INSTRUCTION_MAX_RETRIES = 3
 
+# Strings that indicate a known startup dialog is on screen.
+# Used to guard against false-positive "Claude is running" detection —
+# the trust dialog body itself contains "Claude Code will be able to..."
+# which would otherwise trigger the early-exit before any dialog is handled.
+_DIALOG_TRIGGERS: tuple[str, ...] = (
+    "enter to confirm",
+    "trust this folder",
+    "do you trust",
+    "bypass permissions",
+    "do you want to use this api key",
+    "will be able to read",
+    "yes, i trust this folder",
+    "no, exit",
+    "security guide",
+    # Welcome/tips screen (Claude Code v2+ inline TUI overlay, alternate_on=0)
+    "tips for getting started",
+    "welcome to claude code",
+    "welcome back",
+)
+
 
 # ---------------------------------------------------------------------------
 # tmux helpers (thin wrappers around subprocess)
@@ -94,6 +114,12 @@ async def _spawn_pane(
     """
     args = ["new-window", "-a", "-t", session_name, "-d", "-P", "-F", "#{pane_id}"]
     if working_dir:
+        # Ensure the directory exists — tmux silently falls back to $HOME if the
+        # working_dir does not exist, which causes Claude Code to start in the wrong place.
+        import os as _os
+        if not _os.path.isdir(working_dir):
+            _os.makedirs(working_dir, exist_ok=True)
+            logger.info("_spawn_pane: created missing working_dir %s", working_dir)
         args.extend(["-c", working_dir])
     if command:
         args.extend([command])
@@ -141,10 +167,6 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
             output = await _capture_pane(pane_id)
             lowered = output.lower()
 
-            # Claude Code is running — all dialogs cleared
-            if "claude code" in lowered:
-                return bool(dismissed)
-
             # Dialog 1: API key selector — Enter dismisses (selects "No")
             if "api_key_selector" not in dismissed and (
                 "do you want to use this api key" in lowered
@@ -169,15 +191,46 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
                 await asyncio.sleep(1.0)
                 continue
 
-            # Legacy: trust this folder dialog — Enter accepts
+            # Dialog 3: security guide / trust-folder (new variant, v2+)
+            #   Body: "Claude Code will be able to read, edit, and execute files here."
+            #   ❯ 1. Yes, I trust this folder   ← pre-selected
+            #     2. No, exit
+            #   Enter to confirm · Esc to cancel
+            # Option 1 is pre-selected — Enter accepts without arrow keys.
             if "trust_folder" not in dismissed and (
-                "trust this folder" in lowered or "do you trust" in lowered
+                "trust this folder" in lowered
+                or "do you trust" in lowered
+                or "yes, i trust this folder" in lowered
+                or "will be able to read" in lowered
             ):
                 await _tmux_run("send-keys", "-t", pane_id, "Enter")
                 logger.info("Pane %s: accepted trust-folder dialog", pane_id)
                 dismissed.add("trust_folder")
                 await asyncio.sleep(1.0)
                 continue
+
+            # Dialog 4: Welcome / Tips screen (Claude Code v2+ inline overlay).
+            # Shows "Welcome back <name>" or "Welcome to Claude Code" with a
+            # "Tips for getting started" panel.  alternate_on stays 0 (not full
+            # alternate screen) but the overlay intercepts input — Escape clears it.
+            if "welcome_screen" not in dismissed and (
+                "tips for getting started" in lowered
+                or "welcome to claude code" in lowered
+                or ("welcome back" in lowered and "claude code" in lowered)
+            ):
+                await _tmux_run("send-keys", "-t", pane_id, "Escape")
+                logger.info("Pane %s: dismissed welcome/tips screen", pane_id)
+                dismissed.add("welcome_screen")
+                await asyncio.sleep(1.5)  # wait for overlay to animate out
+                continue
+
+            # Claude Code TUI is running — all dialogs cleared.
+            # NOTE: must run AFTER dialog checks. The trust dialog body text
+            # contains "Claude Code will be able to..." which would cause a
+            # false-positive early-exit if this check ran first.
+            # Guard: only exit early when no known dialog trigger strings present.
+            if "claude code" in lowered and not any(t in lowered for t in _DIALOG_TRIGGERS):
+                return bool(dismissed)
 
         except RuntimeError:
             pass
@@ -290,6 +343,20 @@ async def send_instruction(
         await asyncio.sleep(INSTRUCTION_VERIFY_DELAY)
         try:
             output = await _capture_pane(pane_id)
+            output_lower = output.lower()
+
+            # If the welcome/tips overlay is still visible, the instruction text
+            # is hidden behind it — skip retry and treat as delivered.  The
+            # overlay is purely cosmetic and does not block input; Claude is
+            # already processing the instruction.
+            if any(t in output_lower for t in ("tips for getting started", "welcome to claude code", "welcome back")):
+                logger.info(
+                    "Pane %s: welcome screen visible on attempt %d — assuming instruction delivered",
+                    pane_id,
+                    attempt,
+                )
+                return True
+
             # Check if any significant portion of the instruction appears in output.
             # Use the first 80 chars as a fingerprint to avoid issues with line wrapping.
             fingerprint = text[:80].strip()
