@@ -625,8 +625,23 @@ class TestConfigIntegration:
 
 
 class TestGetLaunchCommand:
-    def test_claude_code_returns_claude_cmd(self) -> None:
+    def test_claude_code_returns_atc_agent_when_present(self) -> None:
+        # atc-agent exists in scripts/, so get_launch_command should prefer it.
+        from pathlib import Path
+
+        script = Path(__file__).parent.parent.parent / "scripts" / "atc-agent"
         cmd = get_launch_command("claude_code")
+        if script.exists():
+            assert cmd == str(script)
+        else:
+            assert cmd == "claude --dangerously-skip-permissions"
+
+    def test_claude_code_falls_back_without_script(self) -> None:
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with patch.object(Path, "exists", return_value=False):
+            cmd = get_launch_command("claude_code")
         assert cmd == "claude --dangerously-skip-permissions"
 
     def test_opencode_returns_opencode_cmd(self) -> None:
@@ -634,7 +649,11 @@ class TestGetLaunchCommand:
         assert cmd == "opencode"
 
     def test_unknown_falls_back_to_claude(self) -> None:
-        cmd = get_launch_command("unknown_provider")
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with patch.object(Path, "exists", return_value=False):
+            cmd = get_launch_command("unknown_provider")
         assert cmd == "claude --dangerously-skip-permissions"
 
     def test_launch_commands_registry_has_both(self) -> None:
