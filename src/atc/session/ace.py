@@ -60,6 +60,10 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
     "yes, i trust this folder",
     "no, exit",
     "security guide",
+    # Welcome/tips screen (Claude Code v2+ inline TUI overlay, alternate_on=0)
+    "tips for getting started",
+    "welcome to claude code",
+    "welcome back",
 )
 
 
@@ -203,6 +207,21 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
                 logger.info("Pane %s: accepted trust-folder dialog", pane_id)
                 dismissed.add("trust_folder")
                 await asyncio.sleep(1.0)
+                continue
+
+            # Dialog 4: Welcome / Tips screen (Claude Code v2+ inline overlay).
+            # Shows "Welcome back <name>" or "Welcome to Claude Code" with a
+            # "Tips for getting started" panel.  alternate_on stays 0 (not full
+            # alternate screen) but the overlay intercepts input — Escape clears it.
+            if "welcome_screen" not in dismissed and (
+                "tips for getting started" in lowered
+                or "welcome to claude code" in lowered
+                or ("welcome back" in lowered and "claude code" in lowered)
+            ):
+                await _tmux_run("send-keys", "-t", pane_id, "Escape")
+                logger.info("Pane %s: dismissed welcome/tips screen", pane_id)
+                dismissed.add("welcome_screen")
+                await asyncio.sleep(1.5)  # wait for overlay to animate out
                 continue
 
             # Claude Code TUI is running — all dialogs cleared.
