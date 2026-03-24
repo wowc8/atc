@@ -343,6 +343,20 @@ async def send_instruction(
         await asyncio.sleep(INSTRUCTION_VERIFY_DELAY)
         try:
             output = await _capture_pane(pane_id)
+            output_lower = output.lower()
+
+            # If the welcome/tips overlay is still visible, the instruction text
+            # is hidden behind it — skip retry and treat as delivered.  The
+            # overlay is purely cosmetic and does not block input; Claude is
+            # already processing the instruction.
+            if any(t in output_lower for t in ("tips for getting started", "welcome to claude code", "welcome back")):
+                logger.info(
+                    "Pane %s: welcome screen visible on attempt %d — assuming instruction delivered",
+                    pane_id,
+                    attempt,
+                )
+                return True
+
             # Check if any significant portion of the instruction appears in output.
             # Use the first 80 chars as a fingerprint to avoid issues with line wrapping.
             fingerprint = text[:80].strip()
