@@ -134,6 +134,53 @@ async def start_tower_session(
                 },
             )
 
+    # Before creating a new session, check for a reusable disconnected session
+    # that still has its staging directory with CLAUDE.md deployed.
+    # `existing` is ordered by created_at DESC, so the first match is most recent.
+    for sess in existing:
+        staging_dir = Path(_DEFAULT_STAGING_ROOT) / sess.id
+        if (staging_dir / "CLAUDE.md").is_file():
+            logger.info(
+                "Reusing disconnected tower session %s — CLAUDE.md present at %s",
+                sess.id,
+                staging_dir,
+            )
+            await db_ops.update_session_status(conn, sess.id, SessionStatus.CONNECTING.value)
+            if event_bus:
+                await event_bus.publish(
+                    "session_status_changed",
+                    {
+                        "session_id": sess.id,
+                        "previous_status": sess.status,
+                        "new_status": SessionStatus.CONNECTING.value,
+                    },
+                )
+            working_dir = str(staging_dir)
+            _log_working_dir_contents(working_dir, sess.id, "start_tower_session:reuse")
+            try:
+                provider = project.agent_provider if project else "claude_code"
+                launch_cmd = get_launch_command(provider)
+                await _ensure_tmux_session(ATC_TMUX_SESSION)
+                pane_id = await _spawn_pane(ATC_TMUX_SESSION, launch_cmd, working_dir=working_dir)
+                await _accept_trust_dialog(pane_id)
+                await db_ops.update_session_tmux(conn, sess.id, ATC_TMUX_SESSION, pane_id)
+                await transition(sess.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
+                await db_ops.update_session_status(conn, sess.id, SessionStatus.IDLE.value)
+            except Exception as exc:
+                logger.exception("Failed to spawn tower pane for reused session %s", sess.id)
+                await db_ops.update_session_status(conn, sess.id, SessionStatus.ERROR.value)
+                if event_bus:
+                    await event_bus.publish(
+                        "session_status_changed",
+                        {
+                            "session_id": sess.id,
+                            "previous_status": SessionStatus.CONNECTING.value,
+                            "new_status": SessionStatus.ERROR.value,
+                        },
+                    )
+                raise RuntimeError(str(exc)) from exc
+            return sess.id
+
     session = await db_ops.create_session(
         conn,
         project_id=project_id,
