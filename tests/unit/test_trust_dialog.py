@@ -180,9 +180,9 @@ async def test_returns_false_when_already_running() -> None:
 
     The 'already running' output must NOT contain any dialog trigger strings —
     otherwise the guard would not fire. This tests clean TUI output with no
-    dialog keywords present.
+    dialog keywords present (e.g. a Claude Code prompt after startup).
     """
-    with _patch_tmux() as mock_run, _patch_pane("Welcome to Claude Code v2.1\n> "):
+    with _patch_tmux() as mock_run, _patch_pane("Claude Code v2.1 ready\n❯ "):
         result = await _accept_trust_dialog("pane-5")
 
     assert result is False

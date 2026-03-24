@@ -221,7 +221,21 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
                 await _tmux_run("send-keys", "-t", pane_id, "Escape")
                 logger.info("Pane %s: dismissed welcome/tips screen", pane_id)
                 dismissed.add("welcome_screen")
-                await asyncio.sleep(1.5)  # wait for overlay to animate out
+                # Poll for up to 3s until the tips panel text is gone from output
+                _clear_elapsed = 0.0
+                while _clear_elapsed < 3.0:
+                    await asyncio.sleep(0.3)
+                    _clear_elapsed += 0.3
+                    try:
+                        _check = await _capture_pane(pane_id)
+                        _check_lower = _check.lower()
+                        if (
+                            "tips for getting started" not in _check_lower
+                            and "welcome to claude code" not in _check_lower
+                        ):
+                            break
+                    except RuntimeError:
+                        break
                 continue
 
             # Claude Code TUI is running — all dialogs cleared.
@@ -279,6 +293,45 @@ async def _get_alternate_on(pane_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+async def wait_for_prompt(
+    pane_id: str,
+    *,
+    timeout: float = 10.0,
+    poll_interval: float = 0.5,
+) -> bool:
+    """Wait until the pane shows an empty prompt with alternate_on == 0.
+
+    Checks two conditions simultaneously:
+    1. alternate_on == 0 (no full-screen TUI active)
+    2. A bare prompt line: starts with '❯' or '> ' with nothing after it
+
+    Returns True when both conditions are met within *timeout* seconds,
+    False otherwise.
+    """
+    import re as _re
+
+    _PROMPT_RE = _re.compile(r"^[❯>]\s*$", _re.MULTILINE)
+
+    elapsed = 0.0
+    while elapsed < timeout:
+        try:
+            alt_on = await _get_alternate_on(pane_id)
+            if not alt_on:
+                output = await _capture_pane(pane_id)
+                if _PROMPT_RE.search(output):
+                    return True
+        except RuntimeError:
+            return False
+        await asyncio.sleep(poll_interval)
+        elapsed += poll_interval
+    logger.warning(
+        "Pane %s: prompt not ready after %.1fs (wait_for_prompt timed out)",
+        pane_id,
+        timeout,
+    )
+    return False
+
+
 async def check_tui_ready(
     pane_id: str,
     *,
@@ -327,8 +380,12 @@ async def send_instruction(
     Returns ``True`` if the instruction was verified (or verification skipped).
     """
     for attempt in range(1, max_retries + 1):
-        # Step 1: TUI readiness
-        ready = await check_tui_ready(pane_id)
+        # Step 1: TUI readiness — use prompt-ready polling for first attempt
+        # to ensure the welcome screen has fully cleared before sending.
+        if attempt == 1:
+            ready = await wait_for_prompt(pane_id)
+        else:
+            ready = await check_tui_ready(pane_id)
         if not ready:
             logger.warning("Pane %s: TUI not ready on attempt %d/%d", pane_id, attempt, max_retries)
             continue
