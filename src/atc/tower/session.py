@@ -86,7 +86,14 @@ async def start_tower_session(
 
     # Check for existing tower session — validate tmux pane is actually alive
     # AND that the Tower identity files are deployed at the working directory.
-    existing = await db_ops.list_sessions(conn, project_id=project_id, session_type="tower")
+    # Search ALL tower sessions (not just the anchor project) so we don't
+    # create a new Tower session every restart when the anchor project changes.
+    cursor = await conn.execute(
+        "SELECT * FROM sessions WHERE session_type = 'tower' ORDER BY created_at DESC LIMIT 20"
+    )
+    rows = await cursor.fetchall()
+    from atc.state.db import _row_to_session
+    existing = [_row_to_session(r) for r in rows]
     for sess in existing:
         if sess.status in (SessionStatus.ERROR.value, SessionStatus.DISCONNECTED.value):
             continue
