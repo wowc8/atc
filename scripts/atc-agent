@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# atc-agent — thin wrapper that guarantees workspace setup before exec-ing claude.
+#
+# Env vars:
+#   ATC_SESSION_ID   — session identifier (informational)
+#   ATC_ROLE         — tower | leader | ace
+#   ATC_REPO_PATH    — path to the repository working directory
+#   ATC_STAGING_DIR  — path to the staging directory
+#
+# Extra args ($@) are passed through to claude.
+
+set -euo pipefail
+
+# 1. Ensure repo directory exists.
+if [[ -n "${ATC_REPO_PATH:-}" ]]; then
+    mkdir -p "${ATC_REPO_PATH}"
+fi
+
+# 2. Copy CLAUDE.md from staging to repo dir if not already present.
+if [[ -n "${ATC_STAGING_DIR:-}" && -n "${ATC_REPO_PATH:-}" ]]; then
+    if [[ -f "${ATC_STAGING_DIR}/CLAUDE.md" && ! -f "${ATC_REPO_PATH}/CLAUDE.md" ]]; then
+        cp "${ATC_STAGING_DIR}/CLAUDE.md" "${ATC_REPO_PATH}/CLAUDE.md"
+    fi
+fi
+
+# 3. cd into the appropriate directory.
+if [[ -n "${ATC_REPO_PATH:-}" ]]; then
+    cd "${ATC_REPO_PATH}"
+elif [[ -n "${ATC_STAGING_DIR:-}" ]]; then
+    cd "${ATC_STAGING_DIR}"
+fi
+
+# 4. Hand off to claude.
+exec claude --dangerously-skip-permissions "$@"

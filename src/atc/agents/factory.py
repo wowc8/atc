@@ -77,7 +77,16 @@ def get_provider_info(name: str) -> ProviderMetadata | None:
 
 
 def get_launch_command(provider_name: str) -> str:
-    """Return the shell launch command for a given provider name."""
+    """Return the shell launch command for a given provider name.
+
+    For the ``claude_code`` provider, if the bundled ``scripts/atc-agent``
+    wrapper exists it is returned instead of the bare ``claude`` command so
+    that workspace setup is guaranteed before Claude starts.
+    """
+    if provider_name == "claude_code":
+        script = Path(__file__).parent.parent.parent.parent / "scripts" / "atc-agent"
+        if script.exists():
+            return str(script)
     return _LAUNCH_COMMANDS.get(provider_name, _LAUNCH_COMMANDS["claude_code"])
 
 
