@@ -224,6 +224,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     ws_hub.on_heartbeat(_on_ws_heartbeat)
 
+    # 6b. Run startup cleanup — remove orphaned sessions and staging dirs
+    from atc.core.cleanup import run_startup_cleanup
+
+    try:
+        cleanup_totals = await run_startup_cleanup(db)
+        logger.info("Startup cleanup: %s", cleanup_totals)
+    except Exception:
+        logger.exception("Startup cleanup failed — continuing")
+
     # 7. Reconnect sessions that were active at last shutdown
     from atc.session.reconnect import reconnect_all
     from atc.state import db as db_ops
@@ -436,6 +445,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         memory,
         projects,
         qa,
+        system,
         task_graphs,
         tasks,
         tower,
@@ -458,6 +468,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
     app.include_router(backup.router, prefix="/api/backup", tags=["backup"])
     app.include_router(qa.router, prefix="/api/qa", tags=["qa"])
+    app.include_router(system.router, prefix="/api/system", tags=["system"])
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
