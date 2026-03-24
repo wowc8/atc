@@ -23,6 +23,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from atc.config import load_settings
 from atc.leader.context_package import build_context_package
 from atc.leader.leader import send_leader_message, start_leader, stop_leader
 from atc.state import db as db_ops
@@ -69,6 +70,7 @@ class TowerController:
         db: aiosqlite.Connection,
         event_bus: EventBus,
         ws_hub: WsHub | None = None,
+        max_concurrent_aces: int | None = None,
     ) -> None:
         self._db = db
         self._event_bus = event_bus
@@ -88,9 +90,19 @@ class TowerController:
         # Budget constraint flag — set when budget_warning fires, cleared on budget_ok
         self._budget_constrained = False
 
+        # Concurrent session limit — counts active leader + ace sessions
+        if max_concurrent_aces is None:
+            try:
+                max_concurrent_aces = load_settings().tower.max_concurrent_aces
+            except Exception:
+                max_concurrent_aces = 5
+        self._max_concurrent_aces: int = max_concurrent_aces
+        self._active_ace_count: int = 0
+
         # Subscribe to leader session events for monitoring
         self._event_bus.subscribe("session_status_changed", self._on_session_status_changed)
         self._event_bus.subscribe("pty_output", self._on_leader_output)
+        self._event_bus.subscribe("session_created", self._on_session_created)
 
         # Subscribe to budget events for proactive slowdown
         self._event_bus.subscribe("budget_warning", self._on_budget_warning)
@@ -231,6 +243,15 @@ class TowerController:
                 "Skipping new Ace spawn — budget constrained (project %s)", project_id
             )
             raise BudgetConstrainedError(project_id)
+
+        if self._active_ace_count >= self._max_concurrent_aces:
+            logger.warning(
+                "Skipping new session spawn — at capacity (active=%d, max=%d, project=%s)",
+                self._active_ace_count,
+                self._max_concurrent_aces,
+                project_id,
+            )
+            raise TowerBusyError(self._state, project_id, detail="at capacity")
 
         # Reset to idle first if coming from complete/error
         if self._state in (TowerState.COMPLETE, TowerState.ERROR):
@@ -421,6 +442,8 @@ class TowerController:
             "current_session_id": self._current_session_id,
             "leader_session_id": self._leader_session_id,
             "output_line_count": len(self._leader_output_lines),
+            "active_ace_count": self._active_ace_count,
+            "max_aces": self._max_concurrent_aces,
         }
 
     async def send_message(self, message: str) -> None:
@@ -668,6 +691,18 @@ class TowerController:
                     },
                 )
 
+    async def _on_session_created(self, data: dict[str, Any]) -> None:
+        """Increment active ace counter when a leader or ace session is created."""
+        session_type = data.get("session_type", "")
+        if session_type in ("leader", "ace"):
+            self._active_ace_count += 1
+            logger.debug(
+                "Session created (type=%s) — active_ace_count=%d/%d",
+                session_type,
+                self._active_ace_count,
+                self._max_concurrent_aces,
+            )
+
     async def _on_budget_warning(self, data: dict[str, Any]) -> None:
         """Handle budget_warning event — pause new Ace spawns."""
         project_id = data.get("project_id", "unknown")
@@ -682,9 +717,30 @@ class TowerController:
         logger.info("Budget back below threshold — resuming Ace spawns")
 
     async def _on_session_status_changed(self, data: dict[str, Any]) -> None:
-        """Monitor Leader session status changes for error detection."""
+        """Monitor Leader session status changes for error detection and counter updates."""
         session_id = data.get("session_id")
         new_status = data.get("new_status")
+
+        # Decrement active counter when any leader/ace session reaches a terminal status
+        _TERMINAL_STATUSES = {"disconnected", "error", "completed", "cancelled"}
+        if new_status in _TERMINAL_STATUSES:
+            # Look up session type to decide if this counts against our limit
+            try:
+                cursor = await self._db.execute(
+                    "SELECT session_type FROM sessions WHERE id = ?", (session_id,)
+                )
+                row = await cursor.fetchone()
+                if row and row[0] in ("leader", "ace"):
+                    self._active_ace_count = max(0, self._active_ace_count - 1)
+                    logger.debug(
+                        "Session %s terminal (status=%s) — active_ace_count=%d/%d",
+                        session_id,
+                        new_status,
+                        self._active_ace_count,
+                        self._max_concurrent_aces,
+                    )
+            except Exception:
+                logger.debug("Could not look up session type for %s during status change", session_id)
 
         if session_id != self._leader_session_id:
             return
@@ -721,12 +777,14 @@ class InvalidTowerTransitionError(Exception):
 class TowerBusyError(Exception):
     """Raised when a goal is submitted while the tower is busy."""
 
-    def __init__(self, state: TowerState, project_id: str) -> None:
+    def __init__(self, state: TowerState, project_id: str, detail: str | None = None) -> None:
         self.state = state
         self.project_id = project_id
-        super().__init__(
-            f"Tower is busy (state={state.value}), cannot accept goal for {project_id}"
-        )
+        self.detail = detail
+        msg = f"Tower is busy (state={state.value}), cannot accept goal for {project_id}"
+        if detail:
+            msg = f"{msg}: {detail}"
+        super().__init__(msg)
 
 
 class BudgetConstrainedError(Exception):

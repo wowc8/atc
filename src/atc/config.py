@@ -24,6 +24,7 @@ class DatabaseConfig(BaseModel):
 class TowerConfig(BaseModel):
     enabled: bool = True
     auto_start: bool = False
+    max_concurrent_aces: int = 5
 
 
 class ResourceMonitorConfig(BaseModel):
