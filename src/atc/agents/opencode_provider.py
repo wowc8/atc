@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
 from atc.agents.base import (
     OutputChunk,
@@ -314,6 +315,23 @@ class OpenCodeProvider:
             status = _STATUS_MAP.get(api_status, SessionStatus.IDLE)
             sessions.append(SessionInfo(session_id=sid, status=status, metadata=item))
         return sessions
+
+    async def prepare_workspace(
+        self,
+        session_id: str,
+        *,
+        working_dir: str,
+        context_file: Path | None = None,
+    ) -> None:
+        """No-op for OpenCode — workspace prep is handled by the server."""
+
+    async def is_ready(self, session_id: str) -> bool:
+        """Return True when the session is tracked and not in error state."""
+        try:
+            info = await self.get_status(session_id)
+            return info.status not in (SessionStatus.ERROR, SessionStatus.STOPPED)
+        except ProviderError:
+            return False
 
     # ------------------------------------------------------------------
     # Internal helpers

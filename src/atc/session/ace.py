@@ -329,7 +329,7 @@ async def wait_for_prompt(
     """
     import re as _re
 
-    _PROMPT_RE = _re.compile(r"^[❯>]\s*$", _re.MULTILINE)
+    _prompt_re = _re.compile(r"^[❯>]\s*$", _re.MULTILINE)
 
     elapsed = 0.0
     while elapsed < timeout:
@@ -337,7 +337,7 @@ async def wait_for_prompt(
             alt_on = await _get_alternate_on(pane_id)
             if not alt_on:
                 output = await _capture_pane(pane_id)
-                if _PROMPT_RE.search(output):
+                if _prompt_re.search(output):
                     return True
         except RuntimeError:
             return False
@@ -425,9 +425,15 @@ async def send_instruction(
             # is hidden behind it — skip retry and treat as delivered.  The
             # overlay is purely cosmetic and does not block input; Claude is
             # already processing the instruction.
-            if any(t in output_lower for t in ("tips for getting started", "welcome to claude code", "welcome back")):
+            _welcome_triggers = (
+                "tips for getting started",
+                "welcome to claude code",
+                "welcome back",
+            )
+            if any(t in output_lower for t in _welcome_triggers):
                 logger.info(
-                    "Pane %s: welcome screen visible on attempt %d — assuming instruction delivered",
+                    "Pane %s: welcome screen visible on attempt %d"
+                    " — assuming instruction delivered",
                     pane_id,
                     attempt,
                 )
@@ -528,6 +534,22 @@ async def create_ace(
 
     # Step 3: spawn tmux pane
     try:
+        # Provider workspace prep (alongside existing tmux logic — fallback safe)
+        if effective_working_dir:
+            try:
+                from atc.agents.factory import create_provider
+
+                _provider = create_provider("claude_code")
+                await _provider.prepare_workspace(
+                    session.id, working_dir=effective_working_dir
+                )
+            except Exception as _prep_exc:
+                logger.debug(
+                    "provider.prepare_workspace skipped for %s: %s",
+                    session.id,
+                    _prep_exc,
+                )
+
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(
             ATC_TMUX_SESSION,

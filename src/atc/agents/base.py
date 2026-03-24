@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
 
 class SessionStatus(enum.Enum):
@@ -104,6 +105,8 @@ class AgentProvider(Protocol):
         *,
         working_dir: str | None = None,
         env: dict[str, str] | None = None,
+        context_file: Path | None = None,
+        role: str = "ace",
     ) -> SessionInfo:
         """Spawn a new agent session.
 
@@ -111,12 +114,44 @@ class AgentProvider(Protocol):
             session_id: Unique identifier for this session.
             working_dir: Working directory for the agent process.
             env: Extra environment variables to pass.
+            context_file: Optional path to a CLAUDE.md to copy into working_dir.
+            role: Role hint for the session (``tower``, ``leader``, or ``ace``).
 
         Returns:
             SessionInfo with initial status.
 
         Raises:
             ProviderError: If the session cannot be spawned.
+        """
+        ...
+
+    async def prepare_workspace(
+        self,
+        session_id: str,
+        *,
+        working_dir: str,
+        context_file: Path | None = None,
+    ) -> None:
+        """Set up the workspace before spawning (mkdir, copy context files).
+
+        Args:
+            session_id: Unique identifier for the session being prepared.
+            working_dir: Directory to create if it does not exist.
+            context_file: Optional CLAUDE.md to copy into working_dir.
+                Skipped if working_dir/CLAUDE.md already exists.
+        """
+        ...
+
+    async def is_ready(self, session_id: str) -> bool:
+        """Wait until the agent session is ready to receive instructions.
+
+        Polls the session until it shows an idle prompt.
+
+        Args:
+            session_id: Target session identifier.
+
+        Returns:
+            True when the session is ready, False if it timed out.
         """
         ...
 
