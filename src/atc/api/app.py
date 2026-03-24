@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -30,7 +31,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan — startup and shutdown sequence."""
     settings: Settings = app.state.settings
     db_path = settings.database.path
+    import time as _time
+
     logger.info("ATC v%s starting up (db=%s)", __version__, db_path)
+    app.state.startup_at = _time.monotonic()
 
     # 1. Run DB migrations
     await run_migrations(db_path)
@@ -238,10 +242,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from atc.state import db as db_ops
 
     try:
-        results = await reconnect_all(db, event_bus=event_bus)
+        results = await asyncio.wait_for(
+            reconnect_all(db, event_bus=event_bus),
+            timeout=20.0,
+        )
         if results:
             ok = sum(1 for v in results.values() if v)
             logger.info("Reconnected %d/%d sessions on startup", ok, len(results))
+    except asyncio.TimeoutError:
+        logger.warning("Session reconnection timed out after 20s — continuing startup")
     except Exception:
         logger.exception("Session reconnection failed on startup")
 
@@ -333,14 +342,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.exception("Failed to restore TowerController state from DB")
 
     # 8b. Auto-start Tower if it's still idle after restore attempt.
-    # Tower should always be running when the app starts — no manual click required.
-    try:
-        if tower_controller._state == TowerState.IDLE:
-            logger.info("Tower is idle after startup — auto-starting session")
-            await tower_controller.start_session()
-            logger.info("Tower auto-started: session=%s", tower_controller._current_session_id)
-    except Exception:
-        logger.exception("Tower auto-start failed — Tower will start in idle state")
+    # Runs in background to avoid blocking the lifespan for 30-60s.
+    async def _auto_start_tower() -> None:
+        try:
+            if tower_controller._state == TowerState.IDLE:
+                logger.info("Tower is idle after startup — auto-starting session")
+                await tower_controller.start_session()
+                logger.info(
+                    "Tower auto-started: session=%s", tower_controller._current_session_id
+                )
+        except Exception:
+            logger.exception("Tower auto-start failed — Tower will start in idle state")
+
+    asyncio.create_task(_auto_start_tower())
 
     # 9. Start resource monitor
     from atc.tracking.resources import ResourceMonitor
@@ -471,8 +485,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(system.router, prefix="/api/system", tags=["system"])
 
     @app.get("/api/health")
-    async def health() -> dict[str, object]:
-        return {"ok": True, "version": __version__}
+    async def health(request: Request) -> dict[str, object]:
+        import time as _time
+
+        startup_at: float | None = getattr(request.app.state, "startup_at", None)
+        startup_duration_ms = (
+            (_time.monotonic() - startup_at) * 1000 if startup_at is not None else None
+        )
+        return {
+            "status": "ok",
+            "version": __version__,
+            "startup_duration_ms": startup_duration_ms,
+        }
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:
