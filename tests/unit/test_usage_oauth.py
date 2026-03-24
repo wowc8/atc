@@ -20,9 +20,11 @@ class TestIsOAuthMode:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "claude_abc123")
         assert _is_oauth_mode() is True
 
-    def test_empty_key_is_not_oauth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_key_is_oauth_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # With no key set, cost tracking is disabled (no real API key).
+        monkeypatch.delenv("ATC_ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        assert _is_oauth_mode() is False
+        assert _is_oauth_mode() is True
 
 
 class TestUsageSummaryResponseModel:

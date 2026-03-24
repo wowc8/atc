@@ -428,6 +428,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             interval_hours=backup_cfg.auto_backup_interval_hours
         )
 
+    # Log auth mode warning
+    from atc.agents.auth import get_auth_mode
+
+    _auth_mode = get_auth_mode()
+    if _auth_mode == "oauth":
+        logger.warning(
+            "Running in OAuth mode — cost tracking disabled, concurrent sessions may conflict. "
+            "Set ATC_ANTHROPIC_API_KEY for full functionality."
+        )
+    elif _auth_mode == "none":
+        logger.warning("No Anthropic API key configured.")
+
     logger.info("ATC startup complete")
     yield
 
@@ -520,6 +532,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "startup_duration_ms": startup_duration_ms,
                 "version": __version__,
             }
+        from atc.agents.auth import get_auth_mode
         from atc.core.health import HealthResult as _HR
         assert isinstance(smoke, _HR)
         return {
@@ -528,6 +541,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "duration_ms": smoke.duration_ms,
             "startup_duration_ms": startup_duration_ms,
             "version": __version__,
+            "auth_mode": get_auth_mode(),
         }
 
     @app.websocket("/ws")

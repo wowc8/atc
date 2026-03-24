@@ -11,7 +11,6 @@ Usage routes:
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request
@@ -76,13 +75,11 @@ class UsageSummaryResponse(BaseModel):
     message: str | None = None
 
 
-_OAUTH_KEY_PREFIXES = ("oat", "claude_")
-
-
 def _is_oauth_mode() -> bool:
-    """Return True if the Anthropic API key is an OAuth token, not a real API key."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    return any(api_key.startswith(prefix) for prefix in _OAUTH_KEY_PREFIXES)
+    """Return True when not using a real API key (OAuth or no key configured)."""
+    from atc.agents.auth import get_auth_mode
+
+    return get_auth_mode() != "api_key"
 
 
 # ---------------------------------------------------------------------------
