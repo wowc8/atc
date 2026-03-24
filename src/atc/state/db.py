@@ -896,10 +896,18 @@ async def delete_session(db: aiosqlite.Connection, session_id: str) -> None:
 
 
 async def list_active_sessions(db: aiosqlite.Connection) -> list[Session]:
-    """Sessions that should be reconnected on startup (not error/disconnected with no tmux)."""
+    """Sessions that should be reconnected on startup.
+
+    Only returns sessions that were genuinely active at last shutdown:
+    - status must indicate activity (not terminal/disconnected states)
+    - tmux_pane must be set (we need something to reconnect to)
+
+    Excludes 'disconnected' and 'error' to prevent stale sessions from
+    blocking startup with endless reconnect loops.
+    """
     cursor = await db.execute(
         """SELECT * FROM sessions
-           WHERE status NOT IN ('error')
+           WHERE status NOT IN ('error', 'disconnected', 'completed', 'cancelled')
              AND tmux_pane IS NOT NULL
            ORDER BY created_at""",
     )
