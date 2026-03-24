@@ -233,6 +233,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("Startup cleanup failed — continuing")
 
+    # 6c. Run startup smoke test — validates pane spawn + instruction delivery
+    import time as _time
+
+    app.state.startup_at = _time.monotonic()
+    from atc.core.health import HealthResult as _HealthResult, run_startup_smoke_test
+
+    try:
+        health = await asyncio.wait_for(run_startup_smoke_test(), timeout=15.0)
+    except asyncio.TimeoutError:
+        health = _HealthResult(ok=False, message="smoke test timed out after 15s", duration_ms=15000.0)
+    except Exception as _exc:
+        health = _HealthResult(ok=False, message=f"smoke test error: {_exc}", duration_ms=0.0)
+
+    app.state.health = health
+    if health.ok:
+        logger.info("Startup smoke test passed (%.0fms)", health.duration_ms)
+    else:
+        logger.warning("Startup smoke test failed: %s (%.0fms)", health.message, health.duration_ms)
+
     # 7. Reconnect sessions that were active at last shutdown
     from atc.session.reconnect import reconnect_all
     from atc.state import db as db_ops
@@ -471,8 +490,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(system.router, prefix="/api/system", tags=["system"])
 
     @app.get("/api/health")
-    async def health() -> dict[str, object]:
-        return {"ok": True, "version": __version__}
+    async def health(request: Request) -> dict[str, object]:
+        smoke: object = getattr(request.app.state, "health", None)
+        if smoke is None:
+            return {"status": "ok", "message": "startup in progress", "duration_ms": 0.0, "version": __version__}
+        from atc.core.health import HealthResult as _HR
+        assert isinstance(smoke, _HR)
+        return {
+            "status": "ok" if smoke.ok else "degraded",
+            "message": smoke.message,
+            "duration_ms": smoke.duration_ms,
+            "version": __version__,
+        }
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:
