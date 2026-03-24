@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
@@ -129,6 +129,9 @@ class Settings(BaseSettings):
     agent_provider: AgentProviderConfig = AgentProviderConfig()
     qa_loop: QALoopConfig = QALoopConfig()
     backup: BackupConfig = BackupConfig()
+    # Dedicated Anthropic API key for agent sessions (real sk-ant-* key).
+    # Falls back to ANTHROPIC_API_KEY when not set.
+    atc_api_key: str | None = Field(default=None, validation_alias="ATC_ANTHROPIC_API_KEY")
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

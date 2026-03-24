@@ -31,8 +31,10 @@ def _patch_tmux() -> patch:
 
 
 @pytest.mark.asyncio
-async def test_api_key_dialog_dismissed_with_enter() -> None:
-    """API key selector dialog is dismissed by sending Enter."""
+async def test_api_key_dialog_dismissed_with_enter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """API key selector dialog is dismissed by sending Enter (OAuth / no-key mode)."""
+    monkeypatch.delenv("ATC_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     outputs = [
         "Detected a custom API key in your environment\nDo you want to use this API key?\n1. Yes\n❯ 2. No (recommended)",
         "Claude Code v2.1 ready",  # second poll sees Claude running
@@ -47,6 +49,29 @@ async def test_api_key_dialog_dismissed_with_enter() -> None:
     send_keys_calls = [c for c in mock_run.call_args_list if "send-keys" in c.args]
     assert send_keys_calls
     assert "Enter" in send_keys_calls[0].args
+
+
+@pytest.mark.asyncio
+async def test_api_key_dialog_accepted_with_real_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """API key selector dialog selects 'Yes' when a real API key is configured."""
+    monkeypatch.setenv("ATC_ANTHROPIC_API_KEY", "sk-ant-api03-realkey")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    outputs = [
+        "Detected a custom API key in your environment\nDo you want to use this API key?\n1. Yes\n❯ 2. No (recommended)",
+        "Claude Code v2.1 ready",
+    ]
+    with _patch_tmux() as mock_run, patch(
+        "atc.session.ace._capture_pane",
+        new=AsyncMock(side_effect=outputs),
+    ):
+        result = await _accept_trust_dialog("pane-1", timeout=5.0)
+
+    assert result is True
+    send_keys_calls = [c for c in mock_run.call_args_list if "send-keys" in c.args]
+    key_values = [c.args[-1] for c in send_keys_calls]
+    assert "Up" in key_values
+    assert "Enter" in key_values
+    assert key_values.index("Up") < key_values.index("Enter")
 
 
 # ---------------------------------------------------------------------------

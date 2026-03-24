@@ -122,6 +122,13 @@ async def _spawn_pane(
             logger.info("_spawn_pane: created missing working_dir %s", working_dir)
         args.extend(["-c", working_dir])
     if command:
+        import shlex as _shlex
+
+        from atc.agents.auth import resolve_agent_api_key
+
+        key = resolve_agent_api_key()
+        if key:
+            command = f"ANTHROPIC_API_KEY={_shlex.quote(key)} {command}"
         args.extend([command])
     logger.warning(
         "=== SPAWN_PANE DEBUG ===\n  tmux args: %s\n  working_dir: %s\n  command: %s",
@@ -156,6 +163,11 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
     Returns True if any dialog was detected and dismissed, False if Claude
     started without showing any dialog within *timeout* seconds.
     """
+    from atc.agents.auth import is_oauth_key, resolve_agent_api_key
+
+    _key = resolve_agent_api_key()
+    _use_api_key = bool(_key and not is_oauth_key(_key))
+
     poll_interval = 0.5
     elapsed = 0.0
     # Track which dialog types we've already handled to avoid re-triggering on
@@ -167,13 +179,20 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
             output = await _capture_pane(pane_id)
             lowered = output.lower()
 
-            # Dialog 1: API key selector — Enter dismisses (selects "No")
+            # Dialog 1: API key selector — select "Yes" when using a real key,
+            # otherwise send Enter to dismiss (selects "No", keeps OAuth).
             if "api_key_selector" not in dismissed and (
                 "do you want to use this api key" in lowered
                 or ("detected" in lowered and "api key" in lowered)
             ):
+                if _use_api_key:
+                    # Option 1 "Yes" is above the pre-selected option 2 "No"
+                    await _tmux_run("send-keys", "-t", pane_id, "Up")
+                    await asyncio.sleep(0.1)
+                    logger.info("Pane %s: accepted API key selector (real key configured)", pane_id)
+                else:
+                    logger.info("Pane %s: dismissed API key selector dialog (OAuth mode)", pane_id)
                 await _tmux_run("send-keys", "-t", pane_id, "Enter")
-                logger.info("Pane %s: dismissed API key selector dialog", pane_id)
                 dismissed.add("api_key_selector")
                 await asyncio.sleep(1.0)  # wait for next dialog to appear
                 continue
