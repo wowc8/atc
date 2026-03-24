@@ -51,6 +51,8 @@ class TowerStatusResponse(BaseModel):
     current_session_id: str | None
     leader_session_id: str | None
     output_line_count: int
+    active_ace_count: int
+    max_aces: int
 
 
 class TowerProgressResponse(BaseModel):
@@ -109,6 +111,8 @@ async def tower_status(request: Request) -> TowerStatusResponse:
         current_session_id=controller_status["current_session_id"],
         leader_session_id=controller_status.get("leader_session_id"),
         output_line_count=controller_status.get("output_line_count", 0),
+        active_ace_count=controller_status.get("active_ace_count", 0),
+        max_aces=controller_status.get("max_aces", 5),
     )
 
 
