@@ -11,6 +11,7 @@ Usage routes:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request
@@ -67,10 +68,21 @@ class GitHubApiDataPoint(BaseModel):
 
 
 class UsageSummaryResponse(BaseModel):
-    today_cost: float
-    month_cost: float
+    today_cost: float | None
+    month_cost: float | None
     today_tokens: int
     month_tokens: int
+    oauth_mode: bool = False
+    message: str | None = None
+
+
+_OAUTH_KEY_PREFIXES = ("oat", "claude_")
+
+
+def _is_oauth_mode() -> bool:
+    """Return True if the Anthropic API key is an OAuth token, not a real API key."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    return any(api_key.startswith(prefix) for prefix in _OAUTH_KEY_PREFIXES)
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +93,19 @@ class UsageSummaryResponse(BaseModel):
 @router.get("/summary", response_model=UsageSummaryResponse)
 async def get_usage_summary(request: Request) -> UsageSummaryResponse:
     """Aggregate cost and token totals across all projects for today and this month."""
+    if _is_oauth_mode():
+        return UsageSummaryResponse(
+            today_cost=None,
+            month_cost=None,
+            today_tokens=0,
+            month_tokens=0,
+            oauth_mode=True,
+            message=(
+                "Cost tracking unavailable — using OAuth authentication. "
+                "Add an Anthropic API key to enable."
+            ),
+        )
+
     db = request.app.state.db
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     month_start = datetime.now(UTC).strftime("%Y-%m-01")
@@ -101,7 +126,7 @@ async def get_usage_summary(request: Request) -> UsageSummaryResponse:
     row = await cursor.fetchone()
     if row is None:
         return UsageSummaryResponse(
-            today_cost=0.0, month_cost=0.0, today_tokens=0, month_tokens=0
+            today_cost=0.0, month_cost=0.0, today_tokens=0, month_tokens=0, oauth_mode=False
         )
     return UsageSummaryResponse(
         today_cost=float(row[0]),
