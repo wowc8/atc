@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -67,20 +69,42 @@ class ClaudeCodeProvider:
         *,
         working_dir: str | None = None,
         env: dict[str, str] | None = None,
+        context_file: Path | None = None,
+        role: str = "ace",
     ) -> SessionInfo:
         if session_id in self._sessions:
             raise ProviderError(self.name, f"Session {session_id} already exists")
 
         self._check_tmux_available()
 
-        # Build the claude command
+        # Prepare workspace if requested
+        if working_dir:
+            await self.prepare_workspace(
+                session_id, working_dir=working_dir, context_file=context_file
+            )
+
+        # Build the claude command, prepending ANTHROPIC_API_KEY if available
+        import shlex as _shlex
+
+        from atc.agents.auth import resolve_agent_api_key
+
         cmd_parts = [self._claude_command]
-        env_prefix = ""
+        all_env: dict[str, str] = {}
+
+        api_key = resolve_agent_api_key()
+        if api_key:
+            all_env["ANTHROPIC_API_KEY"] = api_key
+
         if env:
-            env_parts = [f"{k}={v}" for k, v in env.items()]
+            all_env.update(env)
+
+        env_prefix = ""
+        if all_env:
+            env_parts = [f"{k}={_shlex.quote(v)}" for k, v in all_env.items()]
             env_prefix = " ".join(env_parts) + " "
 
         shell_cmd = f"{env_prefix}{' '.join(cmd_parts)}"
+        logger.debug("spawn_session role=%s session=%s", role, session_id)
 
         # Spawn in a new tmux window (avoids 'no space for new pane' in small terminals)
         tmux_args = [
@@ -244,6 +268,98 @@ class ClaudeCodeProvider:
 
     async def list_sessions(self) -> list[SessionInfo]:
         return [t.to_info() for t in self._sessions.values()]
+
+    async def prepare_workspace(
+        self,
+        session_id: str,
+        *,
+        working_dir: str,
+        context_file: Path | None = None,
+    ) -> None:
+        """Create working_dir and optionally copy context_file to CLAUDE.md.
+
+        Skips the copy if working_dir/CLAUDE.md already exists so we never
+        overwrite a file deployed by AceDeploySpec / ManagerDeploySpec.
+        """
+        import os as _os
+
+        _os.makedirs(working_dir, exist_ok=True)
+        logger.debug(
+            "prepare_workspace: ensured %s exists (session %s)", working_dir, session_id
+        )
+
+        if context_file is not None:
+            dest = Path(working_dir) / "CLAUDE.md"
+            if not dest.exists():
+                shutil.copy2(str(context_file), str(dest))
+                logger.info(
+                    "prepare_workspace: copied %s → %s (session %s)",
+                    context_file,
+                    dest,
+                    session_id,
+                )
+            else:
+                logger.debug(
+                    "prepare_workspace: %s already exists, skipping copy (session %s)",
+                    dest,
+                    session_id,
+                )
+
+    async def is_ready(self, session_id: str) -> bool:
+        """Return True when the session's tmux pane shows an idle ❯ prompt.
+
+        Polls capture-pane for up to 10 seconds looking for a bare prompt
+        line (alternate_on == 0 and a line matching ``^[❯>]\\s*$``).
+        """
+        tracked = self._sessions.get(session_id)
+        if tracked is None:
+            return False
+
+        _prompt_re = re.compile(r"^[❯>]\s*$", re.MULTILINE)
+        timeout = 10.0
+        poll_interval = 0.5
+        elapsed = 0.0
+
+        while elapsed < timeout:
+            try:
+                alt_proc = await asyncio.create_subprocess_exec(
+                    _TMUX_CMD,
+                    "display-message",
+                    "-t",
+                    tracked.pane_id,
+                    "-p",
+                    "#{alternate_on}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                alt_stdout, _ = await alt_proc.communicate()
+                if alt_stdout.decode().strip() == "1":
+                    await asyncio.sleep(poll_interval)
+                    elapsed += poll_interval
+                    continue
+
+                cap_proc = await asyncio.create_subprocess_exec(
+                    _TMUX_CMD,
+                    "capture-pane",
+                    "-t",
+                    tracked.pane_id,
+                    "-p",
+                    "-S",
+                    "-50",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                cap_stdout, _ = await cap_proc.communicate()
+                if _prompt_re.search(cap_stdout.decode()):
+                    return True
+            except OSError:
+                return False
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        logger.warning("is_ready: session %s not ready after %.1fs", session_id, timeout)
+        return False
 
     def _get_tracked(self, session_id: str) -> _TrackedSession:
         tracked = self._sessions.get(session_id)

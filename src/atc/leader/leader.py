@@ -144,6 +144,25 @@ async def start_leader(
             project.agent_provider if project else "claude_code",
         )
 
+        # Provider workspace prep (alongside existing tmux logic — fallback safe)
+        try:
+            from atc.agents.factory import create_provider
+
+            _provider = create_provider(
+                project.agent_provider if project else "claude_code",
+            )
+            _cmp = deployed.claude_md_path
+            _ctx = _cmp if _cmp.exists() else None
+            await _provider.prepare_workspace(
+                session.id, working_dir=working_dir, context_file=_ctx
+            )
+        except Exception as _prep_exc:
+            logger.debug(
+                "provider.prepare_workspace skipped for leader %s: %s",
+                session.id,
+                _prep_exc,
+            )
+
         await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(
             ATC_TMUX_SESSION,
