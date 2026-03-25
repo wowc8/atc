@@ -60,9 +60,14 @@ jobs:
       - name: Build Python sidecar
         run: |
           mkdir -p src-tauri/binaries
-          pyinstaller src-tauri/atc-server.spec
-          # spec uses distpath=src-tauri/binaries — rename in place to Tauri target triple format
-          mv src-tauri/binaries/atc-server "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
+          pyinstaller --onefile --distpath dist src/atc/server_main.py --name atc-server \
+            --hidden-import uvicorn.loops.auto \
+            --hidden-import uvicorn.lifespan.on \
+            --hidden-import uvicorn.protocols.http.auto \
+            --hidden-import aiosqlite \
+            --hidden-import sqlite3 \
+            --hidden-import anthropic
+          mv dist/atc-server "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
           chmod +x "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
 
       - name: Install frontend deps
