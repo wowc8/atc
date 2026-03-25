@@ -70,7 +70,7 @@ jobs:
           mv dist/atc-server "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
           chmod +x "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
 
-      - name: Generate macOS .icns icon
+      - name: Generate macOS .icns icon and inject into config
         if: runner.os == 'macOS'
         run: |
           ICONSET=src-tauri/icons/AppIcon.iconset
@@ -80,12 +80,15 @@ jobs:
             sips -z $((size*2)) $((size*2)) src-tauri/icons/1024x1024.png --out "$ICONSET/icon_${size}x${size}@2x.png" 2>/dev/null
           done
           iconutil -c icns "$ICONSET" -o src-tauri/icons/icon.icns
-
-      - name: Generate Linux/Windows icons
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y imagemagick
-          convert src-tauri/icons/32x32.png src-tauri/icons/icon.ico 2>/dev/null || cp src-tauri/icons/32x32.png src-tauri/icons/icon.png
+          # Inject .icns into tauri.conf.json icon list
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json'));
+            if (!conf.bundle.icon.includes('icons/icon.icns')) {
+              conf.bundle.icon.push('icons/icon.icns');
+            }
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2));
+          "
 
       - name: Install frontend deps
         run: npm ci --prefix frontend
