@@ -1,4 +1,4 @@
-// Tauri 2 desktop shell with auto-updater via tauri-plugin-updater.
+// Tauri 2 desktop shell — spawns Python backend sidecar on startup.
 
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
@@ -9,8 +9,6 @@ pub fn run() {
         .setup(|app| {
             #[cfg(desktop)]
             {
-                app.handle()
-                    .plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
                 app.handle().plugin(tauri_plugin_shell::init())?;
 
