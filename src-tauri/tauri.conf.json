@@ -7,7 +7,8 @@
     "frontendDist": "../frontend/dist"
   },
   "bundle": {
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/atc-server"]
   },
   "plugins": {
     "updater": {
