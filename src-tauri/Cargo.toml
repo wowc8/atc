@@ -8,6 +8,9 @@ description = "ATC desktop shell"
 name = "atc_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
 [dependencies]
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
