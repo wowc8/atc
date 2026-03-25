@@ -440,6 +440,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     elif _auth_mode == "none":
         logger.warning("No Anthropic API key configured.")
 
+    # Resolve the claude binary path at startup to handle nvm / non-standard installs.
+    # On macOS with nvm, tmux panes spawn without sourcing shell RC files, so the
+    # bare "claude" command is not in PATH.  We resolve it once here and update the
+    # settings so every call to get_launch_command() picks up the absolute path.
+    _resolve_claude_binary(settings)
+
     logger.info("ATC startup complete")
     yield
 
@@ -455,6 +461,71 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await pty_pool.stop()
     await event_bus.stop()
     await db.close()
+
+
+def _resolve_claude_binary(settings: "Settings") -> None:
+    """Resolve the absolute path to the claude binary and update settings.
+
+    On macOS with nvm, tmux panes spawn without sourcing shell RC files, so the
+    bare claude command is often not in PATH.  This function probes common
+    install locations at startup and updates settings.agent_provider.claude_command
+    to the absolute path so all subsequent spawns find the binary reliably.
+    """
+    import glob
+    import shutil
+    from pathlib import Path as _Path
+
+    current_cmd = settings.agent_provider.claude_command
+    # If the command contains a space (e.g. "claude --flags"), check just the binary part
+    binary_name = current_cmd.split()[0] if current_cmd else "claude"
+
+    # 1. Check if it's already resolvable via PATH
+    resolved = shutil.which(binary_name)
+    if resolved:
+        # Already in PATH — ensure settings uses the full command unchanged
+        return
+
+    # 2. Probe common locations
+    candidates: list[str] = []
+    home = str(_Path.home())
+    # nvm installs (sorted so we get the newest node version last → first after reverse)
+    candidates.extend(sorted(glob.glob(f"{home}/.nvm/versions/node/*/bin/claude"), reverse=True))
+    candidates.append(f"{home}/.npm-global/bin/claude")
+    candidates.append("/usr/local/bin/claude")
+    candidates.append(f"{home}/.volta/bin/claude")
+    candidates.append(f"{home}/.fnm/current/bin/claude")
+
+    for candidate in candidates:
+        if _Path(candidate).is_file():
+            # Reconstruct the full command with the resolved binary path
+            rest = current_cmd[len(binary_name):].strip()
+            new_cmd = candidate if not rest else f"{candidate} {rest}"
+            logger.warning(
+                "claude binary not found in PATH; resolved to %s — updating settings",
+                candidate,
+            )
+            # Settings is a pydantic model; agent_provider is a nested model.
+            # We patch the attribute directly since Settings may be frozen at the top
+            # level but agent_provider sub-model fields are mutable.
+            try:
+                settings.agent_provider.claude_command = new_cmd
+            except Exception:
+                # If the model is frozen, rebuild agent_provider
+                from atc.config import AgentProviderConfig
+                object.__setattr__(
+                    settings,
+                    "agent_provider",
+                    settings.agent_provider.model_copy(update={"claude_command": new_cmd}),
+                )
+            # Also update the factory registry so get_launch_command() uses the full path
+            from atc.agents import factory as _factory
+            _factory._LAUNCH_COMMANDS["claude_code"] = new_cmd
+            return
+
+    logger.warning(
+        "Could not resolve claude binary from PATH or common locations. "
+        "Tmux panes may fail to launch if nvm is not sourced."
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
