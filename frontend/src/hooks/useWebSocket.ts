@@ -15,7 +15,7 @@ interface UseWebSocketOptions {
 const MAX_RECONNECT_MS_DEFAULT = 30_000;
 
 export function useWebSocket({
-  url = window.location.protocol === "file:" ? "ws://127.0.0.1:8420/ws" : `ws://${window.location.host}/ws`,
+  url = (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) ? "ws://127.0.0.1:8420/ws" : `ws://${window.location.host}/ws`,
   channels = ["state"],
   onMessage,
   reconnectMs = 1_000,

@@ -4,7 +4,7 @@
  * In Tauri: loaded from file://, so we need the absolute backend URL.
  */
 
-const isTauri = typeof window !== "undefined" && window.location.protocol === "file:";
+const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const BASE = isTauri ? "http://127.0.0.1:8420/api" : "/api";
 
 /** Default request timeout in milliseconds (30 seconds). */
