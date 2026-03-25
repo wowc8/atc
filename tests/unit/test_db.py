@@ -220,8 +220,8 @@ class TestMigrationRunner:
 
         migrations = _discover_migrations(versions_dir)
         assert len(migrations) == 2
-        assert migrations[0][0] == 1
-        assert migrations[1][0] == 2
+        assert migrations[0][0] == "001"
+        assert migrations[1][0] == "002"
         assert migrations[0][1].name == "001_initial.sql"
 
     def test_run_migrations_applies_all(self, tmp_path: Path) -> None:
@@ -295,7 +295,7 @@ class TestMigrationRunner:
         run_migrations(factory, versions_dir=versions_dir)
 
         versions = _applied_versions(factory)
-        assert versions == {1}
+        assert versions == {"001"}
 
     def test_initial_migration_applies_cleanly(self) -> None:
         """Verify the real 001_initial_schema.sql applies without errors."""
