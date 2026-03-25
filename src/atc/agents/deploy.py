@@ -7,6 +7,7 @@ Hook scripts report status back to the ATC API via the ``atc`` CLI.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -21,6 +22,18 @@ logger = logging.getLogger(__name__)
 
 # Default staging root for deployed agent files
 _DEFAULT_STAGING_ROOT = Path("/tmp/atc-agents")
+
+
+def _resolve_api_base_url(api_base_url: str) -> str:
+    """Return api_base_url, falling back to load_settings() if empty."""
+    if api_base_url:
+        return api_base_url
+    try:
+        from atc.config import load_settings as _load_settings
+        _s = _load_settings()
+        return f"http://{_s.server.host}:{_s.server.port}"
+    except Exception:
+        return "http://127.0.0.1:8420"
 
 
 @dataclass(frozen=True)
@@ -62,7 +75,7 @@ class AceDeploySpec:
     project_id: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
-    api_base_url: str = "http://127.0.0.1:8420"
+    api_base_url: str = ""
     model: str = "opus"
     allowed_commands: list[str] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
@@ -81,7 +94,7 @@ class ManagerDeploySpec:
     session_id: str | None = None  # actual session_id for hooks
     repo_path: str | None = None
     github_repo: str | None = None
-    api_base_url: str = "http://127.0.0.1:8420"
+    api_base_url: str = ""
     model: str = "opus"
     allowed_commands: list[str] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
@@ -99,7 +112,7 @@ class TowerDeploySpec:
     project_id: str
     repo_path: str | None = None
     github_repo: str | None = None
-    api_base_url: str = "http://127.0.0.1:8420"
+    api_base_url: str = ""
     model: str = "opus"
     allowed_commands: list[str] = field(default_factory=list)
 
@@ -125,6 +138,10 @@ def deploy_ace_files(
     """
     root = (staging_root or _DEFAULT_STAGING_ROOT) / spec.session_id
     written: list[str] = []
+
+    # Resolve api_base_url from settings if not explicitly provided
+    if not spec.api_base_url:
+        spec = dataclasses.replace(spec, api_base_url=_resolve_api_base_url(""))
 
     # Ensure the staging directory is a git repo so Claude Code finds settings
     _ensure_git_repo(root)
@@ -177,6 +194,10 @@ def deploy_manager_files(
     """
     root = (staging_root or _DEFAULT_STAGING_ROOT) / spec.leader_id
     written: list[str] = []
+
+    # Resolve api_base_url from settings if not explicitly provided
+    if not spec.api_base_url:
+        spec = dataclasses.replace(spec, api_base_url=_resolve_api_base_url(""))
 
     # Ensure the staging directory is a git repo so Claude Code finds settings
     _ensure_git_repo(root)
@@ -236,6 +257,10 @@ def deploy_tower_files(
     """
     root = (staging_root or _DEFAULT_STAGING_ROOT) / spec.session_id
     written: list[str] = []
+
+    # Resolve api_base_url from settings if not explicitly provided
+    if not spec.api_base_url:
+        spec = dataclasses.replace(spec, api_base_url=_resolve_api_base_url(""))
 
     # Ensure the staging directory is a git repo so Claude Code finds settings
     _ensure_git_repo(root)
