@@ -6,6 +6,19 @@
   "build": {
     "frontendDist": "../frontend/dist"
   },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ATC",
+        "url": "index.html",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
   "bundle": {
     "createUpdaterArtifacts": false,
     "externalBin": ["binaries/atc-server"],
