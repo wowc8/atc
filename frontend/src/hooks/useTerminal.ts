@@ -138,8 +138,10 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
 
     function connect() {
       if (cancelled) return;
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      const isTauriEnv = window.location.protocol === "file:";
+      const protocol = isTauriEnv ? "ws:" : (window.location.protocol === "https:" ? "wss:" : "ws:");
+      const host = isTauriEnv ? "127.0.0.1:8420" : window.location.host;
+      const ws = new WebSocket(`${protocol}//${host}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {

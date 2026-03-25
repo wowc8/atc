@@ -1,9 +1,11 @@
 /**
  * Lightweight API client for ATC backend.
- * All fetches go through the Vite proxy (/api → backend).
+ * In dev: fetches go through the Vite proxy (/api → backend).
+ * In Tauri: loaded from file://, so we need the absolute backend URL.
  */
 
-const BASE = "/api";
+const isTauri = typeof window !== "undefined" && window.location.protocol === "file:";
+const BASE = isTauri ? "http://127.0.0.1:8420/api" : "/api";
 
 /** Default request timeout in milliseconds (30 seconds). */
 const REQUEST_TIMEOUT_MS = 30_000;
