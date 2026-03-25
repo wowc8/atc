@@ -56,3 +56,5 @@ atc.db-shm
 atc.db-wal
 frontend/test-results/
 frontend/tsconfig.tsbuildinfo
+.claude/
+.venv2/
