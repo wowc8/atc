@@ -130,6 +130,18 @@ async def start_leader(
             deployed.root,
         )
 
+        # Copy CLAUDE.md (and .claude/) from staging dir into repo_path so that
+        # Claude Code picks up the leader instructions when starting in the repo.
+        if spec.repo_path and Path(spec.repo_path) != deployed.root:
+            import shutil as _shutil
+            dest = Path(spec.repo_path)
+            dest.mkdir(parents=True, exist_ok=True)
+            _shutil.copy2(deployed.root / "CLAUDE.md", dest / "CLAUDE.md")
+            claude_src = deployed.root / ".claude"
+            if claude_src.exists():
+                _shutil.copytree(claude_src, dest / ".claude", dirs_exist_ok=True)
+            logger.info("Copied leader CLAUDE.md to repo_path: %s", dest)
+
         # Use repo_path if available so Claude Code starts in the actual repo;
         # fall back to staging dir so it finds the deployed CLAUDE.md and hooks.
         # Ensure the directory exists — tmux silently falls back to $HOME if the
