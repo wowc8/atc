@@ -60,9 +60,14 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
     "bypass permissions",
     "do you want to use this api key",
     "will be able to read",
+    # Claude Code v2+ uses contraction: "Claude Code'll be able to read..."
+    "'ll be able to read",
+    "able to read, edit",
     "yes, i trust this folder",
     "no, exit",
     "security guide",
+    "is this a project you created",
+    "one you trust",
     # Welcome/tips screen — Claude is running but not yet in the interactive
     # prompt.  Listed here so the "claude code" fast-exit doesn't fire early.
     "tips for getting started",
@@ -283,6 +288,9 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 10.0) -> bool:
                 or "do you trust" in lowered
                 or "yes, i trust this folder" in lowered
                 or "will be able to read" in lowered
+                or "'ll be able to read" in lowered  # v2+ contraction form
+                or "able to read, edit" in lowered
+                or "is this a project you created" in lowered
             ):
                 await _tmux_run("send-keys", "-t", pane_id, "Enter")
                 logger.info("Pane %s: accepted trust-folder dialog", pane_id)

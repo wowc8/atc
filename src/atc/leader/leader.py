@@ -196,31 +196,9 @@ async def start_leader(
             )
 
         await _ensure_tmux_session(ATC_TMUX_SESSION)
-
-        # If a goal is available, embed it as ATC_INITIAL_PROMPT so atc-agent
-        # passes it as a positional argument to claude.  This means Claude starts
-        # working on the goal immediately at spawn time rather than waiting for
-        # a separate send_instruction call (which races with pane startup).
-        spawn_cmd = launch_cmd
-        _effective_goal = goal or (spec.goal if spec else None)
-        if _effective_goal:
-            import shlex as _shlex
-            # Brief prompt: goal + instruction to follow CLAUDE.md workflow.
-            # Full API schemas are in CLAUDE.md — this just kicks off the work.
-            initial_prompt = (
-                f"Your goal: {_effective_goal}\n\n"
-                "Follow your CLAUDE.md workflow exactly:\n"
-                "1. Decompose into tasks via the decompose API.\n"
-                "2. Spawn Aces.\n"
-                "3. Instruct each Ace.\n"
-                "4. Monitor and mark done.\n"
-                "Begin NOW."
-            )
-            spawn_cmd = f"ATC_INITIAL_PROMPT={_shlex.quote(initial_prompt)} {launch_cmd}"
-
         pane_id = await _spawn_pane(
             ATC_TMUX_SESSION,
-            spawn_cmd,
+            launch_cmd,
             working_dir=working_dir,
         )
         await _accept_trust_dialog(pane_id)
