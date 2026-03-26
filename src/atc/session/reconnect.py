@@ -154,12 +154,15 @@ async def reconnect_session(
             from atc.agents.deploy import deploy_manager_files
 
             leader = await db_ops.get_leader_by_project(conn, session.project_id)
+            import os as _os
+            _api_url = _os.environ.get("ATC_API_URL", "")
             mgr_spec = _build_manager_deploy_spec(
                 leader_id=leader.id if leader else session_id,
                 project_name=project.name if project else "",
                 goal=(leader.goal or "") if leader else "",
                 repo_path=working_dir,
                 github_repo=project.github_repo if project else None,
+                api_base_url=_api_url,
             )
             mgr_spec.session_id = session_id
             deployed = deploy_manager_files(mgr_spec)

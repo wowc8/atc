@@ -13,6 +13,7 @@ instructions automatically.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
@@ -45,6 +46,7 @@ def _build_manager_deploy_spec(
     repo_path: str | None = None,
     github_repo: str | None = None,
     context_entries: list[dict[str, Any]] | None = None,
+    api_base_url: str = "",
 ) -> ManagerDeploySpec:
     """Build a ManagerDeploySpec from project metadata."""
     return ManagerDeploySpec(
@@ -55,6 +57,7 @@ def _build_manager_deploy_spec(
         repo_path=repo_path,
         github_repo=github_repo,
         context_entries=context_entries or [],
+        api_base_url=api_base_url,
     )
 
 
@@ -111,6 +114,18 @@ async def start_leader(
     try:
         # Deploy config files (CLAUDE.md, hooks, settings.json) before launch
         ctx = context_package or {}
+        # Resolve API base URL from settings so agents use the real running address,
+        # not a hardcoded default.  Falls back to ATC_API_URL env var / load_settings()
+        # via _resolve_api_base_url if settings are unavailable here.
+        import os as _os
+        _api_url = _os.environ.get("ATC_API_URL", "")
+        if not _api_url:
+            try:
+                from atc.config import load_settings as _ls
+                _s = _ls()
+                _api_url = f"http://{_s.server.host}:{_s.server.port}"
+            except Exception:
+                pass
         spec = _build_manager_deploy_spec(
             leader_id=leader.id,
             project_name=ctx.get("project_name") or (project.name if project else ""),
@@ -119,6 +134,7 @@ async def start_leader(
             repo_path=ctx.get("repo_path") or (project.repo_path if project else None),
             github_repo=ctx.get("github_repo") or (project.github_repo if project else None),
             context_entries=ctx.get("context_entries"),
+            api_base_url=_api_url,
         )
         # Pass the real session_id so hooks reference the correct ID
         spec.session_id = session.id
