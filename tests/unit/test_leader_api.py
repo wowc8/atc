@@ -41,10 +41,13 @@ def event_bus() -> EventBus:
 
 @pytest.fixture(autouse=True)
 def clear_orchestrator_cache():
-    """Clear the orchestrator cache before each test."""
+    """Clear the orchestrator cache and global counter before each test."""
+    from atc.leader import orchestrator as orch_mod
     leader_module._orchestrators.clear()
+    orch_mod._GLOBAL_ACTIVE_ACES = 0
     yield
     leader_module._orchestrators.clear()
+    orch_mod._GLOBAL_ACTIVE_ACES = 0
 
 
 @pytest.fixture
@@ -61,6 +64,12 @@ def mock_request(db, event_bus):
     request = MagicMock()
     request.app.state.db = db
     request.app.state.event_bus = event_bus
+    # ws_hub.broadcast must be awaitable (used in decompose endpoint)
+    request.app.state.ws_hub = MagicMock()
+    request.app.state.ws_hub.broadcast = AsyncMock()
+    # settings=None so _get_or_create_orchestrator uses defaults (avoids MagicMock
+    # leaking into ResourceGovernor float comparisons)
+    request.app.state.settings = None
     return request
 
 

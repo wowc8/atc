@@ -248,24 +248,26 @@ class TestClaudeCodeProvider:
         with pytest.raises(ProviderError, match="tmux"):
             await provider.spawn_session("s1")
 
+    @patch("atc.agents.claude_provider.send_instruction_async", new_callable=AsyncMock)
     @patch("shutil.which", return_value="/usr/bin/tmux")
     @patch("asyncio.create_subprocess_exec")
     async def test_send_prompt(
         self,
         mock_exec: AsyncMock,
         _mock_which: MagicMock,
+        mock_send: AsyncMock,
         provider: ClaudeCodeProvider,
     ) -> None:
         # Spawn first
         mock_exec.return_value = _make_process(stdout=b"%42\n")
         await provider.spawn_session("s1")
 
-        # Send prompt
-        mock_exec.return_value = _make_process()
+        # send_instruction_async is mocked so no real tmux call is made
         result = await provider.send_prompt("s1", "Write hello world")
 
         assert result.accepted is True
         assert result.session_id == "s1"
+        mock_send.assert_called_once()
 
     async def test_send_prompt_unknown_session(self, provider: ClaudeCodeProvider) -> None:
         with pytest.raises(ProviderError, match="not found"):

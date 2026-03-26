@@ -125,7 +125,10 @@ class TestSpawnAces:
 
         call_kwargs = mock_create.call_args
         assert call_kwargs is not None
-        assert call_kwargs.kwargs.get("launch_command") == "claude --dangerously-skip-permissions"
+        # get_launch_command returns the atc-agent wrapper script if it exists,
+        # otherwise falls back to the bare claude command.
+        from atc.agents.factory import get_launch_command
+        assert call_kwargs.kwargs.get("launch_command") == get_launch_command("claude_code")
 
     async def test_skips_tasks_with_unmet_deps(
         self,
