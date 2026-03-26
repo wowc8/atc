@@ -544,6 +544,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
+    # Publish the server's actual address as an environment variable so that
+    # agent deploy helpers (deploy.py) and any child processes can discover it
+    # dynamically instead of guessing from a hardcoded default.
+    import os as _os
+    _api_url = f"http://{settings.server.host}:{settings.server.port}"
+    _os.environ.setdefault("ATC_API_URL", _api_url)
+
     # Register domain error handler — serializes ATCError subclasses to JSON
     @app.exception_handler(ATCError)
     async def _atc_error_handler(request: Request, exc: ATCError) -> JSONResponse:

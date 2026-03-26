@@ -25,9 +25,19 @@ _DEFAULT_STAGING_ROOT = Path("/tmp/atc-agents")
 
 
 def _resolve_api_base_url(api_base_url: str) -> str:
-    """Return api_base_url, falling back to load_settings() if empty."""
+    """Return api_base_url, resolved dynamically.
+
+    Resolution order:
+    1. Explicitly provided ``api_base_url`` argument
+    2. ``ATC_API_URL`` environment variable (set by the server at startup)
+    3. ``load_settings()`` — reads atc.toml / env vars for host+port
+    4. Hardcoded fallback (last resort, same default as ServerConfig)
+    """
     if api_base_url:
         return api_base_url
+    env_url = os.environ.get("ATC_API_URL", "")
+    if env_url:
+        return env_url.rstrip("/")
     try:
         from atc.config import load_settings as _load_settings
         _s = _load_settings()
