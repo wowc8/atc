@@ -13,6 +13,7 @@ instructions automatically.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
@@ -136,11 +137,15 @@ async def start_leader(
             import shutil as _shutil
             dest = Path(spec.repo_path)
             dest.mkdir(parents=True, exist_ok=True)
-            _shutil.copy2(deployed.root / "CLAUDE.md", dest / "CLAUDE.md")
+            claude_md_src = deployed.root / "CLAUDE.md"
+            if claude_md_src.exists():
+                _shutil.copy2(claude_md_src, dest / "CLAUDE.md")
+                logger.info("Copied leader CLAUDE.md to repo_path: %s", dest)
+            else:
+                logger.warning("CLAUDE.md not found at %s, skipping copy", deployed.root)
             claude_src = deployed.root / ".claude"
             if claude_src.exists():
                 _shutil.copytree(claude_src, dest / ".claude", dirs_exist_ok=True)
-            logger.info("Copied leader CLAUDE.md to repo_path: %s", dest)
 
         # Use repo_path if available so Claude Code starts in the actual repo;
         # fall back to staging dir so it finds the deployed CLAUDE.md and hooks.
