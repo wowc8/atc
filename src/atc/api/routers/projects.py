@@ -59,6 +59,7 @@ class LeaderResponse(BaseModel):
 
 class LeaderStartRequest(BaseModel):
     goal: str | None = None
+    auto_kickoff: bool = True  # Send brief to leader pane automatically when goal is provided
 
 
 class LeaderMessageRequest(BaseModel):
@@ -341,6 +342,54 @@ async def start_leader(
                     await db.commit()
                 except Exception:
                     pass
+
+    # Auto-kickoff: send mission brief to the leader pane so it starts working.
+    # This mirrors what TowerController._send_leader_kickoff() does, but runs
+    # directly from the API for standalone (non-Tower) usage.
+    if body.goal and body.auto_kickoff:
+        import asyncio as _asyncio
+        from atc.leader.leader import send_leader_message as _send_leader_msg
+
+        async def _kickoff() -> None:
+            await _asyncio.sleep(3)  # brief delay for pane to settle after trust dialog
+            cursor = await db.execute(
+                "SELECT name, description, repo_path, github_repo FROM projects WHERE id = ?",
+                (project_id,),
+            )
+            row = await cursor.fetchone()
+            project_name = row[0] if row else "Unknown"
+            description = row[1] if row else None
+            repo_path = row[2] if row else None
+            lines = [
+                f"# Mission Brief — {project_name}",
+                "",
+                "## Goal",
+                body.goal,
+                "",
+            ]
+            if description:
+                lines += ["## Project Description", description, ""]
+            if repo_path:
+                lines += ["## Repository", f"Local path: {repo_path}", ""]
+            lines += [
+                "## Your Instructions",
+                "1. Decompose the goal into well-scoped tasks using the API.",
+                "2. Spawn Aces for each ready task.",
+                "3. Monitor progress and drive to completion.",
+                "4. Report back when done.",
+                "",
+                "Begin NOW. Do not ask for clarification — start decomposing.",
+            ]
+            kickoff_msg = "\n".join(lines)
+            try:
+                await _send_leader_msg(db, project_id, kickoff_msg, event_bus=event_bus)
+            except Exception:
+                import logging as _logging
+                _logging.getLogger(__name__).exception(
+                    "Auto-kickoff failed for project %s — leader may need manual brief", project_id
+                )
+
+        _asyncio.ensure_future(_kickoff())
 
     return {"status": "started", "session_id": session_id}
 
