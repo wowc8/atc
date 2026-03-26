@@ -19,8 +19,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shlex
 import shutil
 from dataclasses import dataclass
+from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
 from atc.session.state_machine import (
@@ -72,6 +74,48 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # tmux helpers (thin wrappers around subprocess)
 # ---------------------------------------------------------------------------
+
+
+def _build_env_prefix() -> str:
+    """Build a shell env prefix that enriches PATH for tmux panes.
+
+    SSH sessions on macOS (and some Linux deployments) inherit a minimal PATH
+    that omits Homebrew (/usr/local/bin, /opt/homebrew/bin) and nvm/asdf/volta
+    Node shims — so ``claude`` and ``tmux`` are not on PATH inside spawned panes.
+
+    This prefix is prepended to every tmux pane command so that ``atc-agent``
+    (and ``claude`` inside it) can be found regardless of how the backend was
+    launched.
+    """
+    import os as _os
+    extra_paths: list[str] = []
+    home = _os.path.expanduser("~")
+    candidates = [
+        # Homebrew — Intel Mac
+        "/usr/local/bin",
+        # Homebrew — Apple Silicon
+        "/opt/homebrew/bin",
+        # nvm current symlink
+        f"{home}/.nvm/current/bin",
+        # nvm active version (resolve symlink)
+        *([str(_Path(f"{home}/.nvm/current/bin").resolve())]
+          if _Path(f"{home}/.nvm/current/bin").is_symlink()
+          else []),
+        # volta
+        f"{home}/.volta/bin",
+        # asdf shims
+        f"{home}/.asdf/shims",
+        # fnm current
+        f"{home}/.fnm/current/bin",
+    ]
+    current_path = _os.environ.get("PATH", "")
+    for c in candidates:
+        if c and _os.path.isdir(c) and c not in current_path:
+            extra_paths.append(c)
+    if not extra_paths:
+        return ""
+    enriched = ":".join(extra_paths) + ":" + current_path
+    return f"PATH={shlex.quote(enriched)} "
 
 
 def _tmux_binary() -> str:
@@ -145,6 +189,9 @@ async def _spawn_pane(
                 command = f"CLAUDE_CODE_OAUTH_TOKEN={_shlex.quote(key)} {command}"
             else:
                 command = f"ANTHROPIC_API_KEY={_shlex.quote(key)} {command}"
+        # Prepend PATH enrichment so tmux panes can find claude + other tools
+        # regardless of how the backend was launched (e.g. via SSH with minimal PATH).
+        command = _build_env_prefix() + command
         args.extend([command])
     logger.warning(
         "=== SPAWN_PANE DEBUG ===\n  tmux args: %s\n  working_dir: %s\n  command: %s",
