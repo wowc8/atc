@@ -530,6 +530,37 @@ class TowerController:
 
         return progress
 
+    async def _respawn_leader(self, project_id: str, goal: str) -> str | None:
+        """Respawn a dead leader and return the new session_id, or None on failure."""
+        try:
+            from atc.leader.leader import stop_leader
+
+            logger.info("Respawning dead leader for project %s", project_id)
+            # Wipe the dead session link from the leader row so start_leader
+            # creates a fresh session instead of reusing the corpse.
+            await self._db.execute(
+                "UPDATE leaders SET session_id = NULL, status = 'idle',"
+                " updated_at = datetime('now') WHERE project_id = ?",
+                (project_id,),
+            )
+            await self._db.commit()
+
+            context_package = await build_context_package(self._db, project_id, goal)
+            new_session_id = await start_leader(
+                self._db,
+                project_id,
+                goal=goal,
+                event_bus=self._event_bus,
+                context_package=context_package,
+            )
+            self._leader_session_id = new_session_id
+            self._leader_output_lines.clear()
+            logger.info("Leader respawned: new session %s", new_session_id)
+            return new_session_id
+        except Exception:
+            logger.exception("Failed to respawn leader for project %s", project_id)
+            return None
+
     async def _send_leader_kickoff(self, session_id: str, goal: str) -> None:
         """Send the initial kickoff message to the Leader pane, including context."""
         if not self._current_project_id:
@@ -581,12 +612,35 @@ class TowerController:
             ]
             kickoff_msg = "\n".join(lines)
 
-            await send_leader_message(
-                self._db,
-                self._current_project_id,
-                kickoff_msg,
-                event_bus=self._event_bus,
-            )
+            try:
+                await send_leader_message(
+                    self._db,
+                    self._current_project_id,
+                    kickoff_msg,
+                    event_bus=self._event_bus,
+                )
+            except ValueError as exc:
+                # Pane died between spawn and kickoff — respawn once and retry
+                err_msg = str(exc).lower()
+                if "dead" in err_msg or "error" in err_msg or "disconnected" in err_msg:
+                    logger.warning(
+                        "Leader pane dead during kickoff for session %s — respawning once",
+                        session_id,
+                    )
+                    new_id = await self._respawn_leader(self._current_project_id, goal)
+                    if new_id:
+                        # Retry kickoff with fresh session
+                        await send_leader_message(
+                            self._db,
+                            self._current_project_id,
+                            kickoff_msg,
+                            event_bus=self._event_bus,
+                        )
+                        session_id = new_id
+                    else:
+                        raise
+                else:
+                    raise
             logger.info(
                 "Sent kickoff message to leader session %s (project %s)",
                 session_id,
@@ -637,6 +691,27 @@ class TowerController:
                     "Please continue with your goal.",
                     event_bus=self._event_bus,
                 )
+            except ValueError as exc:
+                # Pane is dead — respawn the leader and resend the kickoff
+                err_msg = str(exc).lower()
+                if "dead" in err_msg or "error" in err_msg or "disconnected" in err_msg:
+                    logger.warning(
+                        "Leader pane dead for session %s — respawning (attempt %d/%d)",
+                        session_id,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    new_id = await self._respawn_leader(project_id, goal)
+                    if new_id:
+                        session_id = new_id
+                        await self._send_leader_kickoff(new_id, goal)
+                        # Give new leader time to produce output before next check
+                        await asyncio.sleep(retry_wait)
+                        continue
+                    else:
+                        logger.error("Leader respawn failed — giving up")
+                        break
+                logger.exception("Failed to send nudge to leader session %s", session_id)
             except Exception:
                 logger.exception(
                     "Failed to send nudge to leader session %s", session_id
