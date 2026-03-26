@@ -422,6 +422,32 @@ class TestMarkTaskDone:
         assert updated.status == "done"
         mock_destroy.assert_not_called()
 
+    async def test_counter_decremented_even_without_assignment_in_memory(
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """Bug #163: counter must decrement even when orchestrator has no in-memory assignment.
+
+        This covers the case where the server restarted / a fresh orchestrator
+        was created after aces were spawned by a previous instance.
+        """
+        import atc.leader.orchestrator as orch_mod
+        from atc.state import db as db_ops
+        tg = await create_task_graph(db, orchestrator.project_id, "Task A")
+        # Advance through state machine so mark_task_done can mark it done
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
+        await db_ops.update_task_graph_status(db, tg.id, "in_progress")
+
+        # Manually bump the global counter (simulating a spawned ace)
+        orch_mod._GLOBAL_ACTIVE_ACES = 1
+        # NOTE: orchestrator.assignments is empty (fresh instance, simulating restart)
+
+        await orchestrator.mark_task_done(tg.id)
+
+        assert orch_mod._GLOBAL_ACTIVE_ACES == 0
+
 
 # ---------------------------------------------------------------------------
 # mark_task_failed
@@ -468,6 +494,24 @@ class TestMarkTaskFailed:
 # ---------------------------------------------------------------------------
 # get_progress
 # ---------------------------------------------------------------------------
+
+
+    async def test_failed_counter_decremented_without_in_memory_assignment(
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """Bug #163: mark_task_failed must also decrement counter unconditionally."""
+        import atc.leader.orchestrator as orch_mod
+        tg = await create_task_graph(db, orchestrator.project_id, "Task Fail")
+
+        orch_mod._GLOBAL_ACTIVE_ACES = 2
+        # No in-memory assignment
+
+        await orchestrator.mark_task_failed(tg.id)
+
+        assert orch_mod._GLOBAL_ACTIVE_ACES == 1  # decremented once
 
 
 @pytest.mark.asyncio
