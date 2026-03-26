@@ -31,4 +31,10 @@ elif [[ -n "${ATC_STAGING_DIR:-}" ]]; then
 fi
 
 # 4. Hand off to claude.
-exec claude --dangerously-skip-permissions "$@"
+# If ATC_INITIAL_PROMPT is set, pass it as the positional prompt argument so
+# Claude starts working immediately on the goal without waiting for input.
+if [[ -n "${ATC_INITIAL_PROMPT:-}" ]]; then
+    exec claude --dangerously-skip-permissions "$@" "${ATC_INITIAL_PROMPT}"
+else
+    exec claude --dangerously-skip-permissions "$@"
+fi
