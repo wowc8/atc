@@ -43,7 +43,7 @@ def _resolve_api_base_url(api_base_url: str) -> str:
         _s = _load_settings()
         return f"http://{_s.server.host}:{_s.server.port}"
     except Exception:
-        return "http://127.0.0.1:8420"
+        return "http://127.0.0.1:8421"
 
 
 @dataclass(frozen=True)

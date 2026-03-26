@@ -98,6 +98,21 @@ async def decompose_goal(
             error=f"Project {project_id} not found",
         )
 
+    # Bug #164: decompose is idempotent — delete any existing todo/unassigned
+    # task_graphs before creating new ones.  This prevents duplicates when
+    # decompose is called after task_graphs were already created individually
+    # (e.g. via POST /api/projects/{id}/task-graphs) or when decompose is
+    # called more than once.
+    existing = await db_ops.list_task_graphs(conn, project_id=project_id)
+    for tg in existing:
+        if tg.status == "todo" and tg.assigned_ace_id is None:
+            await db_ops.delete_task_graph(conn, tg.id)
+            logger.debug(
+                "decompose_goal: deleted pre-existing todo task_graph %s ('%s')",
+                tg.id,
+                tg.title,
+            )
+
     created: list[TaskGraph] = []
     title_to_id: dict[str, str] = {}
 

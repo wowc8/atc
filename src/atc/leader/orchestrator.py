@@ -184,6 +184,21 @@ class LeaderOrchestrator:
 
             working_dir = repo_path or str(deployed.root)
 
+            # Bug #162: if the Ace runs in repo_path, the Leader's CLAUDE.md is already
+            # there and the Ace will think it is a Leader (refusing to create files).
+            # Fix: copy the Ace's CLAUDE.md into repo_path, overwriting the Leader's.
+            if repo_path:
+                import shutil as _shutil
+                from pathlib import Path as _Path
+                ace_claude_md_src = deployed.root / "CLAUDE.md"
+                ace_claude_md_dst = _Path(repo_path) / "CLAUDE.md"
+                if ace_claude_md_src.exists():
+                    _shutil.copy2(str(ace_claude_md_src), str(ace_claude_md_dst))
+                    logger.info(
+                        "Copied Ace CLAUDE.md to repo_path %s (overwrites Leader copy)",
+                        ace_claude_md_dst,
+                    )
+
             launch_cmd = get_launch_command(
                 project.agent_provider if project else "claude_code",
             )
@@ -306,11 +321,23 @@ class LeaderOrchestrator:
             "done",
         )
 
+        # Bug #163: decrement the global counter unconditionally when a task is
+        # marked done, regardless of whether this orchestrator instance has the
+        # assignment in memory.  Orchestrators can be recreated after a server
+        # restart or across requests, so self.assignments may be empty even
+        # when real Aces were running.
+        global _GLOBAL_ACTIVE_ACES
+        lock = await _get_global_lock()
+        async with lock:
+            _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
+            logger.debug(
+                "mark_task_done: decremented _GLOBAL_ACTIVE_ACES to %d (task %s)",
+                _GLOBAL_ACTIVE_ACES,
+                task_graph_id,
+            )
+
         if assignment is not None:
             assignment.status = "done"
-            # Decrement global counter when an Ace finishes
-            global _GLOBAL_ACTIVE_ACES
-            _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
 
             # Destroy the Ace session (free resources)
             try:
@@ -350,10 +377,16 @@ class LeaderOrchestrator:
         """Handle a failed task — update status and clean up Ace."""
         assignment = self.assignments.get(task_graph_id)
 
-        # Decrement global counter when an Ace fails
-        if assignment and assignment.status in ("assigned", "working"):
-            global _GLOBAL_ACTIVE_ACES
+        # Bug #163: decrement unconditionally (same reasoning as mark_task_done).
+        global _GLOBAL_ACTIVE_ACES
+        lock = await _get_global_lock()
+        async with lock:
             _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
+            logger.debug(
+                "mark_task_failed: decremented _GLOBAL_ACTIVE_ACES to %d (task %s)",
+                _GLOBAL_ACTIVE_ACES,
+                task_graph_id,
+            )
 
         # Update the assignment record status
         if assignment and assignment.assignment_id:

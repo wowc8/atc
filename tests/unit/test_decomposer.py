@@ -285,3 +285,52 @@ class TestGetCompletionStatus:
         assert status["done"] == 0
         assert status["all_done"] is False
         assert status["progress_pct"] == 0
+
+    async def test_decompose_is_idempotent_replaces_todo_tasks(self, db) -> None:
+        """Bug #164: calling decompose twice should replace, not duplicate."""
+        project = await create_project(db, "test-proj")
+        context = {"project_id": project.id, "goal": "Build feature"}
+
+        # First call — creates 2 tasks
+        await decompose_goal(db, context, [
+            TaskSpec(title="Task A"),
+            TaskSpec(title="Task B"),
+        ])
+        tasks_after_first = await list_task_graphs(db, project_id=project.id)
+        assert len(tasks_after_first) == 2
+
+        # Second call with different specs — should replace, not add
+        result = await decompose_goal(db, context, [
+            TaskSpec(title="Task C"),
+            TaskSpec(title="Task D"),
+            TaskSpec(title="Task E"),
+        ])
+        tasks_after_second = await list_task_graphs(db, project_id=project.id)
+        # Should have exactly 3, not 5
+        assert len(tasks_after_second) == 3
+        assert len(result.task_graphs) == 3
+        titles = {t.title for t in tasks_after_second}
+        assert titles == {"Task C", "Task D", "Task E"}
+
+    async def test_decompose_does_not_delete_assigned_tasks(self, db) -> None:
+        """Bug #164: assigned tasks (ace running) should not be wiped by decompose."""
+        from atc.state.db import update_task_graph, update_task_graph_status
+        project = await create_project(db, "test-proj")
+        context = {"project_id": project.id, "goal": "Build feature"}
+
+        # Create a task and mark it assigned (simulate an ace is working on it)
+        await decompose_goal(db, context, [TaskSpec(title="In Progress")])
+        tasks = await list_task_graphs(db, project_id=project.id)
+        assert len(tasks) == 1
+        # Simulate assignment: set status + assigned_ace_id
+        await update_task_graph_status(db, tasks[0].id, "assigned")
+        await update_task_graph(db, tasks[0].id, assigned_ace_id="some-ace")
+
+        # Re-decompose — should NOT delete the assigned task
+        result = await decompose_goal(db, context, [TaskSpec(title="New Task")])
+        all_tasks = await list_task_graphs(db, project_id=project.id)
+        # assigned task preserved + new task created
+        assert len(all_tasks) == 2
+        statuses = {t.status for t in all_tasks}
+        assert "assigned" in statuses
+        assert "todo" in statuses
