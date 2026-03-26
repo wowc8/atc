@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -73,10 +74,21 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 
+def _tmux_binary() -> str:
+    """Resolve the tmux binary path, checking common macOS/Linux locations."""
+    tmux = shutil.which("tmux")
+    if tmux:
+        return tmux
+    for candidate in ("/usr/local/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/bin/tmux"):
+        if shutil.which(candidate):
+            return candidate
+    return "tmux"  # fallback — will fail with a clear error
+
+
 async def _tmux_run(*args: str) -> str:
     """Run a tmux command and return stdout."""
     proc = await asyncio.create_subprocess_exec(
-        "tmux",
+        _tmux_binary(),
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
