@@ -60,6 +60,11 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
     "yes, i trust this folder",
     "no, exit",
     "security guide",
+    # Welcome/tips screen — Claude is running but not yet in the interactive
+    # prompt.  Listed here so the "claude code" fast-exit doesn't fire early.
+    "tips for getting started",
+    "welcome to claude code",
+    "welcome back",
 )
 
 
@@ -136,7 +141,7 @@ async def _spawn_pane(
     return pane_id
 
 
-async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
+async def _accept_trust_dialog(pane_id: str, *, timeout: float = 10.0) -> bool:
     """Accept all Claude Code startup confirmation dialogs.
 
     Claude Code (v2+) shows up to two dialogs before becoming interactive:
@@ -229,7 +234,21 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 20.0) -> bool:
             # false-positive early-exit if this check ran first.
             # Guard: only exit early when no known dialog trigger strings present.
             if "claude code" in lowered and not any(t in lowered for t in _DIALOG_TRIGGERS):
+                logger.debug("Pane %s: Claude Code ready (text match, %.1fs)", pane_id, elapsed)
                 return bool(dismissed)
+
+            # Fast-exit: pane left alternate-screen mode (TUI exited) and the
+            # interactive ❯ prompt is visible.  This fires on Mac where the
+            # alternate_on flag goes False as soon as dialogs clear.
+            try:
+                alt_on = await _get_alternate_on(pane_id)
+                if not alt_on and ("❯" in output or "> " in output):
+                    logger.debug(
+                        "Pane %s: prompt visible (alternate_on=0, %.1fs)", pane_id, elapsed
+                    )
+                    return bool(dismissed)
+            except RuntimeError:
+                pass
 
         except RuntimeError:
             pass
