@@ -125,11 +125,14 @@ async def _spawn_pane(
     if command:
         import shlex as _shlex
 
-        from atc.agents.auth import resolve_agent_api_key
+        from atc.agents.auth import is_oauth_key, resolve_agent_api_key
 
         key = resolve_agent_api_key()
         if key:
-            command = f"ANTHROPIC_API_KEY={_shlex.quote(key)} {command}"
+            if is_oauth_key(key):
+                command = f"CLAUDE_CODE_OAUTH_TOKEN={_shlex.quote(key)} {command}"
+            else:
+                command = f"ANTHROPIC_API_KEY={_shlex.quote(key)} {command}"
         args.extend([command])
     logger.warning(
         "=== SPAWN_PANE DEBUG ===\n  tmux args: %s\n  working_dir: %s\n  command: %s",
