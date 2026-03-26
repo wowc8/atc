@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from atc.terminal.control import send_instruction_async, send_keys_async
+
 if TYPE_CHECKING:
     from atc.core.events import EventBus
 
@@ -199,9 +201,15 @@ class PtyStreamPool:
     and integration with the WsHub for binary frame distribution.
     """
 
-    def __init__(self, event_bus: EventBus, fifo_dir: Path = FIFO_DIR) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        fifo_dir: Path = FIFO_DIR,
+        tmux_session: str = "atc",
+    ) -> None:
         self._event_bus = event_bus
         self._fifo_dir = fifo_dir
+        self._tmux_session = tmux_session
         self._readers: dict[str, PtyStreamReader] = {}
         self._started = False
 
@@ -270,29 +278,26 @@ class PtyStreamPool:
         )
 
     async def send_keys(self, session_id: str, keys: str) -> None:
-        """Send keystrokes to a session's tmux pane via tmux send-keys.
+        """Send keystrokes to a session's tmux pane via hex-encoded send-keys.
 
         This is the input path: keystrokes from the frontend WebSocket
-        are forwarded to the tmux pane.
+        are forwarded to the tmux pane via the control module.
         """
         reader = self._readers.get(session_id)
         if reader is None:
             raise ValueError(f"No active reader for session {session_id}")
-        await PtyStreamReader._run_tmux("send-keys", "-t", reader._tmux_pane, keys)
+        await send_keys_async(self._tmux_session, reader._tmux_pane, keys)
 
     async def send_instruction(self, session_id: str, text: str) -> None:
-        """Send an instruction followed by Enter to a session's tmux pane.
+        """Send an instruction as bracketed paste followed by Enter.
 
-        Implements the atomic instruction pattern from PATTERNS.md:
-        text and Enter are sent back-to-back with no await gap.
+        Uses the control module for reliable hex-encoded delivery with
+        bracketed paste wrapping and auto-retry on connection failure.
         """
         reader = self._readers.get(session_id)
         if reader is None:
             raise ValueError(f"No active reader for session {session_id}")
-
-        pane = reader._tmux_pane
-        await PtyStreamReader._run_tmux("send-keys", "-t", pane, text)
-        await PtyStreamReader._run_tmux("send-keys", "-t", pane, "Enter")
+        await send_instruction_async(self._tmux_session, reader._tmux_pane, text)
 
     async def check_tui_ready(self, session_id: str) -> bool:
         """Check if the session's TUI is ready for input (not in alternate screen).
