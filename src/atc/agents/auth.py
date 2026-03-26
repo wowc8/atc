@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-_OAUTH_KEY_PREFIXES = ("oat", "claude_")
+_OAUTH_KEY_PREFIXES = ("oat", "claude_", "sk-ant-oat")
 
 
 def is_oauth_key(key: str) -> bool:
@@ -25,7 +25,10 @@ def resolve_agent_api_key() -> str | None:
     key = os.environ.get("ATC_ANTHROPIC_API_KEY")
     if key:
         return key
-    return os.environ.get("ANTHROPIC_API_KEY") or None
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    return os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or None
 
 
 def get_auth_mode() -> Literal["api_key", "oauth", "none"]:
