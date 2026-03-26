@@ -193,14 +193,17 @@ class TestPtyStreamPool:
         assert pool.get_reader("nonexistent") is None
 
     @patch.object(PtyStreamReader, "_run_tmux", new_callable=AsyncMock)
-    async def test_send_keys(self, mock_tmux: AsyncMock, pool: PtyStreamPool) -> None:
+    @patch("atc.terminal.pty_stream.send_keys_async", new_callable=AsyncMock)
+    async def test_send_keys(
+        self,
+        mock_send_keys: AsyncMock,
+        mock_tmux: AsyncMock,
+        pool: PtyStreamPool,
+    ) -> None:
         mock_tmux.return_value = ""
         await pool.add_session("sess-1", "%0")
         await pool.send_keys("sess-1", "ls -la")
-        # send_keys should call tmux send-keys
-        calls = [c for c in mock_tmux.call_args_list if c[0][0] == "send-keys"]
-        assert len(calls) == 1
-        assert calls[0][0] == ("send-keys", "-t", "%0", "ls -la")
+        mock_send_keys.assert_called_once_with("atc", "%0", "ls -la")
         await pool.stop()
 
     async def test_send_keys_no_reader(self, pool: PtyStreamPool) -> None:
@@ -208,15 +211,17 @@ class TestPtyStreamPool:
             await pool.send_keys("nonexistent", "keys")
 
     @patch.object(PtyStreamReader, "_run_tmux", new_callable=AsyncMock)
-    async def test_send_instruction(self, mock_tmux: AsyncMock, pool: PtyStreamPool) -> None:
+    @patch("atc.terminal.pty_stream.send_instruction_async", new_callable=AsyncMock)
+    async def test_send_instruction(
+        self,
+        mock_send_instr: AsyncMock,
+        mock_tmux: AsyncMock,
+        pool: PtyStreamPool,
+    ) -> None:
         mock_tmux.return_value = ""
         await pool.add_session("sess-1", "%0")
         await pool.send_instruction("sess-1", "do something")
-        # Should have send-keys calls for text + Enter
-        send_calls = [c for c in mock_tmux.call_args_list if c[0][0] == "send-keys"]
-        assert len(send_calls) == 2
-        assert send_calls[0][0] == ("send-keys", "-t", "%0", "do something")
-        assert send_calls[1][0] == ("send-keys", "-t", "%0", "Enter")
+        mock_send_instr.assert_called_once_with("atc", "%0", "do something")
         await pool.stop()
 
     async def test_send_instruction_no_reader(self, pool: PtyStreamPool) -> None:

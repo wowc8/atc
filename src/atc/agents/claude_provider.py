@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+from atc.terminal.control import send_instruction_async
+
 from atc.agents.base import (
     OutputChunk,
     PromptResult,
@@ -149,34 +151,12 @@ class ClaudeCodeProvider:
     async def send_prompt(self, session_id: str, prompt: str) -> PromptResult:
         tracked = self._get_tracked(session_id)
 
-        # Send text + Enter atomically (no await gap per PATTERNS.md)
-        escaped = prompt.replace("'", "'\\''")
-        send_cmd = [
-            _TMUX_CMD,
-            "send-keys",
-            "-t",
-            tracked.pane_id,
-            escaped,
-            "Enter",
-        ]
-
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *send_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            await send_instruction_async(
+                self._tmux_session, tracked.pane_id, prompt
             )
-            _, stderr = await proc.communicate()
-        except OSError as exc:
+        except Exception as exc:
             raise ProviderError(self.name, f"send-keys failed: {exc}") from exc
-
-        if proc.returncode != 0:
-            err = stderr.decode().strip()
-            return PromptResult(
-                session_id=session_id,
-                accepted=False,
-                message=f"tmux send-keys failed: {err}",
-            )
 
         tracked.status = SessionStatus.BUSY
         logger.info("Sent prompt to session %s (pane %s)", session_id, tracked.pane_id)
