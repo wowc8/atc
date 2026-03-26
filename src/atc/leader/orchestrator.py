@@ -314,7 +314,13 @@ class LeaderOrchestrator:
                     "done",
                 )
 
-        # Update task graph status
+        # Update task graph status — advance through intermediate states as needed.
+        # The state machine requires assigned→in_progress→done, so we bridge the
+        # gap if the task is still in an earlier state.
+        tg = await db_ops.get_task_graph(self.conn, task_graph_id)
+        if tg is not None and tg.status == "assigned":
+            with contextlib.suppress(ValueError):
+                await db_ops.update_task_graph_status(self.conn, task_graph_id, "in_progress")
         await db_ops.update_task_graph_status(
             self.conn,
             task_graph_id,

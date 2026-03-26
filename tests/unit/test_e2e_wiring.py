@@ -165,9 +165,9 @@ class TestTowerToLeaderWiring:
         args, kwargs = mock_spawn.call_args
         assert args[0] == "atc"  # tmux session name
         assert args[1] == get_launch_command("claude_code")
-        # Leader now always uses the deploy staging directory so Claude Code
-        # finds the deployed CLAUDE.md (Leader role/goal instructions).
-        assert kwargs.get("working_dir") == "/tmp/atc-agents/leader-1"
+        # Leader uses repo_path when set (so Claude works in the actual repo);
+        # falls back to staging dir only when repo_path is None.
+        assert kwargs.get("working_dir") == "/tmp/repo"
 
     @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
     @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
@@ -311,7 +311,8 @@ class TestLeaderToAceWiring:
         mock_create.assert_called_once()
         _, kwargs = mock_create.call_args
         assert kwargs["working_dir"] == "/tmp/repo"
-        assert kwargs["launch_command"] == "claude --dangerously-skip-permissions"
+        from atc.agents.factory import get_launch_command
+        assert kwargs["launch_command"] == get_launch_command("claude_code")
 
     @patch("atc.leader.orchestrator.create_ace", new_callable=AsyncMock, return_value="ace-1")
     @patch("atc.leader.orchestrator.deploy_ace_files")

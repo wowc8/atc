@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-_OAUTH_KEY_PREFIXES = ("oat", "claude_", "sk-ant-oat")
+_OAUTH_KEY_PREFIXES = ("oat", "claude_", "sk-ant-oat01")
 
 
 def is_oauth_key(key: str) -> bool:

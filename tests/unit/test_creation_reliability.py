@@ -107,9 +107,16 @@ class TestSendInstruction:
     @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
     @patch("atc.session.ace._tmux_run", new_callable=AsyncMock)
     @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
+    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
     async def test_success(
-        self, mock_ready: AsyncMock, mock_tmux: AsyncMock, mock_capture: AsyncMock
+        self,
+        mock_wait: AsyncMock,
+        mock_ready: AsyncMock,
+        mock_tmux: AsyncMock,
+        mock_capture: AsyncMock,
     ) -> None:
+        # send_instruction calls wait_for_prompt on attempt 1, check_tui_ready on retries
+        mock_wait.return_value = True
         mock_ready.return_value = True
         mock_tmux.return_value = ""
         mock_capture.return_value = "$ do something important\noutput here"
@@ -122,7 +129,9 @@ class TestSendInstruction:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    async def test_tui_not_ready(self, mock_ready: AsyncMock) -> None:
+    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
+    async def test_tui_not_ready(self, mock_wait: AsyncMock, mock_ready: AsyncMock) -> None:
+        mock_wait.return_value = False
         mock_ready.return_value = False
         result = await send_instruction("%0", "test", max_retries=2)
         assert result is False
@@ -131,9 +140,15 @@ class TestSendInstruction:
     @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
     @patch("atc.session.ace._tmux_run", new_callable=AsyncMock)
     @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
+    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
     async def test_retry_on_verification_failure(
-        self, mock_ready: AsyncMock, mock_tmux: AsyncMock, mock_capture: AsyncMock
+        self,
+        mock_wait: AsyncMock,
+        mock_ready: AsyncMock,
+        mock_tmux: AsyncMock,
+        mock_capture: AsyncMock,
     ) -> None:
+        mock_wait.return_value = True
         mock_ready.return_value = True
         mock_tmux.return_value = ""
         # First attempt: instruction not in output; second: found
