@@ -60,9 +60,14 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
     "bypass permissions",
     "do you want to use this api key",
     "will be able to read",
+    # Claude Code v2+ uses contraction: "Claude Code'll be able to read..."
+    "'ll be able to read",
+    "able to read, edit",
     "yes, i trust this folder",
     "no, exit",
     "security guide",
+    "is this a project you created",
+    "one you trust",
     # Welcome/tips screen — Claude is running but not yet in the interactive
     # prompt.  Listed here so the "claude code" fast-exit doesn't fire early.
     "tips for getting started",
@@ -283,6 +288,9 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 10.0) -> bool:
                 or "do you trust" in lowered
                 or "yes, i trust this folder" in lowered
                 or "will be able to read" in lowered
+                or "'ll be able to read" in lowered  # v2+ contraction form
+                or "able to read, edit" in lowered
+                or "is this a project you created" in lowered
             ):
                 await _tmux_run("send-keys", "-t", pane_id, "Enter")
                 logger.info("Pane %s: accepted trust-folder dialog", pane_id)
@@ -302,13 +310,23 @@ async def _accept_trust_dialog(pane_id: str, *, timeout: float = 10.0) -> bool:
             # Fast-exit: pane left alternate-screen mode (TUI exited) and the
             # interactive ❯ prompt is visible.  This fires on Mac where the
             # alternate_on flag goes False as soon as dialogs clear.
+            #
+            # IMPORTANT: The trust dialog also uses ❯ for menu items (❯ 1. Yes…).
+            # Only treat ❯ as the interactive prompt when it appears on a line by
+            # itself (bare ❯ or "> "), NOT as a menu item prefix like "❯ 1.".
             try:
                 alt_on = await _get_alternate_on(pane_id)
-                if not alt_on and ("❯" in output or "> " in output):
-                    logger.debug(
-                        "Pane %s: prompt visible (alternate_on=0, %.1fs)", pane_id, elapsed
-                    )
-                    return bool(dismissed)
+                if not alt_on:
+                    # Check for bare prompt line: "❯" or "> " alone, not "❯ 1."
+                    import re as _re_mod
+                    _bare_prompt = _re_mod.compile(r"^[❯>]\s*$", _re_mod.MULTILINE)
+                    if _bare_prompt.search(output):
+                        # Extra guard: ensure no dialog triggers are still visible
+                        if not any(t in lowered for t in _DIALOG_TRIGGERS):
+                            logger.debug(
+                                "Pane %s: prompt visible (alternate_on=0, %.1fs)", pane_id, elapsed
+                            )
+                            return bool(dismissed)
             except RuntimeError:
                 pass
 

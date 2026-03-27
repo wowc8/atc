@@ -351,7 +351,9 @@ async def start_leader(
         from atc.leader.leader import send_leader_message as _send_leader_msg
 
         async def _kickoff() -> None:
-            await _asyncio.sleep(3)  # brief delay for pane to settle after trust dialog
+            import logging as _logging
+            _log = _logging.getLogger(__name__)
+            # Build kickoff message
             cursor = await db.execute(
                 "SELECT name, description, repo_path, github_repo FROM projects WHERE id = ?",
                 (project_id,),
@@ -381,13 +383,27 @@ async def start_leader(
                 "Begin NOW. Do not ask for clarification — start decomposing.",
             ]
             kickoff_msg = "\n".join(lines)
-            try:
-                await _send_leader_msg(db, project_id, kickoff_msg, event_bus=event_bus)
-            except Exception:
-                import logging as _logging
-                _logging.getLogger(__name__).exception(
-                    "Auto-kickoff failed for project %s — leader may need manual brief", project_id
-                )
+
+            # Retry loop: wait for the leader pane to be ready before sending.
+            # The pane needs time to start Claude Code and clear startup dialogs.
+            # send_leader_message internally calls wait_for_prompt, so we just
+            # need to retry on ValueError (pane dead/not ready) for up to 60s.
+            deadline = _asyncio.get_event_loop().time() + 60
+            attempt = 0
+            while _asyncio.get_event_loop().time() < deadline:
+                attempt += 1
+                await _asyncio.sleep(5)  # wait for pane to initialise
+                try:
+                    await _send_leader_msg(db, project_id, kickoff_msg, event_bus=event_bus)
+                    _log.info("Auto-kickoff sent to leader for project %s (attempt %d)", project_id, attempt)
+                    return
+                except ValueError as exc:
+                    _log.debug("Auto-kickoff attempt %d for project %s: %s", attempt, project_id, exc)
+                    # Pane not ready yet — retry
+                except Exception:
+                    _log.exception("Auto-kickoff failed for project %s on attempt %d", project_id, attempt)
+                    return  # non-retryable error
+            _log.warning("Auto-kickoff timed out for project %s after %d attempts", project_id, attempt)
 
         _asyncio.ensure_future(_kickoff())
 

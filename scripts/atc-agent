@@ -30,5 +30,5 @@ elif [[ -n "${ATC_STAGING_DIR:-}" ]]; then
     cd "${ATC_STAGING_DIR}"
 fi
 
-# 4. Hand off to claude.
+# 4. Hand off to claude (always interactive mode — prompt is sent via tmux send-keys).
 exec claude --dangerously-skip-permissions "$@"

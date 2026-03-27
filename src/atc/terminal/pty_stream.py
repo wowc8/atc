@@ -10,8 +10,20 @@ import asyncio
 import contextlib
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+
+def _tmux_binary() -> str:
+    """Resolve the tmux binary, checking common macOS/Linux install locations."""
+    tmux = shutil.which("tmux")
+    if tmux:
+        return tmux
+    for candidate in ("/usr/local/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/bin/tmux"):
+        if os.path.isfile(candidate):
+            return candidate
+    return "tmux"
 
 from atc.terminal.control import send_instruction_async, send_keys_async
 
@@ -183,7 +195,7 @@ class PtyStreamReader:
     async def _run_tmux(*args: str) -> str:
         """Execute a tmux command and return stdout."""
         proc = await asyncio.create_subprocess_exec(
-            "tmux", *args,
+            _tmux_binary(), *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
