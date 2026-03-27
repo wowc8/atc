@@ -107,9 +107,16 @@ def _build_env_prefix() -> str:
         *([str(_Path(f"{home}/.nvm/current/bin").resolve())]
           if _Path(f"{home}/.nvm/current/bin").is_symlink()
           else []),
-        # nvm versioned installs — sorted descending so newest is first;
-        # covers machines where ~/.nvm/current symlink is absent (e.g. Big Sur)
-        *sorted(_glob.glob(f"{home}/.nvm/versions/node/*/bin"), reverse=True),
+        # nvm versioned installs.
+        # IMPORTANT: newer Node versions may require a newer macOS (e.g. Node 24
+        # needs Monterey 13.5+, Big Sur only has 11). We check each bin dir's
+        # `node` binary with a cheap `--version` call at PATH-build time (once
+        # per server start) and skip any that crash with dyld/OS errors.
+        *[
+            p for p in sorted(_glob.glob(f"{home}/.nvm/versions/node/*/bin"), reverse=True)
+            if _os.path.isfile(_os.path.join(p, "node"))
+            and _os.system(f"{_os.path.join(p, 'node')} --version > /dev/null 2>&1") == 0
+        ],
         # volta
         f"{home}/.volta/bin",
         # asdf shims
