@@ -275,10 +275,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 7b. Start PTY readers for all reconnected sessions that have live panes
     # (the event-driven auto-start may have missed sessions that were already idle)
+    from atc.session.ace import _pane_is_alive
+
     try:
         all_sessions = await db_ops.list_active_sessions(db)
         for sess in all_sessions:
             if sess.tmux_pane and pty_pool.get_reader(sess.id) is None:
+                # Verify the pane is actually alive before attaching a PTY reader.
+                # A stale pane ID (e.g. %154 from a previous run) will cause
+                # "tmux pipe-pane failed: can't find pane" if we blindly attach.
+                if not await _pane_is_alive(sess.tmux_pane):
+                    logger.warning(
+                        "Skipping PTY reader for session %s — pane %s is dead; "
+                        "marking session disconnected",
+                        sess.id,
+                        sess.tmux_pane,
+                    )
+                    await db_ops.update_session_status(db, sess.id, "disconnected")
+                    continue
                 logger.info(
                     "Starting PTY reader for reconnected session %s (pane %s)",
                     sess.id,
@@ -290,7 +304,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 8. Restore TowerController state from DB so existing tower sessions
     # survive server restarts without the frontend needing to re-create them.
-    from atc.session.ace import _pane_is_alive
     from atc.tower.controller import TowerState
 
     try:
