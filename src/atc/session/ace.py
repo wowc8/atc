@@ -95,6 +95,7 @@ def _build_env_prefix() -> str:
     import os as _os
     extra_paths: list[str] = []
     home = _os.path.expanduser("~")
+    import glob as _glob
     candidates = [
         # Homebrew — Intel Mac
         "/usr/local/bin",
@@ -106,6 +107,9 @@ def _build_env_prefix() -> str:
         *([str(_Path(f"{home}/.nvm/current/bin").resolve())]
           if _Path(f"{home}/.nvm/current/bin").is_symlink()
           else []),
+        # nvm versioned installs — sorted descending so newest is first;
+        # covers machines where ~/.nvm/current symlink is absent (e.g. Big Sur)
+        *sorted(_glob.glob(f"{home}/.nvm/versions/node/*/bin"), reverse=True),
         # volta
         f"{home}/.volta/bin",
         # asdf shims
