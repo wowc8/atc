@@ -89,12 +89,13 @@ def _compatible_nvm_bins(home: str) -> list[str]:
     candidate with ``node --version`` and return only working ones.
     """
     import glob as _g
+    import os as _os2
     import subprocess as _sp
 
     result = []
     for p in sorted(_g.glob(f"{home}/.nvm/versions/node/*/bin"), reverse=True):
-        node_bin = _os.path.join(p, "node")
-        if not _os.path.isfile(node_bin):
+        node_bin = _os2.path.join(p, "node")
+        if not _os2.path.isfile(node_bin):
             continue
         try:
             rc = _sp.run(
