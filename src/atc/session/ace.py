@@ -81,6 +81,34 @@ _DIALOG_TRIGGERS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 
+def _compatible_nvm_bins(home: str) -> list[str]:
+    """Return nvm bin dirs where node actually runs on this OS.
+
+    Newer Node versions (v20+) require macOS 13+ and crash with dyld
+    symbol errors on older systems like Big Sur (11). We probe each
+    candidate with ``node --version`` and return only working ones.
+    """
+    import glob as _g
+    import subprocess as _sp
+
+    result = []
+    for p in sorted(_g.glob(f"{home}/.nvm/versions/node/*/bin"), reverse=True):
+        node_bin = _os.path.join(p, "node")
+        if not _os.path.isfile(node_bin):
+            continue
+        try:
+            rc = _sp.run(
+                [node_bin, "--version"],
+                capture_output=True,
+                timeout=3,
+            ).returncode
+            if rc == 0:
+                result.append(p)
+        except Exception:
+            pass
+    return result
+
+
 def _build_env_prefix() -> str:
     """Build a shell env prefix that enriches PATH for tmux panes.
 
@@ -95,7 +123,6 @@ def _build_env_prefix() -> str:
     import os as _os
     extra_paths: list[str] = []
     home = _os.path.expanduser("~")
-    import glob as _glob
     candidates = [
         # Homebrew — Intel Mac
         "/usr/local/bin",
@@ -110,13 +137,9 @@ def _build_env_prefix() -> str:
         # nvm versioned installs.
         # IMPORTANT: newer Node versions may require a newer macOS (e.g. Node 24
         # needs Monterey 13.5+, Big Sur only has 11). We check each bin dir's
-        # `node` binary with a cheap `--version` call at PATH-build time (once
-        # per server start) and skip any that crash with dyld/OS errors.
-        *[
-            p for p in sorted(_glob.glob(f"{home}/.nvm/versions/node/*/bin"), reverse=True)
-            if _os.path.isfile(_os.path.join(p, "node"))
-            and _os.system(f"{_os.path.join(p, 'node')} --version > /dev/null 2>&1") == 0
-        ],
+        # `node` binary with a cheap `--version` call and skip any that fail
+        # (dyld crash, missing OS symbols, etc.).
+        *_compatible_nvm_bins(home),
         # volta
         f"{home}/.volta/bin",
         # asdf shims
