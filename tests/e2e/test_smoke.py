@@ -24,7 +24,12 @@ def client(tmp_path: Path) -> TestClient:
     db_path = str(tmp_path / "test.db")
     settings = Settings(database={"path": db_path})  # type: ignore[arg-type]
     app = create_app(settings)
-    with TestClient(app) as c:
+    with (
+        patch("atc.leader.leader._accept_trust_dialog", new_callable=AsyncMock, return_value=False),
+        patch("atc.tower.session._accept_trust_dialog", new_callable=AsyncMock, return_value=False),
+        patch("atc.tower.controller.TowerController.start_session", new_callable=AsyncMock),
+        TestClient(app) as c,
+    ):
         yield c
 
 
@@ -38,7 +43,7 @@ class TestHealth:
         resp = client.get("/api/health")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["ok"] is True
+        assert data["status"] == "ok"
         assert "version" in data
 
 
@@ -249,10 +254,11 @@ class TestTowerStatus:
         assert data["state"] == "idle"
 
     def test_tower_status_after_project(self, client: TestClient) -> None:
+        initial = client.get("/api/tower/status").json()["active_projects"]
         client.post("/api/projects", json={"name": "counted-proj"})
         resp = client.get("/api/tower/status")
         data = resp.json()
-        assert data["active_projects"] == 1
+        assert data["active_projects"] == initial + 1
 
     @patch("atc.session.ace._tmux_run", new_callable=AsyncMock, return_value="%1")
     def test_tower_status_counts_sessions(
