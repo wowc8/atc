@@ -394,17 +394,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Runs in background to avoid blocking the lifespan for 30-60s.
     async def _auto_start_tower() -> None:
         try:
-            if tower_controller._state == TowerState.IDLE and not tower_controller._current_session_id:
-                logger.info("Tower is idle with no session — auto-starting session")
-                await tower_controller.start_session()
-                logger.info(
-                    "Tower auto-started: session=%s", tower_controller._current_session_id
-                )
-            elif tower_controller._current_session_id:
+            if tower_controller._current_session_id:
                 logger.info(
                     "Tower has restored session %s — skipping auto-start",
                     tower_controller._current_session_id,
                 )
+                return
+
+            if tower_controller._state != TowerState.IDLE:
+                return
+
+            # Only auto-start if there are user-created projects to work with.
+            # On a fresh install there are no projects yet — starting Tower with
+            # project_id=None produces a "● Managing" header with no context,
+            # which is confusing and blocks first-run UX.
+            from atc.state import db as db_ops
+            user_projects = await db_ops.list_projects(db, include_system=False)
+            if not user_projects:
+                logger.info("Tower idle with no user projects — skipping auto-start (first run or cleared DB)")
+                return
+
+            logger.info("Tower is idle with no session — auto-starting session")
+            await tower_controller.start_session()
+            logger.info(
+                "Tower auto-started: session=%s", tower_controller._current_session_id
+            )
         except Exception:
             logger.exception("Tower auto-start failed — Tower will start in idle state")
 
