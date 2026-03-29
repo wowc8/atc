@@ -332,12 +332,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
                     tower_controller._current_project_id = proj.id
                     tower_controller._current_session_id = ts.id
-                    tower_controller._state = TowerState.MANAGING
-                    logger.info(
-                        "Restored TowerController state: project=%s session=%s",
-                        proj.id,
-                        ts.id,
-                    )
                     # Also check for a leader session
                     leader = await db_ops.get_leader_by_project(db, proj.id)
                     if leader and leader.session_id:
@@ -368,6 +362,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                                     (leader.id,),
                                 )
                                 await db.commit()
+                    # Only restore as MANAGING if there is an active goal;
+                    # a live pane with no goal means the Tower is effectively
+                    # idle and the frontend should not show an active terminal.
+                    if tower_controller._current_goal:
+                        tower_controller._state = TowerState.MANAGING
+                        logger.info(
+                            "Restored TowerController state: MANAGING project=%s session=%s",
+                            proj.id,
+                            ts.id,
+                        )
+                    else:
+                        tower_controller._state = TowerState.IDLE
+                        logger.info(
+                            "Restored TowerController state: IDLE (no active goal)"
+                            " project=%s session=%s",
+                            proj.id,
+                            ts.id,
+                        )
                     restored = True
                     break
     except Exception:
@@ -451,7 +463,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Set ATC_ANTHROPIC_API_KEY for full functionality."
         )
     elif _auth_mode == "none":
-        logger.warning("No Anthropic API key configured.")
+        logger.warning(
+            "⚠️  No agent API key configured. Set ATC_ANTHROPIC_API_KEY or "
+            "CLAUDE_CODE_OAUTH_TOKEN in the environment before starting the backend. "
+            "Agent terminals will show 'Not logged in' and produce blank terminals."
+        )
 
     # Resolve the claude binary path at startup to handle nvm / non-standard installs.
     # On macOS with nvm, tmux panes spawn without sourcing shell RC files, so the
