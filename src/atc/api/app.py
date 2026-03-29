@@ -385,15 +385,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.exception("Failed to restore TowerController state from DB")
 
-    # 8b. Auto-start Tower if it's still idle after restore attempt.
+    # 8b. Auto-start Tower if no session was restored and state is still idle.
+    # Skip if a session was already restored (even as IDLE) — the pane is alive
+    # and the frontend will show it correctly. Auto-starting on top of a restored
+    # session would spawn a duplicate pane with no project context.
     # Runs in background to avoid blocking the lifespan for 30-60s.
     async def _auto_start_tower() -> None:
         try:
-            if tower_controller._state == TowerState.IDLE:
-                logger.info("Tower is idle after startup — auto-starting session")
+            if tower_controller._state == TowerState.IDLE and not tower_controller._current_session_id:
+                logger.info("Tower is idle with no session — auto-starting session")
                 await tower_controller.start_session()
                 logger.info(
                     "Tower auto-started: session=%s", tower_controller._current_session_id
+                )
+            elif tower_controller._current_session_id:
+                logger.info(
+                    "Tower has restored session %s — skipping auto-start",
+                    tower_controller._current_session_id,
                 )
         except Exception:
             logger.exception("Tower auto-start failed — Tower will start in idle state")
