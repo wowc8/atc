@@ -215,6 +215,18 @@ async def reconnect_all(
 
     results: dict[str, bool] = {}
     for session in sessions:
+        # Tower sessions are managed exclusively by the TowerController restore
+        # logic in the lifespan (step 8). Reconnecting them here would respawn
+        # the pane and transition state to MANAGING before the restore check
+        # can set it to IDLE (when there is no active goal). Skip them.
+        session_type = getattr(session, "session_type", None)
+        if session_type in ("tower", "manager"):
+            logger.info(
+                "Skipping reconnect for tower session %s — handled by TowerController restore",
+                session.id,
+            )
+            results[session.id] = True
+            continue
         ok = await reconnect_session(conn, session.id, event_bus=event_bus)
         results[session.id] = ok
 
