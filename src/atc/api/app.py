@@ -307,7 +307,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from atc.tower.controller import TowerState
 
     try:
-        projects = await db_ops.list_projects(db)
+        # include_system=True so the 'Tower Workspace' sentinel project is
+        # included — the tower session lives there and would be missed otherwise.
+        projects = await db_ops.list_projects(db, include_system=True)
         restored = False
         for proj in projects:
             if restored:
