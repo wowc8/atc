@@ -50,6 +50,9 @@ cleardb: ## Full reset: kill ALL dev processes, nuke venv + DB, rebuild from scr
 	else \
 		echo "  (no atc.db found)"; \
 	fi
+	@echo "→ Cleaning up stale agent staging dirs and tmux sessions..."
+	@rm -rf /tmp/atc-agents && echo "✓ /tmp/atc-agents cleared" || true
+	@/usr/local/bin/tmux kill-session -t atc 2>/dev/null && echo "✓ tmux atc session killed" || true
 	@echo "→ Nuking .venv to ensure a clean Python environment..."
 	@rm -rf $(VENV)
 	@echo "→ Rebuilding venv and installing all deps..."

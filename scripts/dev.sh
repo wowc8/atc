@@ -21,6 +21,16 @@ if lsof -i :8420 -sTCP:LISTEN -t >/dev/null 2>&1; then
   echo "  Port 8420 freed."
 fi
 
+# Check for agent auth credentials — warn early so the user knows before Tower tries to spawn
+if [ -z "${ATC_ANTHROPIC_API_KEY:-}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  echo ""
+  echo "⚠️  WARNING: No agent API key configured."
+  echo "   Set ATC_ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in your environment."
+  echo "   Without this, Tower/Leader/Ace terminals will show 'Not logged in' and fail to run."
+  echo "   Example: export CLAUDE_CODE_OAUTH_TOKEN=\$(claude setup-token)"
+  echo ""
+fi
+
 # Start backend
 echo "→ Starting backend (uvicorn with reload)..."
 # PYTHONPATH=src ensures uvicorn always loads from source, not stale site-packages

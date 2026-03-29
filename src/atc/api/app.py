@@ -171,7 +171,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     session_id,
                     session.tmux_pane,
                 )
-                await pty_pool.add_session(session_id, session.tmux_pane)
+                try:
+                    await pty_pool.add_session(session_id, session.tmux_pane)
+                except Exception as _pty_err:
+                    # Pane may have died between spawn and PTY reader start (e.g. claude
+                    # binary not found). Log and continue — don't crash the event handler.
+                    logger.warning(
+                        "PTY reader failed for session %s pane %s: %s",
+                        session_id,
+                        session.tmux_pane,
+                        _pty_err,
+                    )
 
         # Broadcast status changes on the state channel for AppContext
         await ws_hub.broadcast(
