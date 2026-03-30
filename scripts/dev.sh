@@ -22,12 +22,21 @@ if lsof -i :8420 -sTCP:LISTEN -t >/dev/null 2>&1; then
 fi
 
 # Check for agent auth credentials — warn early so the user knows before Tower tries to spawn
-if [ -z "${ATC_ANTHROPIC_API_KEY:-}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+# ATC prefers env vars, but if none are set it checks ~/.claude/credentials.json (set by `claude login`).
+_has_auth=0
+if [ -n "${ATC_ANTHROPIC_API_KEY:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  _has_auth=1
+elif [ -f "$HOME/.claude/credentials.json" ]; then
+  # Claude Code stores OAuth credentials here after `claude login` — ATC will use them automatically
+  _has_auth=1
+fi
+
+if [ "$_has_auth" -eq 0 ]; then
   echo ""
-  echo "⚠️  WARNING: No agent API key configured."
-  echo "   Set ATC_ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in your environment."
-  echo "   Without this, Tower/Leader/Ace terminals will show 'Not logged in' and fail to run."
-  echo "   Example: export CLAUDE_CODE_OAUTH_TOKEN=\$(claude setup-token)"
+  echo "⚠️  WARNING: Claude Code does not appear to be authenticated."
+  echo "   Run: claude login"
+  echo "   Or set ATC_ANTHROPIC_API_KEY in your environment for a dedicated API key."
+  echo "   Without auth, Tower/Leader/Ace terminals will fail to start."
   echo ""
 fi
 

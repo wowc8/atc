@@ -506,18 +506,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     # Log auth mode warning
-    from atc.agents.auth import get_auth_mode
+    from atc.agents.auth import get_auth_mode, claude_credentials_exist
 
     _auth_mode = get_auth_mode()
     if _auth_mode == "oauth":
-        logger.warning(
-            "Running in OAuth mode — cost tracking disabled, concurrent sessions may conflict. "
-            "Set ATC_ANTHROPIC_API_KEY for full functionality."
-        )
+        _key = os.environ.get("ATC_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+        if _key:
+            logger.warning(
+                "Running in OAuth mode — cost tracking disabled, concurrent sessions may conflict. "
+                "Set ATC_ANTHROPIC_API_KEY for full functionality."
+            )
+        else:
+            # No env var — using Claude's own stored credentials (best case for local dev)
+            logger.info(
+                "Auth: Claude Code credentials found at ~/.claude/credentials.json — "
+                "agents will run as the logged-in Claude user. "
+                "Set ATC_ANTHROPIC_API_KEY for a dedicated API key."
+            )
+    elif _auth_mode == "api_key":
+        logger.info("Auth: API key configured (ATC_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY)")
     elif _auth_mode == "none":
         logger.warning(
-            "⚠️  No agent API key configured. Set ATC_ANTHROPIC_API_KEY or "
-            "CLAUDE_CODE_OAUTH_TOKEN in the environment before starting the backend. "
+            "⚠️  No auth configured. Claude Code does not appear to be logged in "
+            "(~/.claude/credentials.json not found) and no API key env vars are set. "
+            "Run 'claude login' or set ATC_ANTHROPIC_API_KEY. "
             "Agent terminals will show 'Not logged in' and produce blank terminals."
         )
 
