@@ -392,6 +392,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                             proj.id,
                             ts.id,
                         )
+
+                    # Start PTY reader for the restored tower pane so the frontend
+                    # terminal is populated on load (without this the subscribe handler
+                    # throws ValueError: No active reader and returns nothing).
+                    try:
+                        await pty_pool.add_session(ts.id, ts.tmux_pane)
+                        logger.info(
+                            "Started PTY reader for restored tower session %s (pane %s)",
+                            ts.id,
+                            ts.tmux_pane,
+                        )
+                    except Exception as _pty_err:
+                        logger.warning(
+                            "Could not start PTY reader for restored tower session %s: %s",
+                            ts.id,
+                            _pty_err,
+                        )
+
                     restored = True
                     break
     except Exception:
