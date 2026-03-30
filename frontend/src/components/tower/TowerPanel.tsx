@@ -57,7 +57,7 @@ export default function TowerPanel() {
     ? `terminal:${towerDetail.current_session_id}`
     : undefined;
 
-  const { attachRef, fit } = useTerminal({
+  const { attachRef, fit, requestSnapshot } = useTerminal({
     channel: terminalChannel,
     enabled: (isRunning || !!terminalChannel) && !!terminalChannel,
   });
@@ -83,13 +83,19 @@ export default function TowerPanel() {
     }
   }, [isIdle, starting]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-fit terminal when panel expands
+  // Re-fit terminal when panel expands; also request a fresh snapshot so the
+  // terminal isn't blank when the panel was collapsed during initial load.
+  // xterm.js may silently drop writes to a zero-size hidden container, so we
+  // re-subscribe to trigger the backend to resend the current pane content.
   useEffect(() => {
     if (expanded && (isRunning || !!terminalChannel)) {
-      const timer = setTimeout(() => fit(), 200);
+      const timer = setTimeout(() => {
+        fit();
+        requestSnapshot();
+      }, 200);
       return () => clearTimeout(timer);
     }
-  }, [expanded, isRunning, terminalChannel, fit]);
+  }, [expanded, isRunning, terminalChannel, fit, requestSnapshot]);
 
   // Auto-expand when Tower starts running
   useEffect(() => {
