@@ -580,3 +580,64 @@ class TestLeaderOutput:
             if c[0][0] == "tower" and c[0][1].get("type") == "leader_activity"
         ]
         assert len(activity_calls) == 0
+
+
+@patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
+@patch("atc.tower.controller.send_tower_message", new_callable=AsyncMock)
+@pytest.mark.asyncio
+class TestNotifyTowerGoalStarted:
+    """Tests for _notify_tower_goal_started — ensure Tower's terminal gets notified."""
+
+    async def test_no_session_returns_early(
+        self, mock_send: AsyncMock, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        """If Tower has no active session, notification is a no-op."""
+        project = await create_project(db, "my-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+        # _current_session_id is None — no tower session started
+        assert tower._current_session_id is None
+
+        await tower._notify_tower_goal_started(project.id, "leader-sess-1", "Build X")
+
+        mock_send.assert_not_called()
+
+    async def test_sends_notification_when_session_active(
+        self, mock_send: AsyncMock, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        """When Tower has an active session, a notification message is sent."""
+        project = await create_project(db, "my-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+        tower._current_session_id = "tower-sess-1"  # simulate active tower session
+
+        # Skip the 3s sleep in tests
+        import asyncio as _asyncio
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await tower._notify_tower_goal_started(project.id, "leader-sess-1", "Build X")
+
+        mock_send.assert_called_once()
+        call_args = mock_send.call_args
+        # session_id passed as 2nd positional arg
+        assert call_args[0][1] == "tower-sess-1"
+        # message contains goal and leader session
+        message = call_args[0][2]
+        assert "Build X" in message
+        assert "leader-sess-1" in message
+        assert project.id in message
+
+    async def test_notification_error_is_swallowed(
+        self, mock_send: AsyncMock, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        """send_tower_message errors are caught so goal submission isn't disrupted."""
+        project = await create_project(db, "my-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+        tower._current_session_id = "tower-sess-1"
+        mock_send.side_effect = ValueError("Tower session has no tmux pane")
+
+        # Should not raise
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await tower._notify_tower_goal_started(project.id, "leader-sess-1", "Build X")
+
+        mock_send.assert_called_once()
