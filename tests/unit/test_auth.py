@@ -75,9 +75,11 @@ class TestResolveAgentApiKey:
         assert resolve_agent_api_key() == "oat01_mytoken"
 
     def test_empty_anthropic_key_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import atc.agents.auth as auth_mod
         monkeypatch.delenv("ATC_ANTHROPIC_API_KEY", raising=False)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "")
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setattr(auth_mod, "_read_claude_credentials", lambda: None)
         assert resolve_agent_api_key() is None
 
 
@@ -103,9 +105,11 @@ class TestGetAuthMode:
         assert get_auth_mode() == "oauth"
 
     def test_none_mode_no_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import atc.agents.auth as auth_mod
         monkeypatch.delenv("ATC_ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setattr(auth_mod, "_read_claude_credentials", lambda: None)
         assert get_auth_mode() == "none"
 
     def test_atc_oauth_key_is_oauth_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
