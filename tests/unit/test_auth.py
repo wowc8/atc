@@ -37,11 +37,37 @@ class TestResolveAgentApiKey:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fallback")
         assert resolve_agent_api_key() == "sk-ant-fallback"
 
-    def test_returns_none_when_neither_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_none_when_neither_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: "Path") -> None:
         monkeypatch.delenv("ATC_ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        import atc.agents.auth as auth_mod
+        monkeypatch.setattr(auth_mod, "_read_claude_credentials", lambda: None)
         assert resolve_agent_api_key() is None
+
+    def test_falls_back_to_claude_credentials_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If no env vars set but ~/.claude/credentials.json exists, use its token."""
+        import atc.agents.auth as auth_mod
+
+        monkeypatch.delenv("ATC_ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setattr(auth_mod, "_read_claude_credentials", lambda: "sk-ant-oat01-fromfile")
+
+        assert resolve_agent_api_key() == "sk-ant-oat01-fromfile"
+
+    def test_env_var_takes_priority_over_credentials_file(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Env vars always win over the credentials file."""
+        import atc.agents.auth as auth_mod
+
+        monkeypatch.setenv("ATC_ANTHROPIC_API_KEY", "sk-ant-api03-envkey")
+        monkeypatch.setattr(auth_mod, "_read_claude_credentials", lambda: "sk-ant-oat01-fromfile")
+
+        assert resolve_agent_api_key() == "sk-ant-api03-envkey"
 
     def test_atc_key_oauth_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ATC_ANTHROPIC_API_KEY", "oat01_mytoken")
