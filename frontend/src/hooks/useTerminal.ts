@@ -301,6 +301,20 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     }
   }, []);
 
+  /**
+   * Re-send the subscribe message to the backend, triggering a fresh
+   * terminal snapshot. Useful when the terminal container was hidden on
+   * first mount (e.g. a collapsed panel) and xterm.js may have silently
+   * dropped content written to a zero-size renderer.
+   */
+  const requestSnapshot = useCallback(() => {
+    const ws = wsRef.current;
+    const ch = channelRef.current;
+    if (ws?.readyState === WebSocket.OPEN && ch) {
+      ws.send(JSON.stringify({ channel: "subscribe", data: [ch] }));
+    }
+  }, []);
+
   /** Send text + Enter to the terminal's PTY via WebSocket. */
   const sendInput = useCallback(
     (text: string) => {
@@ -312,5 +326,5 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     [channel],
   );
 
-  return { attachRef, terminal: termRef, writeLine, fit, sendInput };
+  return { attachRef, terminal: termRef, writeLine, fit, sendInput, requestSnapshot };
 }
