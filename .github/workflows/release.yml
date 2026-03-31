@@ -60,7 +60,7 @@ jobs:
       - name: Build Python sidecar
         run: |
           mkdir -p src-tauri/binaries
-          pyinstaller --onefile --distpath dist src/atc/server_main.py --name atc-server \
+          pyinstaller --onefile --distpath dist src/atc/server_main.py --name atc-server --paths src --collect-all atc \
             --hidden-import uvicorn.loops.auto \
             --hidden-import uvicorn.lifespan.on \
             --hidden-import uvicorn.protocols.http.auto \
