@@ -24,7 +24,11 @@ import type {
   TowerProgress,
 } from "../types";
 import { useWebSocket, type WsMessage } from "../hooks/useWebSocket";
+import { useBackendReady } from "../hooks/useBackendReady";
 import { api } from "../utils/api";
+
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -234,6 +238,8 @@ interface AppContextValue {
   state: AppState;
   dispatch: React.Dispatch<Action>;
   fetchAll: () => Promise<void>;
+  backendReady: boolean;
+  backendError: string | null;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -253,6 +259,7 @@ interface AppProviderProps {
 
 export function AppProvider({ children }: AppProviderProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const { ready: backendReady, error: backendError } = useBackendReady(isTauri);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -433,11 +440,13 @@ export function AppProvider({ children }: AppProviderProps) {
   });
 
   useEffect(() => {
-    void fetchAll();
-  }, [fetchAll]);
+    if (backendReady) {
+      void fetchAll();
+    }
+  }, [fetchAll, backendReady]);
 
   return (
-    <AppContext.Provider value={{ state, dispatch, fetchAll }}>
+    <AppContext.Provider value={{ state, dispatch, fetchAll, backendReady, backendError }}>
       {children}
     </AppContext.Provider>
   );
