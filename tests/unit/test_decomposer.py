@@ -253,8 +253,9 @@ class TestGetCompletionStatus:
     def test_empty(self) -> None:
         status = get_completion_status([])
         assert status["total"] == 0
-        assert status["all_done"] is True
-        assert status["progress_pct"] == 100
+        assert status["error"] == 0
+        assert status["all_done"] is False
+        assert status["progress_pct"] == 0
 
     def test_all_done(self) -> None:
         tasks = [self._make_tg("1", "done"), self._make_tg("2", "done")]

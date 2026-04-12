@@ -12,6 +12,7 @@ from atc.state.db import (
     create_leader,
     create_project,
     get_connection,
+    get_session,
     run_migrations,
 )
 from atc.tower.controller import (
@@ -641,3 +642,36 @@ class TestNotifyTowerGoalStarted:
             await tower._notify_tower_goal_started(project.id, "leader-sess-1", "Build X")
 
         mock_send.assert_called_once()
+
+
+@pytest.mark.asyncio
+class TestAuthBlockDetection:
+    @patch("atc.tower.controller.start_leader", new_callable=AsyncMock, return_value="leader-sess-1")
+    async def test_leader_auth_block_marks_session_error_and_transitions_tower(
+        self, mock_start: AsyncMock, db, event_bus: EventBus
+    ) -> None:
+        project = await create_project(db, "test-proj")
+        await create_leader(db, project.id)
+        tower = TowerController(db, event_bus)
+
+        await tower.submit_goal(project.id, "Blocked goal")
+        await db.execute(
+            "INSERT INTO sessions (id, project_id, session_type, name, status, created_at, updated_at) VALUES (?, ?, 'manager', 'leader', 'working', datetime('now'), datetime('now'))",
+            ("leader-sess-1", project.id),
+        )
+        await db.commit()
+
+        await tower._on_agent_output({
+            "session_id": "leader-sess-1",
+            "data": "Not logged in · Please run /login\n".encode("utf-8"),
+        })
+
+        session = await get_session(db, "leader-sess-1")
+        assert session is not None
+        assert session.status == "error"
+        assert tower.state == TowerState.ERROR
+
+    async def test_extract_auth_blocker_detects_login_and_keychain_hints(self, tower: TowerController) -> None:
+        assert tower._extract_auth_blocker("Not logged in · Please run /login") is not None
+        assert tower._extract_auth_blocker("Run in another terminal: security unlock-keychain") is not None
+        assert tower._extract_auth_blocker("All good, working normally") is None

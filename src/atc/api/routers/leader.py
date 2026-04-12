@@ -93,6 +93,14 @@ def _get_event_bus(request: Request) -> Any:
     return getattr(request.app.state, "event_bus", None)
 
 
+async def _broadcast_tower_progress(request: Request) -> None:
+    tower = getattr(request.app.state, "tower_controller", None)
+    if tower is None:
+        return
+    with __import__("contextlib").suppress(Exception):
+        await tower.get_progress()
+
+
 async def _get_or_create_orchestrator(
     request: Request,
     project_id: str,
@@ -212,6 +220,8 @@ async def decompose(
             {"task_graphs_updated": True, "project_id": project_id, "task_graphs": tg_data},
         )
 
+    await _broadcast_tower_progress(request)
+
     return DecomposeResponse(
         project_id=result.project_id,
         goal=result.goal,
@@ -239,6 +249,7 @@ async def spawn_aces(
     """Spawn Ace sessions for all ready (unblocked) tasks."""
     orch = await _get_or_create_orchestrator(request, project_id)
     assignments = await orch.spawn_aces_for_ready_tasks()
+    await _broadcast_tower_progress(request)
 
     return SpawnAcesResponse(
         spawned=[
@@ -281,6 +292,7 @@ async def task_done(
     """Mark a task graph entry as done and clean up its Ace."""
     orch = await _get_or_create_orchestrator(request, project_id)
     await orch.mark_task_done(body.task_graph_id)
+    await _broadcast_tower_progress(request)
     return {"status": "done"}
 
 
@@ -293,6 +305,7 @@ async def task_failed(
     """Mark a task graph entry as failed and allow retry."""
     orch = await _get_or_create_orchestrator(request, project_id)
     await orch.mark_task_failed(body.task_graph_id, reason=body.reason)
+    await _broadcast_tower_progress(request)
     return {"status": "failed"}
 
 

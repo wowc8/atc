@@ -70,6 +70,8 @@ def mock_request(db, event_bus):
     # settings=None so _get_or_create_orchestrator uses defaults (avoids MagicMock
     # leaking into ResourceGovernor float comparisons)
     request.app.state.settings = None
+    request.app.state.tower_controller = MagicMock()
+    request.app.state.tower_controller.get_progress = AsyncMock(return_value={})
     return request
 
 
@@ -98,6 +100,7 @@ class TestDecomposeEndpoint:
         assert result.error is None
         assert result.project_id == project.id
         assert len(result.task_graphs) == 2
+        mock_request.app.state.tower_controller.get_progress.assert_awaited()
 
     async def test_decompose_no_leader_returns_404(
         self, db, mock_request,
@@ -165,6 +168,7 @@ class TestSpawnAcesEndpoint:
 
         assert len(result.spawned) == 1
         assert result.spawned[0]["task_title"] == "Ready Task"
+        mock_request.app.state.tower_controller.get_progress.assert_awaited()
 
     async def test_spawn_with_no_ready_tasks(
         self, mock_create: AsyncMock, db, project_with_leader, mock_request,
@@ -238,6 +242,7 @@ class TestTaskLifecycleEndpoints:
         result = await task_done(project.id, body, mock_request)
 
         assert result["status"] == "done"
+        mock_request.app.state.tower_controller.get_progress.assert_awaited()
 
     async def test_task_failed(
         self, mock_create: AsyncMock, mock_destroy: AsyncMock,
@@ -255,6 +260,7 @@ class TestTaskLifecycleEndpoints:
         result = await task_failed(project.id, body, mock_request)
 
         assert result["status"] == "failed"
+        mock_request.app.state.tower_controller.get_progress.assert_awaited()
 
 
 # ---------------------------------------------------------------------------
