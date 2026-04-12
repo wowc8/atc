@@ -98,17 +98,23 @@ async def decompose_goal(
             error=f"Project {project_id} not found",
         )
 
-    # Bug #164: decompose is idempotent — delete any existing todo/unassigned
-    # task_graphs before creating new ones.  This prevents duplicates when
-    # decompose is called after task_graphs were already created individually
-    # (e.g. via POST /api/projects/{id}/task-graphs) or when decompose is
-    # called more than once.
+    # Bug #164 follow-up: keep task IDs stable across repeat decompositions.
+    # Deleting + recreating matching todo tasks introduces a race with spawn-aces:
+    # a second decompose can replace a task row while an Ace is being created for
+    # the first one, leaving orphaned sessions and stale task_graph_ids. Reuse
+    # existing todo/unassigned tasks by title when possible, delete only stale
+    # unmatched todo tasks, and create only genuinely new tasks.
     existing = await db_ops.list_task_graphs(conn, project_id=project_id)
+    reusable_by_title = {
+        tg.title: tg for tg in existing if tg.status == "todo" and tg.assigned_ace_id is None
+    }
+    requested_titles = {spec.title for spec in task_specs}
+
     for tg in existing:
-        if tg.status == "todo" and tg.assigned_ace_id is None:
+        if tg.status == "todo" and tg.assigned_ace_id is None and tg.title not in requested_titles:
             await db_ops.delete_task_graph(conn, tg.id)
             logger.debug(
-                "decompose_goal: deleted pre-existing todo task_graph %s ('%s')",
+                "decompose_goal: deleted stale todo task_graph %s ('%s')",
                 tg.id,
                 tg.title,
             )
@@ -116,15 +122,37 @@ async def decompose_goal(
     created: list[TaskGraph] = []
     title_to_id: dict[str, str] = {}
 
-    # Phase 1: Create all task_graph entries (without dependency IDs)
+    # Phase 1: Reuse matching task_graph entries when possible, otherwise create.
     for spec in task_specs:
-        tg = await db_ops.create_task_graph(
-            conn,
-            project_id,
-            spec.title,
-            description=spec.description,
-            status="todo",
-        )
+        existing_tg = reusable_by_title.get(spec.title)
+        if existing_tg is not None:
+            tg = await db_ops.update_task_graph(
+                conn,
+                existing_tg.id,
+                description=spec.description,
+                dependencies=None,
+            )
+            if tg is None:
+                logger.warning(
+                    "decompose_goal: failed to reload reusable task_graph %s ('%s'); recreating",
+                    existing_tg.id,
+                    existing_tg.title,
+                )
+                tg = await db_ops.create_task_graph(
+                    conn,
+                    project_id,
+                    spec.title,
+                    description=spec.description,
+                    status="todo",
+                )
+        else:
+            tg = await db_ops.create_task_graph(
+                conn,
+                project_id,
+                spec.title,
+                description=spec.description,
+                status="todo",
+            )
         created.append(tg)
         title_to_id[spec.title] = tg.id
 

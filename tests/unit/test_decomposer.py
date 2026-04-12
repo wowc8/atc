@@ -313,6 +313,31 @@ class TestGetCompletionStatus:
         titles = {t.title for t in tasks_after_second}
         assert titles == {"Task C", "Task D", "Task E"}
 
+    async def test_decompose_reuses_matching_todo_task_ids(self, db) -> None:
+        """Repeated decomposition should preserve IDs for unchanged todo tasks."""
+        project = await create_project(db, "test-proj")
+        context = {"project_id": project.id, "goal": "Build feature"}
+
+        first = await decompose_goal(db, context, [
+            TaskSpec(title="Task A", description="first description"),
+            TaskSpec(title="Task B", description="keep me"),
+        ])
+        first_ids = {tg.title: tg.id for tg in first.task_graphs}
+
+        second = await decompose_goal(db, context, [
+            TaskSpec(title="Task A", description="updated description"),
+            TaskSpec(title="Task C", description="new task"),
+        ])
+        second_by_title = {tg.title: tg for tg in second.task_graphs}
+
+        assert second_by_title["Task A"].id == first_ids["Task A"]
+        assert second_by_title["Task A"].description == "updated description"
+        assert second_by_title["Task C"].id != first_ids["Task A"]
+
+        all_tasks = await list_task_graphs(db, project_id=project.id)
+        titles = {t.title for t in all_tasks}
+        assert titles == {"Task A", "Task C"}
+
     async def test_decompose_does_not_delete_assigned_tasks(self, db) -> None:
         """Bug #164: assigned tasks (ace running) should not be wiped by decompose."""
         from atc.state.db import update_task_graph, update_task_graph_status
