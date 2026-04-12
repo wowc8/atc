@@ -27,6 +27,7 @@ from atc.config import load_settings
 from atc.leader.context_package import build_context_package
 from atc.leader.leader import send_leader_message, start_leader, stop_leader
 from atc.state import db as db_ops
+from atc.session.state_machine import SessionStatus
 from atc.tower.session import send_tower_message, start_tower_session, stop_tower_session
 
 if TYPE_CHECKING:
@@ -101,7 +102,7 @@ class TowerController:
 
         # Subscribe to leader session events for monitoring
         self._event_bus.subscribe("session_status_changed", self._on_session_status_changed)
-        self._event_bus.subscribe("pty_output", self._on_leader_output)
+        self._event_bus.subscribe("pty_output", self._on_agent_output)
         self._event_bus.subscribe("session_created", self._on_session_created)
 
         # Subscribe to budget events for proactive slowdown
@@ -797,29 +798,72 @@ class TowerController:
                 exc,
             )
 
-    async def _on_leader_output(self, data: dict[str, Any]) -> None:
-        """Capture PTY output from the Leader session for monitoring.
+    @staticmethod
+    def _extract_auth_blocker(text: str) -> str | None:
+        """Return a human-readable auth blocker when Claude is not usable."""
+        lowered = text.lower()
+        if "not logged in" in lowered and "/login" in lowered:
+            return "Claude Code is not logged in on the host. Run /login in the affected pane."
+        if "run in another terminal: security unlock-keychain" in lowered:
+            return "Claude Code cannot access macOS keychain; unlock the keychain on the host."
+        return None
 
-        Only captures output from the current Leader session. Stores
-        recent lines for the Tower to inspect and broadcasts a summary
-        event so the frontend can show activity indicators.
-        """
+    async def _mark_session_error(self, session_id: str, reason: str) -> None:
+        session = await db_ops.get_session(self._db, session_id)
+        if session is None or session.status == SessionStatus.ERROR.value:
+            return
+
+        await db_ops.update_session_status(self._db, session_id, SessionStatus.ERROR.value)
+        await self._event_bus.publish(
+            "session_status_changed",
+            {
+                "session_id": session_id,
+                "previous_status": session.status,
+                "new_status": SessionStatus.ERROR.value,
+                "reason": reason,
+            },
+        )
+
+    async def _handle_auth_blocked_session(self, session_id: str, reason: str) -> None:
+        await self._mark_session_error(session_id, reason)
+
+        if self._ws_hub is not None and session_id == self._leader_session_id:
+            await self._ws_hub.broadcast(
+                "tower",
+                {
+                    "type": "leader_activity",
+                    "session_id": session_id,
+                    "preview": reason,
+                },
+            )
+
+        if session_id in {self._leader_session_id, self._current_session_id}:
+            logger.error("Tower session %s blocked by auth issue: %s", session_id, reason)
+            if self._state in (TowerState.PLANNING, TowerState.MANAGING):
+                await self._transition(TowerState.ERROR)
+
+    async def _on_agent_output(self, data: dict[str, Any]) -> None:
+        """Capture PTY output from current Tower/Leader sessions for monitoring."""
         session_id = data.get("session_id")
-        if session_id != self._leader_session_id:
+        if session_id not in {self._leader_session_id, self._current_session_id}:
             return
 
         raw = data.get("data", b"")
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
 
-        # Store output lines (ring buffer)
+        reason = self._extract_auth_blocker(text)
+        if reason is not None:
+            await self._handle_auth_blocked_session(session_id, reason)
+
+        if session_id != self._leader_session_id:
+            return
+
         lines = text.splitlines()
         self._leader_output_lines.extend(lines)
         if len(self._leader_output_lines) > self._max_output_lines:
             self._leader_output_lines = self._leader_output_lines[-self._max_output_lines :]
 
-        # Broadcast a lightweight activity event for the Tower UI
         if self._ws_hub is not None:
-            # Only broadcast non-empty, visible text
             stripped = text.strip()
             if stripped:
                 await self._ws_hub.broadcast(

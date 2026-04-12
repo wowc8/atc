@@ -208,8 +208,9 @@ def get_completion_status(task_graphs: list[TaskGraph]) -> dict[str, Any]:
             "done": 0,
             "in_progress": 0,
             "todo": 0,
-            "all_done": True,
-            "progress_pct": 100,
+            "error": 0,
+            "all_done": False,
+            "progress_pct": 0,
         }
 
     done = sum(1 for tg in task_graphs if tg.status == "done")
