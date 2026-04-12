@@ -113,6 +113,23 @@ class TestPatchAceStatus:
         assert updated is not None
         assert updated.status == "idle"
 
+    @pytest.mark.asyncio
+    async def test_stale_waiting_hook_is_ignored(self, project_and_session) -> None:
+        from types import SimpleNamespace
+
+        from atc.api.routers.aces import StatusUpdateRequest, update_ace_status
+        from atc.state import db as db_ops
+
+        _project, session, db, event_bus = project_and_session
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db=db, event_bus=event_bus)))
+
+        result = await update_ace_status(session.id, StatusUpdateRequest(status="waiting"), request)
+
+        assert result == {"status": "idle"}
+        updated = await db_ops.get_session(db, session.id)
+        assert updated is not None
+        assert updated.status == "idle"
+
 
 class TestNotifyEndpoint:
     @pytest.mark.asyncio

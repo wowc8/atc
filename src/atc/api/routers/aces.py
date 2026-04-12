@@ -13,6 +13,7 @@ Routes:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -25,6 +26,7 @@ from atc.session.state_machine import InvalidTransitionError
 from atc.state import db as db_ops
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +208,15 @@ async def update_ace_status(
         await transition(session.id, current, target, event_bus)
         await db_ops.update_session_status(db, session.id, target.value)
     except InvalidTransitionError as exc:
+        if target in {SessionStatus.WORKING, SessionStatus.WAITING}:
+            logger.info(
+                "Ignoring stale hook status for ace %s: %s -> %s (%s)",
+                session.id,
+                current.value,
+                target.value,
+                exc,
+            )
+            return {"status": current.value}
         raise SessionStaleError(str(exc)) from None
 
     return {"status": target.value}

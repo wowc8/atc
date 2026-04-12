@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -310,6 +311,26 @@ class TestSpawnAces:
         assignments = await orchestrator.spawn_aces_for_ready_tasks()
         assert len(assignments) == 0
         assert orch_mod._GLOBAL_ACTIVE_ACES == 0
+
+    async def test_deploy_uses_real_session_id_for_staging_root(
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        await create_task_graph(db, orchestrator.project_id, "Task Deploy")
+
+        assignments = await orchestrator.spawn_aces_for_ready_tasks()
+
+        assert len(assignments) == 1
+        assert assignments[0].deployed_root == Path("/tmp/atc-agents/ace-session-1")
+
+        call_kwargs = mock_create.call_args
+        assert call_kwargs is not None
+        deploy_kwargs = call_kwargs.kwargs.get("deploy_spec_kwargs")
+        assert deploy_kwargs is not None
+        assert deploy_kwargs["task_title"] == "Task Deploy"
+        assert deploy_kwargs["project_id"] == orchestrator.project_id
 
 
 # ---------------------------------------------------------------------------

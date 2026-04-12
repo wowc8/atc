@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
+from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files
 from atc.agents.factory import get_launch_command
 from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
@@ -152,52 +152,20 @@ class LeaderOrchestrator:
             repo_path = project.repo_path if project else None
             github_repo = project.github_repo if project else None
 
-            # Generate a stable session id up-front so deploy can use it
-            session_id_preview = str(uuid.uuid4())
-
-            # Fetch inherited context entries for the Ace
+            # Fetch inherited context entries for the Ace. Use a preview id only
+            # for context assembly; create_ace will deploy hooks/config with the real
+            # session id so callbacks target the live session instead of a ghost id.
             context_entries: list[dict[str, Any]] = []
             with contextlib.suppress(Exception):
                 ctx = await build_context_package(
                     self.conn,
                     self.project_id,
                     title,
-                    session_id=session_id_preview,
+                    session_id=f"preview:{task_graph_id}",
                     parent_session_id=self.leader_id,
                     scope="ace",
                 )
                 context_entries = ctx.get("context_entries", [])
-
-            # Deploy config files before launching the session
-            spec = AceDeploySpec(
-                session_id=session_id_preview,
-                project_name=project_name,
-                task_title=title,
-                task_description=description,
-                project_id=self.project_id,
-                repo_path=repo_path,
-                github_repo=github_repo,
-                context_entries=context_entries,
-            )
-            deployed = deploy_ace_files(spec)
-            logger.info("Deployed ace config for task '%s' → %s", title, deployed.root)
-
-            working_dir = repo_path or str(deployed.root)
-
-            # Bug #162: if the Ace runs in repo_path, the Leader's CLAUDE.md is already
-            # there and the Ace will think it is a Leader (refusing to create files).
-            # Fix: copy the Ace's CLAUDE.md into repo_path, overwriting the Leader's.
-            if repo_path:
-                import shutil as _shutil
-                from pathlib import Path as _Path
-                ace_claude_md_src = deployed.root / "CLAUDE.md"
-                ace_claude_md_dst = _Path(repo_path) / "CLAUDE.md"
-                if ace_claude_md_src.exists():
-                    _shutil.copy2(str(ace_claude_md_src), str(ace_claude_md_dst))
-                    logger.info(
-                        "Copied Ace CLAUDE.md to repo_path %s (overwrites Leader copy)",
-                        ace_claude_md_dst,
-                    )
 
             launch_cmd = get_launch_command(
                 project.agent_provider if project else "claude_code",
@@ -209,8 +177,17 @@ class LeaderOrchestrator:
                 ace_name,
                 task_id=task_graph_id,
                 event_bus=self.event_bus,
-                working_dir=working_dir,
+                working_dir=repo_path,
                 launch_command=launch_cmd,
+                deploy_spec_kwargs={
+                    "project_name": project_name,
+                    "task_title": title,
+                    "task_description": description,
+                    "project_id": self.project_id,
+                    "repo_path": repo_path,
+                    "github_repo": github_repo,
+                    "context_entries": context_entries,
+                },
             )
         except Exception:
             logger.exception(
@@ -257,7 +234,7 @@ class LeaderOrchestrator:
             task_title=title,
             assignment_id=idempotency_key,
             status="assigned",
-            deployed_root=deployed.root,
+            deployed_root=Path("/tmp/atc-agents") / session_id,
         )
         self.assignments[task_graph_id] = assignment
 
