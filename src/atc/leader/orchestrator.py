@@ -221,12 +221,16 @@ class LeaderOrchestrator:
                 title,
             )
 
-        # Transition the task to in_progress now that the Ace is running
-        await db_ops.update_task_graph_status(
-            self.conn,
-            task_graph_id,
-            "in_progress",
-        )
+        # Transition the task to in_progress now that the Ace is running.
+        # Retry/idempotent paths can surface an already-assigned or already-
+        # in-progress task; only advance when needed.
+        task_graph = await db_ops.get_task_graph(self.conn, task_graph_id)
+        if task_graph is not None and task_graph.status == "assigned":
+            await db_ops.update_task_graph_status(
+                self.conn,
+                task_graph_id,
+                "in_progress",
+            )
 
         assignment = AceAssignment(
             ace_session_id=session_id,

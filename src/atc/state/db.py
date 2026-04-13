@@ -1143,14 +1143,18 @@ async def assign_task(
     Raises ``ValueError`` if the task is not in a state that allows
     assignment (i.e. not ``todo``).
     """
-    # Check for existing assignment with same idempotency key
+    # Check for existing assignment with same idempotency key.
+    # Active assignments are true idempotent no-ops; terminal assignments need to
+    # be reusable so retrying the same task after a failure/done state can create
+    # a fresh live assignment without tripping later task-state transitions.
     cursor = await db.execute(
         "SELECT * FROM task_assignments WHERE assignment_id = ?",
         (assignment_id,),
     )
     existing_row = await cursor.fetchone()
-    if existing_row is not None:
-        return _row_to_task_assignment(existing_row), False
+    existing = _row_to_task_assignment(existing_row) if existing_row is not None else None
+    if existing is not None and existing.status in {"assigned", "working"}:
+        return existing, False
 
     # Validate the task exists and is in assignable state
     task = await get_task_graph(db, task_graph_id)
@@ -1180,30 +1184,45 @@ async def assign_task(
         )
 
     now = _now()
-    assignment = TaskAssignment(
-        id=_uuid(),
-        task_graph_id=task_graph_id,
-        ace_session_id=ace_session_id,
-        assignment_id=assignment_id,
-        status="assigned",
-        created_at=now,
-        updated_at=now,
-    )
+    if existing is not None:
+        assignment = TaskAssignment(
+            id=existing.id,
+            task_graph_id=existing.task_graph_id,
+            ace_session_id=ace_session_id,
+            assignment_id=existing.assignment_id,
+            status="assigned",
+            created_at=existing.created_at,
+            updated_at=now,
+        )
+        await db.execute(
+            "UPDATE task_assignments SET ace_session_id = ?, status = ?, updated_at = ? WHERE assignment_id = ?",
+            (ace_session_id, assignment.status, assignment.updated_at, assignment.assignment_id),
+        )
+    else:
+        assignment = TaskAssignment(
+            id=_uuid(),
+            task_graph_id=task_graph_id,
+            ace_session_id=ace_session_id,
+            assignment_id=assignment_id,
+            status="assigned",
+            created_at=now,
+            updated_at=now,
+        )
 
-    await db.execute(
-        """INSERT INTO task_assignments
-           (id, task_graph_id, ace_session_id, assignment_id, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (
-            assignment.id,
-            assignment.task_graph_id,
-            assignment.ace_session_id,
-            assignment.assignment_id,
-            assignment.status,
-            assignment.created_at,
-            assignment.updated_at,
-        ),
-    )
+        await db.execute(
+            """INSERT INTO task_assignments
+               (id, task_graph_id, ace_session_id, assignment_id, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                assignment.id,
+                assignment.task_graph_id,
+                assignment.ace_session_id,
+                assignment.assignment_id,
+                assignment.status,
+                assignment.created_at,
+                assignment.updated_at,
+            ),
+        )
 
     # Transition the task_graph to 'assigned'
     await db.execute(
