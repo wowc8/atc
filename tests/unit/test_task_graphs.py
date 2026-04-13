@@ -332,7 +332,7 @@ class TestIdempotentAssignment:
         assert task.assigned_ace_id == "ace-1"
 
     async def test_duplicate_assignment_id_is_noop(self, db) -> None:
-        """Same assignment_id returns existing record without side effects."""
+        """Same active assignment_id returns existing record without side effects."""
         project = await create_project(db, "p1")
         tg = await create_task_graph(db, project.id, "Task A")
 
@@ -343,6 +343,35 @@ class TestIdempotentAssignment:
         assert created2 is False
         assert second.id == first.id
         assert second.assignment_id == "key-1"
+
+    async def test_terminal_assignment_id_can_be_reused_for_retry(self, db) -> None:
+        """A failed/done assignment key should be reusable on retry."""
+        project = await create_project(db, "p1")
+        tg = await create_task_graph(db, project.id, "Task A")
+
+        first, created1 = await assign_task(db, tg.id, "ace-1", "key-1")
+        assert created1 is True
+
+        updated = await update_task_assignment_status(db, "key-1", "working")
+        assert updated is not None
+        updated = await update_task_assignment_status(db, "key-1", "failed")
+        assert updated is not None
+
+        task = await update_task_graph_status(db, tg.id, "error")
+        assert task is not None
+        task = await update_task_graph_status(db, tg.id, "todo")
+        assert task is not None
+
+        retried, created2 = await assign_task(db, tg.id, "ace-2", "key-1")
+        assert created2 is True
+        assert retried.id == first.id
+        assert retried.ace_session_id == "ace-2"
+        assert retried.status == "assigned"
+
+        task = await get_task_graph(db, tg.id)
+        assert task is not None
+        assert task.status == "assigned"
+        assert task.assigned_ace_id == "ace-2"
 
     async def test_assign_non_todo_task_rejected(self, db) -> None:
         """Only tasks in 'todo' state can be assigned."""

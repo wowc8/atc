@@ -385,6 +385,41 @@ class TestSendInstruction:
             await orchestrator.send_instruction_to_ace("nonexistent", "Do something")
 
 
+@pytest.mark.asyncio
+class TestSpawnRetryAssignmentReuse:
+    async def test_reuses_terminal_assignment_without_todo_to_in_progress_jump(
+        self,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        from atc.state import db as db_ops
+
+        tg = await create_task_graph(db, orchestrator.project_id, "Task Retry")
+        first, created = await db_ops.assign_task(db, tg.id, "ace-old", f"{orchestrator.leader_id}:{tg.id}")
+        assert created is True
+        updated = await db_ops.update_task_assignment_status(db, first.assignment_id, "working")
+        assert updated is not None
+        updated = await db_ops.update_task_assignment_status(db, first.assignment_id, "failed")
+        assert updated is not None
+        await db_ops.update_task_graph_status(db, tg.id, "error")
+        await db_ops.update_task_graph_status(db, tg.id, "todo")
+
+        orchestrator.assignments.clear()
+
+        with (
+            patch("atc.leader.orchestrator.create_ace", new=AsyncMock(return_value="ace-new")),
+            patch("atc.leader.orchestrator.get_launch_command", return_value="claude"),
+            patch("atc.leader.orchestrator.build_context_package", new=AsyncMock(return_value={"context_entries": []})),
+        ):
+            assignment = await orchestrator._spawn_ace_for_task(tg.id, tg.title, tg.description)
+
+        assert assignment is not None
+        refreshed = await db_ops.get_task_graph(db, tg.id)
+        assert refreshed is not None
+        assert refreshed.status == "in_progress"
+        assert refreshed.assigned_ace_id == "ace-new"
+
+
 # ---------------------------------------------------------------------------
 # mark_task_done
 # ---------------------------------------------------------------------------
@@ -567,7 +602,12 @@ class TestGetProgress:
     async def test_progress_empty(self, db, orchestrator: LeaderOrchestrator) -> None:
         progress = await orchestrator.get_progress()
         assert progress["total"] == 0
-        assert progress["all_done"] is True
+        assert progress["done"] == 0
+        assert progress["in_progress"] == 0
+        assert progress["todo"] == 0
+        assert progress["error"] == 0
+        assert progress["progress_pct"] == 0
+        assert progress["all_done"] is False
 
 
 # ---------------------------------------------------------------------------

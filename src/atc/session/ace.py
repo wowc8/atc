@@ -30,6 +30,7 @@ from atc.session.state_machine import (
     transition,
 )
 from atc.state import db as db_ops
+from atc.terminal.control import send_instruction_async
 
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
@@ -509,8 +510,10 @@ async def send_instruction(
             logger.warning("Pane %s: TUI not ready on attempt %d/%d", pane_id, attempt, max_retries)
             continue
 
-        # Step 2: Atomic send — text and Enter back-to-back, no await gap
-        await _tmux_run("send-keys", "-t", pane_id, text, "Enter")
+        # Step 2: Atomic send — bracketed paste plus Enter via tmux control mode.
+        # This is more reliable with Claude Code than raw send-keys text because
+        # the whole payload lands as one paste event before Enter is pressed.
+        await send_instruction_async(ATC_TMUX_SESSION, pane_id, text)
 
         if not verify:
             return True
@@ -545,6 +548,25 @@ async def send_instruction(
             if fingerprint and fingerprint in output:
                 logger.info("Pane %s: instruction verified on attempt %d", pane_id, attempt)
                 return True
+
+            # Claude sometimes consumes a bracketed paste immediately without leaving
+            # the full instruction visible in capture-pane. If the prompt is no longer
+            # bare, treat that as accepted input rather than a swallowed send — but
+            # only if the pane is still alive. A dead pane must remain a delivery
+            # failure so callers can retry/report accurately.
+            if not await wait_for_prompt(pane_id, timeout=1.0, poll_interval=0.25):
+                if await _pane_is_alive(pane_id):
+                    logger.info(
+                        "Pane %s: prompt disappeared after send on attempt %d — assuming instruction accepted",
+                        pane_id,
+                        attempt,
+                    )
+                    return True
+                logger.warning(
+                    "Pane %s: prompt disappeared after send on attempt %d but pane is dead",
+                    pane_id,
+                    attempt,
+                )
             logger.warning(
                 "Pane %s: instruction not found in output (attempt %d/%d)",
                 pane_id,
