@@ -452,6 +452,33 @@ async def wait_for_prompt(
     return False
 
 
+def _instruction_still_pending(output: str, text: str) -> bool:
+    """Return True when the sent instruction still appears to be sitting at the prompt.
+
+    Claude Code shows unsent pasted input as a visible prompt-line payload such as:
+    ``[Pasted text #1 +22 lines]Please continue with your goal.``
+    or a bare prompt line followed by the instruction body. In that state, the
+    instruction has *not* been accepted/executed yet, so delivery must remain a
+    failure rather than being treated as "sent".
+    """
+    normalized = " ".join(output.split())
+    fingerprint = " ".join(text[:120].strip().split())
+    if not fingerprint:
+        return False
+
+    pending_markers = (
+        "[pasted text #",
+        "pasted text #",
+    )
+    normalized_lower = normalized.lower()
+    if fingerprint in normalized:
+        if any(marker in normalized_lower for marker in pending_markers):
+            return True
+        if normalized_lower.endswith(fingerprint.lower()):
+            return True
+    return False
+
+
 async def check_tui_ready(
     pane_id: str,
     *,
@@ -546,27 +573,43 @@ async def send_instruction(
             # Use the first 80 chars as a fingerprint to avoid issues with line wrapping.
             fingerprint = text[:80].strip()
             if fingerprint and fingerprint in output:
-                logger.info("Pane %s: instruction verified on attempt %d", pane_id, attempt)
-                return True
+                if _instruction_still_pending(output, text):
+                    logger.warning(
+                        "Pane %s: instruction fingerprint still visible as pending input on attempt %d",
+                        pane_id,
+                        attempt,
+                    )
+                else:
+                    logger.info("Pane %s: instruction verified on attempt %d", pane_id, attempt)
+                    return True
 
             # Claude sometimes consumes a bracketed paste immediately without leaving
             # the full instruction visible in capture-pane. If the prompt is no longer
             # bare, treat that as accepted input rather than a swallowed send — but
-            # only if the pane is still alive. A dead pane must remain a delivery
-            # failure so callers can retry/report accurately.
-            if not await wait_for_prompt(pane_id, timeout=1.0, poll_interval=0.25):
-                if await _pane_is_alive(pane_id):
+            # only if the pane is still alive and the capture does not still show the
+            # instruction sitting unsent at the prompt. A dead pane must remain a
+            # delivery failure so callers can retry/report accurately.
+            prompt_ready = await wait_for_prompt(pane_id, timeout=1.0, poll_interval=0.25)
+            if not prompt_ready:
+                if _instruction_still_pending(output, text):
+                    logger.warning(
+                        "Pane %s: prompt changed after send on attempt %d but instruction still appears pending",
+                        pane_id,
+                        attempt,
+                    )
+                elif await _pane_is_alive(pane_id):
                     logger.info(
                         "Pane %s: prompt disappeared after send on attempt %d — assuming instruction accepted",
                         pane_id,
                         attempt,
                     )
                     return True
-                logger.warning(
-                    "Pane %s: prompt disappeared after send on attempt %d but pane is dead",
-                    pane_id,
-                    attempt,
-                )
+                else:
+                    logger.warning(
+                        "Pane %s: prompt disappeared after send on attempt %d but pane is dead",
+                        pane_id,
+                        attempt,
+                    )
             logger.warning(
                 "Pane %s: instruction not found in output (attempt %d/%d)",
                 pane_id,
