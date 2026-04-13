@@ -15,9 +15,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shutil
+from pathlib import Path
 from typing import ClassVar
 
 logger = logging.getLogger(__name__)
+
+
+def _tmux_binary() -> str:
+    """Resolve tmux from PATH or common install locations."""
+    tmux = shutil.which("tmux")
+    if tmux:
+        return tmux
+    for candidate in ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"):
+        if shutil.which(candidate) or Path(candidate).exists():
+            return candidate
+    return "tmux"
 
 # Bracketed paste escape sequences
 # ESC [ 2 0 0 ~  →  start of paste
@@ -107,7 +120,7 @@ class TmuxControlConnection:
 
         try:
             self._proc = await asyncio.create_subprocess_exec(
-                "tmux",
+                _tmux_binary(),
                 "-C",
                 "attach-session",
                 "-t",
@@ -379,7 +392,7 @@ async def capture_pane_async(tmux_session: str, target: str) -> str:  # noqa: AR
         RuntimeError: if ``tmux capture-pane`` exits non-zero.
     """
     proc = await asyncio.create_subprocess_exec(
-        "tmux",
+        _tmux_binary(),
         "capture-pane",
         "-t",
         target,
