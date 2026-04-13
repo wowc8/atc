@@ -602,7 +602,12 @@ class TestGetProgress:
     async def test_progress_empty(self, db, orchestrator: LeaderOrchestrator) -> None:
         progress = await orchestrator.get_progress()
         assert progress["total"] == 0
-        assert progress["all_done"] is True
+        assert progress["done"] == 0
+        assert progress["in_progress"] == 0
+        assert progress["todo"] == 0
+        assert progress["error"] == 0
+        assert progress["progress_pct"] == 0
+        assert progress["all_done"] is False
 
 
 # ---------------------------------------------------------------------------
