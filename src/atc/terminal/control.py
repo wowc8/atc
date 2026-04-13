@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shutil
 from typing import ClassVar
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,17 @@ _BP_SUFFIX = bytes([0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E])
 
 # Enter key in hex
 _ENTER_HEX = "0d"
+
+
+def _tmux_binary() -> str:
+    """Resolve the tmux binary path, checking common macOS/Linux locations."""
+    tmux = shutil.which("tmux")
+    if tmux:
+        return tmux
+    for candidate in ("/usr/local/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/bin/tmux"):
+        if shutil.which(candidate):
+            return candidate
+    return "tmux"
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +119,7 @@ class TmuxControlConnection:
 
         try:
             self._proc = await asyncio.create_subprocess_exec(
-                "tmux",
+                _tmux_binary(),
                 "-C",
                 "attach-session",
                 "-t",
@@ -379,7 +391,7 @@ async def capture_pane_async(tmux_session: str, target: str) -> str:  # noqa: AR
         RuntimeError: if ``tmux capture-pane`` exits non-zero.
     """
     proc = await asyncio.create_subprocess_exec(
-        "tmux",
+        _tmux_binary(),
         "capture-pane",
         "-t",
         target,
