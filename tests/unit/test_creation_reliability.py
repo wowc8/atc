@@ -168,6 +168,7 @@ class TestSendInstruction:
         mock_send_async.assert_called_once_with("atc", "%0", "test")
 
     @pytest.mark.asyncio
+    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
     @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
     @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
     @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
@@ -178,14 +179,40 @@ class TestSendInstruction:
         mock_ready: AsyncMock,
         mock_send_async: AsyncMock,
         mock_capture: AsyncMock,
+        mock_alive: AsyncMock,
     ) -> None:
         mock_wait.side_effect = [True, False]
         mock_ready.return_value = True
         mock_send_async.return_value = None
         mock_capture.return_value = "$ \n"
+        mock_alive.return_value = True
 
         result = await send_instruction("%0", "run tests", max_retries=1)
         assert result is True
+        mock_send_async.assert_called_once_with("atc", "%0", "run tests")
+
+    @pytest.mark.asyncio
+    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
+    @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
+    @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
+    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
+    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
+    async def test_prompt_disappearing_with_dead_pane_is_not_treated_as_success(
+        self,
+        mock_wait: AsyncMock,
+        mock_ready: AsyncMock,
+        mock_send_async: AsyncMock,
+        mock_capture: AsyncMock,
+        mock_alive: AsyncMock,
+    ) -> None:
+        mock_wait.side_effect = [True, False]
+        mock_ready.return_value = True
+        mock_send_async.return_value = None
+        mock_capture.return_value = "$ \n"
+        mock_alive.return_value = False
+
+        result = await send_instruction("%0", "run tests", max_retries=1)
+        assert result is False
         mock_send_async.assert_called_once_with("atc", "%0", "run tests")
 
 

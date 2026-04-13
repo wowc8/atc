@@ -551,14 +551,22 @@ async def send_instruction(
 
             # Claude sometimes consumes a bracketed paste immediately without leaving
             # the full instruction visible in capture-pane. If the prompt is no longer
-            # bare, treat that as accepted input rather than a swallowed send.
+            # bare, treat that as accepted input rather than a swallowed send — but
+            # only if the pane is still alive. A dead pane must remain a delivery
+            # failure so callers can retry/report accurately.
             if not await wait_for_prompt(pane_id, timeout=1.0, poll_interval=0.25):
-                logger.info(
-                    "Pane %s: prompt disappeared after send on attempt %d — assuming instruction accepted",
+                if await _pane_is_alive(pane_id):
+                    logger.info(
+                        "Pane %s: prompt disappeared after send on attempt %d — assuming instruction accepted",
+                        pane_id,
+                        attempt,
+                    )
+                    return True
+                logger.warning(
+                    "Pane %s: prompt disappeared after send on attempt %d but pane is dead",
                     pane_id,
                     attempt,
                 )
-                return True
             logger.warning(
                 "Pane %s: instruction not found in output (attempt %d/%d)",
                 pane_id,
