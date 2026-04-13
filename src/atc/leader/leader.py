@@ -304,4 +304,16 @@ async def send_leader_message(
     if not await _pane_is_alive(session.tmux_pane):
         raise ValueError("Leader tmux pane is dead — stop and restart the leader")
 
-    await send_instruction(session.tmux_pane, message)
+    delivered = await send_instruction(session.tmux_pane, message)
+    if not delivered:
+        logger.error(
+            "Leader %s: instruction delivery failed for project %s",
+            session.id,
+            project_id,
+        )
+        await db_ops.update_session_status(conn, session.id, SessionStatus.ERROR.value)
+        try:
+            await transition(session.id, SessionStatus.WORKING, SessionStatus.ERROR, event_bus)
+        except Exception:
+            pass
+        raise ValueError("Leader instruction delivery failed — restart the leader after Claude login if needed")

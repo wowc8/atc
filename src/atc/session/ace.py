@@ -567,6 +567,41 @@ async def send_instruction(
                     pane_id,
                     attempt,
                 )
+
+            # Live macOS repro: after /login recovery, bracketed paste can land
+            # in the Claude prompt while the submit keystroke is effectively lost.
+            # When we can still see the full instruction sitting at a bare prompt,
+            # send one extra plain Enter before declaring delivery failure.
+            prompt_lines = [line.rstrip() for line in output.splitlines() if line.strip()]
+            last_line = prompt_lines[-1] if prompt_lines else ""
+            at_bare_prompt = last_line.startswith("❯") or last_line.startswith(">")
+            if at_bare_prompt and fingerprint and fingerprint in output:
+                logger.info(
+                    "Pane %s: instruction still visible at prompt on attempt %d; sending extra Enter",
+                    pane_id,
+                    attempt,
+                )
+                await _tmux_run("send-keys", "-t", pane_id, "Enter")
+                await asyncio.sleep(1.0)
+                follow_up = await _capture_pane(pane_id)
+                follow_lines = [line.rstrip() for line in follow_up.splitlines() if line.strip()]
+                follow_last = follow_lines[-1] if follow_lines else ""
+                if not (follow_last.startswith("❯") or follow_last.startswith(">")):
+                    logger.info(
+                        "Pane %s: extra Enter cleared bare prompt on attempt %d",
+                        pane_id,
+                        attempt,
+                    )
+                    return True
+                if not await wait_for_prompt(pane_id, timeout=1.0, poll_interval=0.25):
+                    if await _pane_is_alive(pane_id):
+                        logger.info(
+                            "Pane %s: extra Enter caused prompt to disappear on attempt %d",
+                            pane_id,
+                            attempt,
+                        )
+                        return True
+
             logger.warning(
                 "Pane %s: instruction not found in output (attempt %d/%d)",
                 pane_id,
