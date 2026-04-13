@@ -13,6 +13,7 @@ import pytest
 from atc.session.ace import (
     VerificationResult,
     _get_alternate_on,
+    _instruction_still_pending,
     check_tui_ready,
     send_instruction,
     verify_alive,
@@ -211,6 +212,7 @@ class TestSendInstruction:
         mock_capture.return_value = "[Pasted text #1 +22 lines]run tests"
         mock_alive.return_value = True
 
+        assert _instruction_still_pending(mock_capture.return_value, "run tests") is True
         result = await send_instruction("%0", "run tests", max_retries=1)
         assert result is False
         mock_send_async.assert_called_once_with("atc", "%0", "run tests")
