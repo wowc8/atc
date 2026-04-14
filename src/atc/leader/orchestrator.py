@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files
+from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
 from atc.agents.factory import get_launch_command
 from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
@@ -232,13 +232,26 @@ class LeaderOrchestrator:
                 "in_progress",
             )
 
+        deployed = deploy_ace_files(
+            AceDeploySpec(
+                session_id=session_id,
+                project_name=project_name,
+                task_title=title,
+                task_description=description,
+                project_id=self.project_id,
+                repo_path=repo_path,
+                github_repo=github_repo,
+                context_entries=context_entries,
+            )
+        )
+
         assignment = AceAssignment(
             ace_session_id=session_id,
             task_graph_id=task_graph_id,
             task_title=title,
             assignment_id=idempotency_key,
             status="assigned",
-            deployed_root=Path("/tmp/atc-agents") / session_id,
+            deployed_root=deployed.root,
         )
         self.assignments[task_graph_id] = assignment
 
