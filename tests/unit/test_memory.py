@@ -345,7 +345,7 @@ class TestMemoryCron:
         from atc.memory.cron import MemoryCron
 
         mock_bus = MagicMock()
-        cron = MemoryCron(db, mock_bus)
+        cron = MemoryCron(":memory:", mock_bus)
 
         with patch(
             "atc.memory.cron.MemoryConsolidation.run_consolidation",
@@ -367,7 +367,7 @@ class TestMemoryCron:
         from atc.memory.cron import MemoryCron
 
         mock_bus = MagicMock()
-        cron = MemoryCron(db, mock_bus)
+        cron = MemoryCron(":memory:", mock_bus)
 
         async def _slow_job(*args, **kwargs):  # type: ignore[no-untyped-def]
             import asyncio

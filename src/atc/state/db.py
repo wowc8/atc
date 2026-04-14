@@ -190,10 +190,11 @@ def _uuid() -> str:
 @asynccontextmanager
 async def get_connection(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
     """Yield an aiosqlite connection with WAL mode and foreign keys enabled."""
-    db = await aiosqlite.connect(db_path)
+    db = await aiosqlite.connect(db_path, timeout=30.0)
     try:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("PRAGMA busy_timeout=30000")
         db.row_factory = aiosqlite.Row
         yield db
     finally:

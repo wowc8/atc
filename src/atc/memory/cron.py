@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING
 from atc.memory.consolidation import MemoryConsolidation
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     import aiosqlite
 
     from atc.api.ws.hub import WsHub
@@ -40,13 +42,13 @@ class MemoryCron:
 
     def __init__(
         self,
-        db: aiosqlite.Connection,
+        db_path: str,
         event_bus: EventBus,
         *,
         ws_hub: WsHub | None = None,
         check_interval: float = _CHECK_INTERVAL,
     ) -> None:
-        self._db = db
+        self._db_path = db_path
         self._event_bus = event_bus
         self._ws_hub = ws_hub
         self._check_interval = check_interval
@@ -60,9 +62,10 @@ class MemoryCron:
 
         # On startup: trigger immediately if no run today
         try:
-            if await MemoryConsolidation.should_run_for_day(self._db):
-                logger.info("Memory cron: first run of day — triggering consolidation now")
-                self._running_job = asyncio.create_task(self._run_job("startup"))
+            async with self._connection() as db:
+                if await MemoryConsolidation.should_run_for_day(db):
+                    logger.info("Memory cron: first run of day — triggering consolidation now")
+                    self._running_job = asyncio.create_task(self._run_job("startup"))
         except Exception:
             logger.exception("Memory cron: startup check failed")
 
@@ -115,9 +118,10 @@ class MemoryCron:
             logger.debug("Memory cron: consolidation already running, skipping check")
             return
 
-        if not await MemoryConsolidation.should_run(self._db):
-            logger.debug("Memory cron: skipping — consolidation not yet due")
-            return
+        async with self._connection() as db:
+            if not await MemoryConsolidation.should_run(db):
+                logger.debug("Memory cron: skipping — consolidation not yet due")
+                return
 
         logger.info("Memory cron: consolidation is due — launching job")
         self._running_job = asyncio.create_task(self._run_job("scheduled"))
@@ -126,9 +130,10 @@ class MemoryCron:
         """Execute consolidation and log result."""
         logger.info("Memory cron: starting consolidation (trigger=%s)", trigger)
         try:
-            result = await MemoryConsolidation.run_consolidation(
-                self._db, self._event_bus, self._ws_hub
-            )
+            async with self._connection() as db:
+                result = await MemoryConsolidation.run_consolidation(
+                    db, self._event_bus, self._ws_hub
+                )
             logger.info(
                 "Memory cron: consolidation done (trigger=%s status=%s written=%d)",
                 trigger,
@@ -149,14 +154,22 @@ class MemoryCron:
     async def last_run_at(self) -> str | None:
         """Return ISO-8601 timestamp of the last finished consolidation run, or None."""
         try:
-            cursor = await self._db.execute(
-                """SELECT finished_at FROM memory_consolidation_runs
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """SELECT finished_at FROM memory_consolidation_runs
                    WHERE status = 'done' ORDER BY finished_at DESC LIMIT 1"""
-            )
-            row = await cursor.fetchone()
-            return str(row["finished_at"]) if row and row["finished_at"] else None
+                )
+                row = await cursor.fetchone()
+                return str(row["finished_at"]) if row and row["finished_at"] else None
         except Exception:
             return None
+
+    @contextlib.asynccontextmanager
+    async def _connection(self) -> "AsyncIterator[aiosqlite.Connection]":
+        from atc.state.db import get_connection
+
+        async with get_connection(self._db_path) as db:
+            yield db
 
     async def next_run_at(self) -> str | None:
         """Return the estimated ISO-8601 timestamp for the next scheduled run."""
