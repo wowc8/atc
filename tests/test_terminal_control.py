@@ -19,7 +19,8 @@ from atc.terminal.control import (
     TmuxControlPool,
     _BP_PREFIX,
     _BP_SUFFIX,
-    _ENTER_HEX,
+    _ENTER_KEY,
+    _ENTER_SETTLE_DELAY,
     _encode_text,
     _to_hex,
     capture_pane_async,
@@ -94,9 +95,9 @@ def test_encode_text_bracketed_round_trip() -> None:
     assert raw == _BP_PREFIX + text.encode("utf-8") + _BP_SUFFIX
 
 
-def test_enter_hex_is_carriage_return() -> None:
-    assert _ENTER_HEX == "0d"
-    assert bytes([int(_ENTER_HEX, 16)]) == b"\r"
+def test_enter_key_uses_symbolic_tmux_name() -> None:
+    assert _ENTER_KEY == "Enter"
+    assert _ENTER_SETTLE_DELAY == 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -229,12 +230,34 @@ async def test_send_instruction_async_retries_on_failure() -> None:
             return failing
         return fresh
 
-    with patch.object(pool, "get_connection", side_effect=fake_get):
+    with patch.object(pool, "get_connection", side_effect=fake_get), patch(
+        "atc.terminal.control.asyncio.sleep",
+        new=AsyncMock(),
+    ) as mock_sleep:
         await send_instruction_async("atc", "%42", "do something")
+
+    mock_sleep.assert_awaited_once_with(_ENTER_SETTLE_DELAY)
 
     assert call_count == 2
     fresh.send_keys.assert_called_once_with("%42", "do something", bracketed=True)
     fresh.send_enter.assert_called_once_with("%42")
+
+
+@pytest.mark.asyncio
+async def test_send_enter_uses_symbolic_tmux_key() -> None:
+    proc = MagicMock()
+    proc.returncode = None
+    proc.stdin = AsyncMock()
+    proc.stdin.write = MagicMock()
+    proc.stdin.drain = AsyncMock()
+
+    conn = TmuxControlConnection("atc")
+    conn._proc = proc
+
+    await conn.send_enter("%7")
+
+    proc.stdin.write.assert_called_once_with(b"send-keys -t %7 Enter\n")
+    proc.stdin.drain.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -247,8 +270,13 @@ async def test_send_instruction_async_success_path() -> None:
     conn.send_keys = AsyncMock()
     conn.send_enter = AsyncMock()
 
-    with patch.object(pool, "get_connection", AsyncMock(return_value=conn)):
+    with patch.object(pool, "get_connection", AsyncMock(return_value=conn)), patch(
+        "atc.terminal.control.asyncio.sleep",
+        new=AsyncMock(),
+    ) as mock_sleep:
         await send_instruction_async("atc", "%7", "run the tests")
+
+    mock_sleep.assert_awaited_once_with(_ENTER_SETTLE_DELAY)
 
     conn.send_keys.assert_called_once_with("%7", "run the tests", bracketed=True)
     conn.send_enter.assert_called_once_with("%7")
@@ -367,7 +395,7 @@ async def test_send_keys_writes_hex_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_enter_writes_0d() -> None:
+async def test_send_enter_writes_symbolic_key_command() -> None:
     mock_stdin = MagicMock()
     mock_stdin.drain = AsyncMock()
 
@@ -381,7 +409,7 @@ async def test_send_enter_writes_0d() -> None:
     await conn.send_enter("%5")
 
     written: bytes = mock_stdin.write.call_args[0][0]
-    assert b"0d" in written
+    assert written == b"send-keys -t %5 Enter\n"
     mock_stdin.drain.assert_called_once()
 
 

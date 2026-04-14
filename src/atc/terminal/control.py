@@ -38,8 +38,17 @@ _BP_PREFIX = bytes([0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E])
 # ESC [ 2 0 1 ~  →  end of paste
 _BP_SUFFIX = bytes([0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E])
 
-# Enter key in hex
-_ENTER_HEX = "0d"
+# Enter key name for tmux send-keys.
+#
+# On macOS tmux control mode, `send-keys -H ... 0d` can leave pasted input sitting
+# at the prompt without actually submitting it. A symbolic `Enter` key works
+# reliably there and on Linux.
+_ENTER_KEY = "Enter"
+
+# Small settle delay between bracketed paste and Enter.
+# Without this, tmux control mode on macOS can leave the pasted instruction
+# sitting visibly at the Claude prompt even though both commands were written.
+_ENTER_SETTLE_DELAY = 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +239,11 @@ class TmuxControlConnection:
         await self._proc.stdin.drain()
 
     async def send_enter(self, target: str) -> None:
-        """Send the Enter key (0x0d) to *target*.
+        """Send the Enter key to *target*.
+
+        Uses tmux's symbolic `Enter` key instead of a hex carriage return.
+        Control mode on macOS accepted the pasted text but sometimes ignored a
+        hex `0d`, leaving the instruction visibly pending at the prompt.
 
         Raises:
             RuntimeError: if the connection is not alive.
@@ -239,7 +252,7 @@ class TmuxControlConnection:
             raise RuntimeError(
                 f"Control connection for {self._tmux_session!r} is not alive"
             )
-        cmd = f"send-keys -H -t {target} {_ENTER_HEX}\n"
+        cmd = f"send-keys -t {target} {_ENTER_KEY}\n"
         self._proc.stdin.write(cmd.encode())
         await self._proc.stdin.drain()
 
@@ -362,6 +375,7 @@ async def send_instruction_async(
     try:
         conn = await pool.get_connection(tmux_session)
         await conn.send_keys(target, text, bracketed=True)
+        await asyncio.sleep(_ENTER_SETTLE_DELAY)
         await conn.send_enter(target)
     except Exception as exc:
         logger.warning(
@@ -373,6 +387,7 @@ async def send_instruction_async(
             await old.stop()
         conn = await pool.get_connection(tmux_session)
         await conn.send_keys(target, text, bracketed=True)
+        await asyncio.sleep(_ENTER_SETTLE_DELAY)
         await conn.send_enter(target)
 
 
