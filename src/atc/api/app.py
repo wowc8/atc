@@ -539,8 +539,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _resolve_claude_binary(settings)
 
     logger.info("ATC startup complete")
-    asyncio.create_task(_auto_start_tower())
-    await memory_cron.start()
     yield
 
     # Shutdown
