@@ -486,7 +486,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from atc.memory.cron import MemoryCron
 
     memory_cron = MemoryCron(db_path, event_bus, ws_hub=ws_hub)
-    await memory_cron.start()
     app.state.memory_cron = memory_cron
 
     # 14. Start backup service
@@ -542,6 +541,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _resolve_claude_binary(settings)
 
     logger.info("ATC startup complete")
+    await memory_cron.start()
     yield
 
     # Shutdown
