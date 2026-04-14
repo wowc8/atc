@@ -486,6 +486,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     memory_cron = MemoryCron(db_path, event_bus, ws_hub=ws_hub)
     app.state.memory_cron = memory_cron
 
+    # Startup DB-heavy background jobs only after init work is complete.
+    await memory_cron.start()
+    asyncio.create_task(_auto_start_tower())
+
     # 14. Start backup service
     from pathlib import Path as _Path
 
