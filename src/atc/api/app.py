@@ -48,9 +48,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 3. Open a persistent DB connection for the app
     import aiosqlite
 
-    db = await aiosqlite.connect(db_path)
+    db = await aiosqlite.connect(db_path, timeout=30.0)
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA foreign_keys=ON")
+    await db.execute("PRAGMA busy_timeout=30000")
     db.row_factory = aiosqlite.Row
     app.state.db = db
 
@@ -451,8 +452,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception:
             logger.exception("Tower auto-start failed — Tower will start in idle state")
 
-    asyncio.create_task(_auto_start_tower())
-
     # 9. Start resource monitor
     from atc.tracking.resources import ResourceMonitor
 
@@ -484,9 +483,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 13. Start memory consolidation cron
     from atc.memory.cron import MemoryCron
 
-    memory_cron = MemoryCron(db, event_bus, ws_hub=ws_hub)
-    await memory_cron.start()
+    memory_cron = MemoryCron(db_path, event_bus, ws_hub=ws_hub)
     app.state.memory_cron = memory_cron
+
+    # Startup DB-heavy background jobs only after init work is complete.
+    await memory_cron.start()
+    asyncio.create_task(_auto_start_tower())
 
     # 14. Start backup service
     from pathlib import Path as _Path

@@ -798,6 +798,61 @@ class TowerController:
                 exc,
             )
 
+    async def _on_leader_output(self, data: dict[str, Any]) -> None:
+        """Capture PTY output from the Leader session for monitoring.
+
+        After submit_goal() starts a Leader, Tower's Claude session needs to
+        know the goal and leader session ID so it can begin monitoring.
+        This is fire-and-forget: if Tower's terminal isn't ready, we log and move on.
+        """
+        if not self._current_session_id:
+            return
+
+        # Wait briefly for Tower's pane to be ready before sending
+        await asyncio.sleep(3.0)
+
+        # Look up the project name for a friendlier message
+        try:
+            cursor = await self._db.execute(
+                "SELECT name FROM projects WHERE id = ?",
+                (project_id,),
+            )
+            row = await cursor.fetchone()
+            project_name = row[0] if row else project_id[:8]
+        except Exception:
+            project_name = project_id[:8]
+
+        notification = (
+            f"[ATC] Leader started for project '{project_name}'.\n"
+            f"Goal: {goal}\n"
+            f"Leader session: {leader_session_id}\n"
+            f"Project ID: {project_id}\n\n"
+            f"Begin monitoring. Check progress with:\n"
+            f"  curl -s http://127.0.0.1:8420/api/projects/{project_id}/leader/progress\n"
+            f"Send nudges if stuck:\n"
+            f"  atc leader message --project-id {project_id} --message 'Please continue with your goal.'\n"
+            f"\nDo NOT write code or create files yourself — delegate to the Leader only."
+        )
+
+        try:
+            await send_tower_message(
+                self._db,
+                self._current_session_id,
+                notification,
+                event_bus=self._event_bus,
+            )
+            logger.info(
+                "Sent goal notification to Tower session %s (project %s)",
+                self._current_session_id,
+                project_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not notify Tower session %s of new goal: %s",
+                self._current_session_id,
+                exc,
+            )
+
     @staticmethod
     def _extract_auth_blocker(text: str) -> str | None:
         """Return a human-readable auth blocker when Claude is not usable."""

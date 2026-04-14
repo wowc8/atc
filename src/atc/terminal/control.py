@@ -20,6 +20,17 @@ from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
+
+def _tmux_binary() -> str:
+    """Resolve tmux path consistently across Linux/macOS and sparse PATHs."""
+    tmux = shutil.which("tmux")
+    if tmux:
+        return tmux
+    for candidate in ("/usr/local/bin/tmux", "/opt/homebrew/bin/tmux", "/usr/bin/tmux"):
+        if shutil.which(candidate):
+            return candidate
+    return "tmux"
+
 # Bracketed paste escape sequences
 # ESC [ 2 0 0 ~  →  start of paste
 _BP_PREFIX = bytes([0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E])
