@@ -150,6 +150,8 @@ class OpenCodeProvider:
         *,
         working_dir: str | None = None,
         env: dict[str, str] | None = None,
+        context_file: Path | None = None,
+        role: str = "ace",
     ) -> SessionInfo:
         if session_id in self._pane_ids:
             raise ProviderError(self.name, f"Session {session_id} already tracked")
@@ -178,6 +180,29 @@ class OpenCodeProvider:
             status=SessionStatus.IDLE,
             metadata={"pane_id": pane_id, "base_url": self._base_url},
         )
+
+    async def prepare_workspace(
+        self,
+        session_id: str,
+        *,
+        working_dir: str,
+        context_file: Path | None = None,
+    ) -> None:
+        """OpenCode does not require provider-managed workspace prep."""
+        return None
+
+    async def is_ready(self, session_id: str) -> bool:
+        """OpenCode sessions are ready once the API reports them reachable."""
+        try:
+            status = await self.get_status(session_id)
+        except ProviderError:
+            return False
+        return status.status in {SessionStatus.IDLE, SessionStatus.BUSY}
+
+    async def handle_startup(self, session_id: str) -> None:
+        """OpenCode has no tmux/TUI startup dialog flow."""
+        self._require_tracked(session_id)
+        return None
 
     async def send_prompt(self, session_id: str, prompt: str) -> PromptResult:
         self._require_tracked(session_id)

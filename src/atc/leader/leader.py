@@ -201,7 +201,15 @@ async def start_leader(
             launch_cmd,
             working_dir=working_dir,
         )
-        await _accept_trust_dialog(pane_id)
+        try:
+            from atc.agents.factory import create_provider
+
+            provider = create_provider(project.agent_provider if project else "claude_code")
+            if hasattr(provider, "_sessions"):
+                provider._sessions[session.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
+            await provider.handle_startup(session.id)
+        except Exception:
+            await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)

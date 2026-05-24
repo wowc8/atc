@@ -155,6 +155,15 @@ class AgentProvider(Protocol):
         """
         ...
 
+    async def handle_startup(self, session_id: str) -> None:
+        """Handle provider-specific startup flows after spawn.
+
+        Examples: dismiss trust dialogs, accept permission prompts, or
+        perform other provider-specific initialization needed before the
+        session is considered ready.
+        """
+        ...
+
     async def send_prompt(self, session_id: str, prompt: str) -> PromptResult:
         """Send a prompt/instruction to an existing session.
 

@@ -25,6 +25,15 @@ from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
+from atc.agents.claude_runtime import (
+    INSTRUCTION_MAX_RETRIES,
+    TUI_READY_POLL_INTERVAL,
+    TUI_READY_TIMEOUT,
+    accept_startup_dialogs,
+    check_tui_ready as claude_check_tui_ready,
+    send_instruction as claude_send_instruction,
+    wait_for_prompt as claude_wait_for_prompt,
+)
 from atc.session.state_machine import (
     SessionStatus,
     transition,
@@ -41,42 +50,6 @@ logger = logging.getLogger(__name__)
 
 # Default tmux session name used for ATC panes
 ATC_TMUX_SESSION = "atc"
-
-# TUI readiness: max seconds to wait for alternate_on == False
-TUI_READY_TIMEOUT = 10.0
-TUI_READY_POLL_INTERVAL = 0.5
-
-# Instruction verification: seconds to wait before capture-pane check
-INSTRUCTION_VERIFY_DELAY = 2.0
-INSTRUCTION_MAX_RETRIES = 3
-
-# Strings that indicate a known startup dialog is on screen.
-# Used to guard against false-positive "Claude is running" detection —
-# the trust dialog body itself contains "Claude Code will be able to..."
-# which would otherwise trigger the early-exit before any dialog is handled.
-_DIALOG_TRIGGERS: tuple[str, ...] = (
-    "enter to confirm",
-    "trust this folder",
-    "do you trust",
-    "bypass permissions",
-    "bypass permissions on",
-    "yes, i accept",
-    "do you want to use this api key",
-    "will be able to read",
-    # Claude Code v2+ uses contraction: "Claude Code'll be able to read..."
-    "'ll be able to read",
-    "able to read, edit",
-    "yes, i trust this folder",
-    "no, exit",
-    "security guide",
-    "is this a project you created",
-    "one you trust",
-    # Welcome/tips screen — Claude is running but not yet in the interactive
-    # prompt.  Listed here so the "claude code" fast-exit doesn't fire early.
-    "tips for getting started",
-    "welcome to claude code",
-    "welcome back",
-)
 
 
 # ---------------------------------------------------------------------------
@@ -247,133 +220,14 @@ async def _spawn_pane(
 
 
 async def _accept_trust_dialog(pane_id: str, *, timeout: float = 10.0) -> bool:
-    """Accept all Claude Code startup confirmation dialogs.
-
-    Claude Code (v2+) shows up to two dialogs before becoming interactive:
-
-    Dialog 1 — API key selector (when ANTHROPIC_API_KEY is set):
-        "Detected a custom API key in your environment"
-        "Do you want to use this API key?"
-        ❯ 2. No (recommended)  ← default cursor position
-        → Send Enter to dismiss (keeps OAuth login, ignores the env key)
-
-    Dialog 2 — Bypass permissions confirmation (with --dangerously-skip-permissions):
-        "By proceeding, you accept all responsibility..."
-        ❯ 1. No, exit          ← default cursor position
-          2. Yes, I accept
-        → Send Down then Enter to select "Yes, I accept"
-
-    Legacy dialog — trust this folder:
-        → Send Enter to accept
-
-    Returns True if any dialog was detected and dismissed, False if Claude
-    started without showing any dialog within *timeout* seconds.
-    """
-    from atc.agents.auth import is_oauth_key, resolve_agent_api_key
-
-    _key = resolve_agent_api_key()
-    _use_api_key = bool(_key and not is_oauth_key(_key))
-
-    poll_interval = 0.5
-    elapsed = 0.0
-    # Track which dialog types we've already handled to avoid re-triggering on
-    # the same pane output while waiting for the screen to clear.
-    dismissed: set[str] = set()
-
-    while elapsed < timeout:
-        try:
-            output = await _capture_pane(pane_id)
-            lowered = output.lower()
-
-            # Dialog 1: API key selector — Enter dismisses (selects "No")
-            if "api_key_selector" not in dismissed and (
-                "do you want to use this api key" in lowered
-                or ("detected" in lowered and "api key" in lowered)
-            ):
-                if _use_api_key:
-                    # Option 1 "Yes" is above the pre-selected option 2 "No"
-                    await _tmux_run("send-keys", "-t", pane_id, "Up")
-                    await asyncio.sleep(0.1)
-                    logger.info("Pane %s: accepted API key selector (real key configured)", pane_id)
-                else:
-                    logger.info("Pane %s: dismissed API key selector dialog (OAuth mode)", pane_id)
-                await _tmux_run("send-keys", "-t", pane_id, "Enter")
-                dismissed.add("api_key_selector")
-                await asyncio.sleep(1.0)  # wait for next dialog to appear
-                continue
-
-            # Dialog 2: bypass permissions confirmation — Down then Enter selects "Yes"
-            if "bypass_permissions" not in dismissed and (
-                "bypass permissions" in lowered
-                or ("yes, i accept" in lowered and "no, exit" in lowered)
-            ):
-                await _tmux_run("send-keys", "-t", pane_id, "Down")
-                await asyncio.sleep(0.1)
-                await _tmux_run("send-keys", "-t", pane_id, "Enter")
-                logger.info("Pane %s: accepted bypass permissions dialog", pane_id)
-                dismissed.add("bypass_permissions")
-                await asyncio.sleep(1.0)
-                continue
-
-            # Dialog 3: security guide / trust-folder (new variant, v2+)
-            #   Body: "Claude Code will be able to read, edit, and execute files here."
-            #   ❯ 1. Yes, I trust this folder   ← pre-selected
-            #     2. No, exit
-            #   Enter to confirm · Esc to cancel
-            # Option 1 is pre-selected — Enter accepts without arrow keys.
-            if "trust_folder" not in dismissed and (
-                "trust this folder" in lowered
-                or "do you trust" in lowered
-                or "yes, i trust this folder" in lowered
-                or "will be able to read" in lowered
-                or "'ll be able to read" in lowered  # v2+ contraction form
-                or "able to read, edit" in lowered
-                or "is this a project you created" in lowered
-            ):
-                await _tmux_run("send-keys", "-t", pane_id, "Enter")
-                logger.info("Pane %s: accepted trust-folder dialog", pane_id)
-                dismissed.add("trust_folder")
-                await asyncio.sleep(1.0)
-                continue
-
-            # Claude Code TUI is running — all dialogs cleared.
-            # NOTE: must run AFTER dialog checks. The trust dialog body text
-            # contains "Claude Code will be able to..." which would cause a
-            # false-positive early-exit if this check ran first.
-            # Guard: only exit early when no known dialog trigger strings present.
-            if "claude code" in lowered and not any(t in lowered for t in _DIALOG_TRIGGERS):
-                logger.debug("Pane %s: Claude Code ready (text match, %.1fs)", pane_id, elapsed)
-                return bool(dismissed)
-
-            # Fast-exit: pane left alternate-screen mode (TUI exited) and the
-            # interactive ❯ prompt is visible.  This fires on Mac where the
-            # alternate_on flag goes False as soon as dialogs clear.
-            #
-            # IMPORTANT: The trust dialog also uses ❯ for menu items (❯ 1. Yes…).
-            # Only treat ❯ as the interactive prompt when it appears on a line by
-            # itself (bare ❯ or "> "), NOT as a menu item prefix like "❯ 1.".
-            try:
-                alt_on = await _get_alternate_on(pane_id)
-                if not alt_on:
-                    # Check for bare prompt line: "❯" or "> " alone, not "❯ 1."
-                    import re as _re_mod
-                    _bare_prompt = _re_mod.compile(r"^[❯>]\s*$", _re_mod.MULTILINE)
-                    if _bare_prompt.search(output):
-                        # Extra guard: ensure no dialog triggers are still visible
-                        if not any(t in lowered for t in _DIALOG_TRIGGERS):
-                            logger.debug(
-                                "Pane %s: prompt visible (alternate_on=0, %.1fs)", pane_id, elapsed
-                            )
-                            return bool(dismissed)
-            except RuntimeError:
-                pass
-
-        except RuntimeError:
-            pass
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
-    logger.debug("Pane %s: dialog handling finished after %.1fs", pane_id, timeout)
-    return bool(dismissed)
+    """Backward-compatible wrapper around Claude-specific startup handling."""
+    return await accept_startup_dialogs(
+        pane_id,
+        capture_pane=_capture_pane,
+        get_alternate_on=_get_alternate_on,
+        tmux_run=_tmux_run,
+        timeout=timeout,
+    )
 
 
 async def _kill_pane(pane_id: str) -> None:
@@ -421,43 +275,14 @@ async def wait_for_prompt(
     timeout: float = 10.0,
     poll_interval: float = 0.5,
 ) -> bool:
-    """Wait until the pane shows an empty prompt with alternate_on == 0.
-
-    Checks two conditions simultaneously:
-    1. alternate_on == 0 (no full-screen TUI active)
-    2. A bare prompt line: starts with '❯' or '> ' with nothing after it
-
-    Returns True when both conditions are met within *timeout* seconds,
-    False otherwise.
-    """
-    import re as _re
-
-    _prompt_re = _re.compile(r"^[❯>]\s*$", _re.MULTILINE)
-
-    elapsed = 0.0
-    while elapsed < timeout:
-        try:
-            alt_on = await _get_alternate_on(pane_id)
-            if not alt_on:
-                output = await _capture_pane(pane_id)
-                lowered = output.lower()
-                if any(trigger in lowered for trigger in _DIALOG_TRIGGERS):
-                    logger.debug(
-                        "Pane %s: prompt suppressed because startup dialog is still visible",
-                        pane_id,
-                    )
-                elif _prompt_re.search(output):
-                    return True
-        except RuntimeError:
-            return False
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
-    logger.warning(
-        "Pane %s: prompt not ready after %.1fs (wait_for_prompt timed out)",
+    """Backward-compatible wrapper around Claude-specific prompt readiness."""
+    return await claude_wait_for_prompt(
         pane_id,
-        timeout,
+        get_alternate_on=_get_alternate_on,
+        capture_pane=_capture_pane,
+        timeout=timeout,
+        poll_interval=poll_interval,
     )
-    return False
 
 
 async def check_tui_ready(
@@ -466,25 +291,13 @@ async def check_tui_ready(
     timeout: float = TUI_READY_TIMEOUT,
     poll_interval: float = TUI_READY_POLL_INTERVAL,
 ) -> bool:
-    """Wait until the pane exits alternate screen mode (TUI not active).
-
-    Returns ``True`` if the pane is ready for input within *timeout* seconds,
-    ``False`` if it timed out (TUI still active).
-    """
-    elapsed = 0.0
-    while elapsed < timeout:
-        try:
-            if not await _get_alternate_on(pane_id):
-                return True
-        except RuntimeError:
-            # Pane may have died
-            return False
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
-    logger.warning(
-        "Pane %s: TUI still active after %.1fs, alternate_on not cleared", pane_id, timeout
+    """Backward-compatible wrapper around Claude-specific TUI readiness."""
+    return await claude_check_tui_ready(
+        pane_id,
+        get_alternate_on=_get_alternate_on,
+        timeout=timeout,
+        poll_interval=poll_interval,
     )
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -499,108 +312,24 @@ async def send_instruction(
     verify: bool = True,
     max_retries: int = INSTRUCTION_MAX_RETRIES,
 ) -> bool:
-    """Send instruction text + Enter atomically, with optional verification.
+    """Backward-compatible wrapper around Claude-specific instruction delivery."""
+    import atc.agents.claude_runtime as _claude_runtime
 
-    1. Check TUI readiness (alternate_on == False)
-    2. Send text + Enter with no await gap between them
-    3. Verify instruction appears in capture-pane output
-
-    Returns ``True`` if the instruction was verified (or verification skipped).
-    """
-    for attempt in range(1, max_retries + 1):
-        # Step 1: TUI readiness — use prompt-ready polling for first attempt
-        # to ensure the welcome screen has fully cleared before sending.
-        if attempt == 1:
-            ready = await wait_for_prompt(pane_id)
-        else:
-            ready = await check_tui_ready(pane_id)
-        if not ready:
-            logger.warning("Pane %s: TUI not ready on attempt %d/%d", pane_id, attempt, max_retries)
-            continue
-
-        # Step 2: Atomic send — bracketed paste plus Enter via tmux control mode.
-        # This is more reliable with Claude Code than raw send-keys text because
-        # the whole payload lands as one paste event before Enter is pressed.
-        await send_instruction_async(ATC_TMUX_SESSION, pane_id, text)
-
-        if not verify:
-            return True
-
-        # Step 3: Verify instruction was received
-        await asyncio.sleep(INSTRUCTION_VERIFY_DELAY)
-        try:
-            output = await _capture_pane(pane_id)
-            output_lower = output.lower()
-
-            # If the welcome/tips overlay is still visible, the instruction text
-            # is hidden behind it — skip retry and treat as delivered.  The
-            # overlay is purely cosmetic and does not block input; Claude is
-            # already processing the instruction.
-            _welcome_triggers = (
-                "tips for getting started",
-                "welcome to claude code",
-                "welcome back",
-            )
-            if any(t in output_lower for t in _welcome_triggers):
-                logger.info(
-                    "Pane %s: welcome screen visible on attempt %d"
-                    " — assuming instruction delivered",
-                    pane_id,
-                    attempt,
-                )
-                return True
-
-            # Check if any significant portion of the instruction appears in output.
-            # Use the first 80 chars as a fingerprint to avoid issues with line wrapping.
-            fingerprint = text[:80].strip()
-            if fingerprint and fingerprint in output:
-                logger.info("Pane %s: instruction verified on attempt %d", pane_id, attempt)
-                return True
-
-            # Claude sometimes consumes a bracketed paste immediately without leaving
-            # the full instruction visible in capture-pane. If the prompt is no longer
-            # bare, treat that as accepted input rather than a swallowed send — but
-            # only if the pane is still alive and not sitting on a startup dialog.
-            # A dead pane or visible dialog must remain a delivery failure so callers
-            # can retry/report accurately.
-            if not await wait_for_prompt(pane_id, timeout=1.0, poll_interval=0.25):
-                latest_output = await _capture_pane(pane_id)
-                latest_lower = latest_output.lower()
-                if any(trigger in latest_lower for trigger in _DIALOG_TRIGGERS):
-                    logger.warning(
-                        "Pane %s: startup dialog still visible after send on attempt %d",
-                        pane_id,
-                        attempt,
-                    )
-                elif await _pane_is_alive(pane_id):
-                    logger.info(
-                        "Pane %s: prompt disappeared after send on attempt %d — assuming instruction accepted",
-                        pane_id,
-                        attempt,
-                    )
-                    return True
-                else:
-                    logger.warning(
-                        "Pane %s: prompt disappeared after send on attempt %d but pane is dead",
-                        pane_id,
-                        attempt,
-                    )
-            logger.warning(
-                "Pane %s: instruction not found in output (attempt %d/%d)",
-                pane_id,
-                attempt,
-                max_retries,
-            )
-        except RuntimeError:
-            logger.warning(
-                "Pane %s: capture-pane failed on attempt %d/%d",
-                pane_id,
-                attempt,
-                max_retries,
-            )
-
-    logger.error("Pane %s: instruction delivery failed after %d attempts", pane_id, max_retries)
-    return False
+    original_send = _claude_runtime.send_instruction_async
+    _claude_runtime.send_instruction_async = send_instruction_async
+    try:
+        return await claude_send_instruction(
+            pane_id,
+            text,
+            capture_pane=_capture_pane,
+            pane_is_alive=_pane_is_alive,
+            wait_for_prompt_fn=wait_for_prompt,
+            check_tui_ready_fn=check_tui_ready,
+            verify=verify,
+            max_retries=max_retries,
+        )
+    finally:
+        _claude_runtime.send_instruction_async = original_send
 
 
 # Legacy wrapper kept for backward compatibility with existing callers
@@ -696,7 +425,20 @@ async def create_ace(
             launch_command,
             working_dir=effective_working_dir,
         )
-        await _accept_trust_dialog(pane_id)
+        try:
+            from atc.agents.factory import create_provider
+
+            provider_name = "claude_code"
+            if project_id:
+                project = await db_ops.get_project(conn, project_id)
+                if project and project.agent_provider:
+                    provider_name = project.agent_provider
+            provider = create_provider(provider_name)
+            if hasattr(provider, "_sessions"):
+                provider._sessions[session.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
+            await provider.handle_startup(session.id)
+        except Exception:
+            await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         # Step 4a: success → idle

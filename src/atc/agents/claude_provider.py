@@ -9,15 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-from atc.terminal.control import send_instruction_async
 
 from atc.agents.base import (
     OutputChunk,
@@ -27,6 +24,12 @@ from atc.agents.base import (
     SessionInfo,
     SessionStatus,
 )
+from atc.agents.claude_runtime import (
+    accept_startup_dialogs,
+    send_instruction as claude_send_instruction,
+    wait_for_prompt as claude_wait_for_prompt,
+)
+from atc.terminal.control import send_instruction_async
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +40,8 @@ class ClaudeCodeProvider:
     """Agent provider using Claude Code in tmux panes.
 
     Sessions are spawned as tmux new-window commands. Prompts are delivered
-    via ``tmux send-keys``. Status is tracked internally (future: via PTY
-    monitor). Output streaming delegates to the terminal/pty_stream module.
+    through Claude-specific runtime helpers. Output streaming delegates to a
+    capture-pane fallback for now.
 
     Implements :class:`AgentProvider` protocol.
     """
@@ -79,13 +82,11 @@ class ClaudeCodeProvider:
 
         self._check_tmux_available()
 
-        # Prepare workspace if requested
         if working_dir:
             await self.prepare_workspace(
                 session_id, working_dir=working_dir, context_file=context_file
             )
 
-        # Build the claude command, prepending ANTHROPIC_API_KEY if available
         import shlex as _shlex
 
         from atc.agents.auth import resolve_agent_api_key
@@ -108,14 +109,13 @@ class ClaudeCodeProvider:
         shell_cmd = f"{env_prefix}{' '.join(cmd_parts)}"
         logger.debug("spawn_session role=%s session=%s", role, session_id)
 
-        # Spawn in a new tmux window (avoids 'no space for new pane' in small terminals)
         tmux_args = [
             _TMUX_CMD,
             "new-window",
             "-t",
             self._tmux_session,
             "-d",
-            "-P",  # print pane info
+            "-P",
             "-F",
             "#{pane_id}",
         ]
@@ -148,71 +148,53 @@ class ClaudeCodeProvider:
         logger.info("Spawned Claude Code session %s in pane %s", session_id, pane_id)
         return tracked.to_info()
 
+    async def handle_startup(self, session_id: str) -> None:
+        """Handle Claude-specific startup dialogs for a tracked session."""
+        tracked = self._get_tracked(session_id)
+        await accept_startup_dialogs(
+            tracked.pane_id,
+            capture_pane=self._capture_pane,
+            get_alternate_on=self._get_alternate_on,
+            tmux_run=self._tmux_run,
+        )
+
     async def send_prompt(self, session_id: str, prompt: str) -> PromptResult:
         tracked = self._get_tracked(session_id)
 
+        import atc.agents.claude_runtime as _claude_runtime
+
+        original_send = _claude_runtime.send_instruction_async
+        _claude_runtime.send_instruction_async = send_instruction_async
         try:
-            await send_instruction_async(
-                self._tmux_session, tracked.pane_id, prompt
+            accepted = await claude_send_instruction(
+                tracked.pane_id,
+                prompt,
+                capture_pane=self._capture_pane,
+                pane_is_alive=self._pane_is_alive,
+                wait_for_prompt_fn=self._wait_for_prompt,
+                check_tui_ready_fn=self.is_ready,
             )
         except Exception as exc:
             raise ProviderError(self.name, f"send-keys failed: {exc}") from exc
+        finally:
+            _claude_runtime.send_instruction_async = original_send
 
-        tracked.status = SessionStatus.BUSY
+        tracked.status = SessionStatus.BUSY if accepted else SessionStatus.ERROR
         logger.info("Sent prompt to session %s (pane %s)", session_id, tracked.pane_id)
-        return PromptResult(session_id=session_id, accepted=True)
+        return PromptResult(session_id=session_id, accepted=accepted)
 
     async def get_status(self, session_id: str) -> SessionInfo:
         tracked = self._get_tracked(session_id)
 
-        # Verify the tmux pane still exists
-        check_cmd = [
-            _TMUX_CMD,
-            "has-session",
-            "-t",
-            tracked.pane_id,
-        ]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *check_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
-        except OSError:
-            tracked.status = SessionStatus.ERROR
-            return tracked.to_info()
-
-        if proc.returncode != 0:
+            await self._tmux_query("has-session", "-t", tracked.pane_id)
+        except ProviderError:
             tracked.status = SessionStatus.STOPPED
         return tracked.to_info()
 
     async def stream_output(self, session_id: str) -> AsyncIterator[OutputChunk]:
-        """Stream output via PTY pipe-pane.
-
-        NOTE: Full implementation depends on the terminal/pty_stream module
-        (ATC-5). This provides a basic capture-pane fallback.
-        """
         tracked = self._get_tracked(session_id)
-
-        capture_cmd = [
-            _TMUX_CMD,
-            "capture-pane",
-            "-t",
-            tracked.pane_id,
-            "-p",  # print to stdout
-        ]
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *capture_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-        except OSError as exc:
-            raise ProviderError(self.name, f"capture-pane failed: {exc}") from exc
-
-        content = stdout.decode()
+        content = await self._capture_pane(tracked.pane_id, lines=200)
         yield OutputChunk(
             session_id=session_id,
             content=content,
@@ -222,15 +204,12 @@ class ClaudeCodeProvider:
     async def stop_session(self, session_id: str) -> None:
         tracked = self._get_tracked(session_id)
 
-        kill_cmd = [
-            _TMUX_CMD,
-            "kill-pane",
-            "-t",
-            tracked.pane_id,
-        ]
         try:
             proc = await asyncio.create_subprocess_exec(
-                *kill_cmd,
+                _TMUX_CMD,
+                "kill-pane",
+                "-t",
+                tracked.pane_id,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -286,60 +265,58 @@ class ClaudeCodeProvider:
                 )
 
     async def is_ready(self, session_id: str) -> bool:
-        """Return True when the session's tmux pane shows an idle ❯ prompt.
-
-        Polls capture-pane for up to 10 seconds looking for a bare prompt
-        line (alternate_on == 0 and a line matching ``^[❯>]\\s*$``).
-        """
+        """Return True when the session's tmux pane shows an idle Claude prompt."""
         tracked = self._sessions.get(session_id)
         if tracked is None:
             return False
+        return await self._wait_for_prompt(tracked.pane_id)
 
-        _prompt_re = re.compile(r"^[❯>]\s*$", re.MULTILINE)
-        timeout = 10.0
-        poll_interval = 0.5
-        elapsed = 0.0
+    async def _tmux_query(self, *args: str) -> str:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                _TMUX_CMD,
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+        except OSError as exc:
+            raise ProviderError(self.name, f"tmux command failed: {exc}") from exc
+        if proc.returncode != 0:
+            raise ProviderError(self.name, stderr.decode().strip() or "tmux query failed")
+        return stdout.decode()
 
-        while elapsed < timeout:
-            try:
-                alt_proc = await asyncio.create_subprocess_exec(
-                    _TMUX_CMD,
-                    "display-message",
-                    "-t",
-                    tracked.pane_id,
-                    "-p",
-                    "#{alternate_on}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                alt_stdout, _ = await alt_proc.communicate()
-                if alt_stdout.decode().strip() == "1":
-                    await asyncio.sleep(poll_interval)
-                    elapsed += poll_interval
-                    continue
+    async def _capture_pane(self, pane_id: str, *, lines: int = 50) -> str:
+        return await self._tmux_query("capture-pane", "-t", pane_id, "-p", "-S", f"-{lines}")
 
-                cap_proc = await asyncio.create_subprocess_exec(
-                    _TMUX_CMD,
-                    "capture-pane",
-                    "-t",
-                    tracked.pane_id,
-                    "-p",
-                    "-S",
-                    "-50",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                cap_stdout, _ = await cap_proc.communicate()
-                if _prompt_re.search(cap_stdout.decode()):
-                    return True
-            except OSError:
-                return False
+    async def _get_alternate_on(self, pane_id: str) -> bool:
+        result = await self._tmux_query("display-message", "-t", pane_id, "-p", "#{alternate_on}")
+        return result.strip() == "1"
 
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+    async def _pane_is_alive(self, pane_id: str) -> bool:
+        try:
+            await self._tmux_query("has-session", "-t", pane_id)
+            return True
+        except ProviderError:
+            return False
 
-        logger.warning("is_ready: session %s not ready after %.1fs", session_id, timeout)
-        return False
+    async def _wait_for_prompt(
+        self,
+        pane_id: str,
+        *,
+        timeout: float = 10.0,
+        poll_interval: float = 0.5,
+    ) -> bool:
+        return await claude_wait_for_prompt(
+            pane_id,
+            get_alternate_on=self._get_alternate_on,
+            capture_pane=self._capture_pane,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+
+    async def _tmux_run(self, *args: str) -> str:
+        return (await self._tmux_query(*args)).strip()
 
     def _get_tracked(self, session_id: str) -> _TrackedSession:
         tracked = self._sessions.get(session_id)
