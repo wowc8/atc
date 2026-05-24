@@ -162,7 +162,15 @@ async def start_tower_session(
                 launch_cmd = get_launch_command(provider)
                 await _ensure_tmux_session(ATC_TMUX_SESSION)
                 pane_id = await _spawn_pane(ATC_TMUX_SESSION, launch_cmd, working_dir=working_dir)
-                await _accept_trust_dialog(pane_id)
+                try:
+                    from atc.agents.factory import create_provider
+
+                    provider_obj = create_provider(provider)
+                    if hasattr(provider_obj, "_sessions"):
+                        provider_obj._sessions[sess.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
+                    await provider_obj.handle_startup(sess.id)
+                except Exception:
+                    await _accept_trust_dialog(pane_id)
                 await db_ops.update_session_tmux(conn, sess.id, ATC_TMUX_SESSION, pane_id)
                 await transition(sess.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
                 await db_ops.update_session_status(conn, sess.id, SessionStatus.IDLE.value)
@@ -226,7 +234,15 @@ async def start_tower_session(
             launch_cmd,
             working_dir=working_dir,
         )
-        await _accept_trust_dialog(pane_id)
+        try:
+            from atc.agents.factory import create_provider
+
+            provider_obj = create_provider(provider)
+            if hasattr(provider_obj, "_sessions"):
+                provider_obj._sessions[session.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
+            await provider_obj.handle_startup(session.id)
+        except Exception:
+            await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)

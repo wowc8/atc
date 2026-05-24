@@ -179,7 +179,16 @@ async def reconnect_session(
             launch_cmd,
             working_dir=working_dir,
         )
-        await _accept_trust_dialog(pane_id)
+        try:
+            from atc.agents.factory import create_provider
+
+            provider_name = project.agent_provider or "claude_code" if project else "claude_code"
+            provider = create_provider(provider_name)
+            if hasattr(provider, "_sessions"):
+                provider._sessions[session_id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
+            await provider.handle_startup(session_id)
+        except Exception:
+            await _accept_trust_dialog(pane_id)
         await db_ops.update_session_tmux(conn, session_id, ATC_TMUX_SESSION, pane_id)
 
         await transition(session_id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)

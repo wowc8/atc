@@ -262,8 +262,13 @@ class TestClaudeCodeProvider:
         mock_exec.return_value = _make_process(stdout=b"%42\n")
         await provider.spawn_session("s1")
 
-        # send_instruction_async is mocked so no real tmux call is made
-        result = await provider.send_prompt("s1", "Write hello world")
+        with (
+            patch.object(provider, "_wait_for_prompt", new=AsyncMock(return_value=True)),
+            patch.object(provider, "is_ready", new=AsyncMock(return_value=True)),
+            patch.object(provider, "_capture_pane", new=AsyncMock(return_value="Write hello world")),
+        ):
+            # send_instruction_async is mocked so no real tmux call is made
+            result = await provider.send_prompt("s1", "Write hello world")
 
         assert result.accepted is True
         assert result.session_id == "s1"
