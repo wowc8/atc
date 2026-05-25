@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -13,6 +14,7 @@ from atc.orchestration.models import (
     OrchestrationStatus,
     SendInstructionRequest,
     SpawnLeaderRequest,
+    WaitForSessionRequest,
 )
 from atc.orchestration.service import OrchestrationService
 from atc.state import db as db_ops
@@ -189,5 +191,57 @@ async def test_send_instruction_maps_rejected_delivery(db_conn) -> None:
                     idempotency_key='send-2',
                 )
             )
+    assert exc.value.code.value == 'SESSION_NOT_READY'
+    assert exc.value.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_wait_for_session_returns_when_status_matches(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, 'ATC')
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='connecting',
+    )
+    service = OrchestrationService(db_conn)
+
+    async def flip_status() -> None:
+        await asyncio.sleep(0.05)
+        await db_ops.update_session_status(db_conn, session.id, 'idle')
+
+    task = asyncio.create_task(flip_status())
+    summary = await service.wait_for_session(
+        WaitForSessionRequest(
+            session_id=session.id,
+            target_statuses=[OrchestrationStatus.READY],
+            timeout_ms=1000,
+        )
+    )
+    await task
+    assert summary.id == session.id
+    assert summary.status == OrchestrationStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_wait_for_session_times_out(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, 'ATC')
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='connecting',
+    )
+    service = OrchestrationService(db_conn)
+    with pytest.raises(OrchestrationException) as exc:
+        await service.wait_for_session(
+            WaitForSessionRequest(
+                session_id=session.id,
+                target_statuses=[OrchestrationStatus.READY],
+                timeout_ms=10,
+            )
+        )
     assert exc.value.code.value == 'SESSION_NOT_READY'
     assert exc.value.retryable is True

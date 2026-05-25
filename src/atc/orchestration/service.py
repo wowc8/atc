@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from atc.orchestration.errors import OrchestrationErrorCode, OrchestrationException
@@ -11,6 +12,7 @@ from atc.orchestration.models import (
     SendInstructionRequest,
     SessionSummary,
     SpawnLeaderRequest,
+    WaitForSessionRequest,
     normalize_role,
     normalize_status,
 )
@@ -145,6 +147,24 @@ class OrchestrationService:
             operation_id=request.idempotency_key,
             session=summary,
         )
+
+    async def wait_for_session(self, request: WaitForSessionRequest) -> SessionSummary:
+        timeout_s = max(request.timeout_ms, 0) / 1000
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        target_statuses = set(request.target_statuses)
+
+        while True:
+            summary = await self.get_session(request.session_id)
+            if summary.status in target_statuses:
+                return summary
+            if asyncio.get_running_loop().time() >= deadline:
+                wanted = ", ".join(status.value for status in request.target_statuses)
+                raise OrchestrationException(
+                    OrchestrationErrorCode.SESSION_NOT_READY,
+                    f"Session {request.session_id} did not reach target statuses [{wanted}] before timeout",
+                    retryable=True,
+                )
+            await asyncio.sleep(0.5)
 
     async def _build_session_summary(self, session: Any) -> SessionSummary:
         role = normalize_role(session.session_type)
