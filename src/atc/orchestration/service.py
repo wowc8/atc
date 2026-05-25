@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from atc.agents.factory import get_launch_command
@@ -84,6 +85,24 @@ class OrchestrationService:
                 retryable=True,
             )
 
+        existing = await db_ops.get_orchestration_operation(self._db, request.idempotency_key)
+        if existing is not None:
+            if existing.operation_type != "spawn_leader":
+                raise OrchestrationException(
+                    OrchestrationErrorCode.IDEMPOTENCY_CONFLICT,
+                    f"Operation id {request.idempotency_key} already used for {existing.operation_type}",
+                )
+            if existing.response_payload:
+                payload = json.loads(existing.response_payload)
+                return OperationAcceptedResponse.model_validate(payload)
+
+        await db_ops.create_orchestration_operation(
+            self._db,
+            request.idempotency_key,
+            "spawn_leader",
+            request.model_dump_json(),
+        )
+
         try:
             result = await self._tower_controller.submit_goal(request.project_id, request.goal)
         except BudgetConstrainedError as exc:
@@ -107,11 +126,18 @@ class OrchestrationService:
             )
 
         summary = await self.get_session(leader_session_id)
-        return OperationAcceptedResponse(
+        response = OperationAcceptedResponse(
             request_status="accepted",
             operation_id=request.idempotency_key,
             session=summary,
         )
+        await db_ops.update_orchestration_operation(
+            self._db,
+            request.idempotency_key,
+            session_id=leader_session_id,
+            response_payload=response.model_dump_json(),
+        )
+        return response
 
     async def spawn_ace(self, request: SpawnAceRequest) -> OperationAcceptedResponse:
         project = await db_ops.get_project(self._db, request.project_id)
@@ -120,6 +146,24 @@ class OrchestrationService:
                 OrchestrationErrorCode.PROJECT_NOT_FOUND,
                 f"Project {request.project_id} not found",
             )
+
+        existing = await db_ops.get_orchestration_operation(self._db, request.idempotency_key)
+        if existing is not None:
+            if existing.operation_type != "spawn_ace":
+                raise OrchestrationException(
+                    OrchestrationErrorCode.IDEMPOTENCY_CONFLICT,
+                    f"Operation id {request.idempotency_key} already used for {existing.operation_type}",
+                )
+            if existing.response_payload:
+                payload = json.loads(existing.response_payload)
+                return OperationAcceptedResponse.model_validate(payload)
+
+        await db_ops.create_orchestration_operation(
+            self._db,
+            request.idempotency_key,
+            "spawn_ace",
+            request.model_dump_json(),
+        )
 
         launch_cmd = get_launch_command(project.agent_provider)
         ace_name = request.context.get("task_title") if request.context else None
@@ -175,11 +219,18 @@ class OrchestrationService:
                 )
 
         summary = await self.get_session(session_id)
-        return OperationAcceptedResponse(
+        response = OperationAcceptedResponse(
             request_status="accepted",
             operation_id=request.idempotency_key,
             session=summary,
         )
+        await db_ops.update_orchestration_operation(
+            self._db,
+            request.idempotency_key,
+            session_id=session_id,
+            response_payload=response.model_dump_json(),
+        )
+        return response
 
     async def send_instruction(self, request: SendInstructionRequest) -> OperationAcceptedResponse:
         session = await db_ops.get_session(self._db, request.session_id)

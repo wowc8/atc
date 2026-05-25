@@ -14,6 +14,7 @@ import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 from time import sleep
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,7 @@ from atc.state.models import (
     QALoopRun,
     Session,
     SessionHeartbeat,
+    OrchestrationOperation,
     TaskAssignment,
     TaskGraph,
     UsageEvent,
@@ -495,6 +497,8 @@ async def run_migrations(db_path: str) -> None:
         await db.executescript(_SCHEMA_SQL)
         await db.commit()
 
+        await _apply_file_migrations(db)
+
         # --- projects.position ---
         if not await _has_column(db, "projects", "position"):
             logger.info("Migration: adding projects.position column")
@@ -524,6 +528,54 @@ async def run_migrations(db_path: str) -> None:
             logger.info("Migration: adding tower_memory.embedding column")
             await db.execute("ALTER TABLE tower_memory ADD COLUMN embedding BLOB")
             await db.commit()
+
+
+
+
+async def _ensure_schema_migrations_table(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS schema_migrations (
+               version TEXT PRIMARY KEY,
+               applied_at TEXT NOT NULL
+           )"""
+    )
+    await db.commit()
+
+
+async def _list_applied_migrations(db: aiosqlite.Connection) -> set[str]:
+    cursor = await db.execute("SELECT version FROM schema_migrations")
+    rows = await cursor.fetchall()
+    return {str(r[0]) for r in rows}
+
+
+async def _apply_file_migrations(db: aiosqlite.Connection) -> None:
+    await _ensure_schema_migrations_table(db)
+    applied = await _list_applied_migrations(db)
+    file_migrations = sorted(MIGRATIONS_DIR.glob("*.sql"))
+
+    # Legacy note: _SCHEMA_SQL plus hand-coded ALTER migrations already cover
+    # the historical 001-013 schema evolution. New file-based migrations should
+    # start at 014+, otherwise fresh DBs would replay old ALTERs against tables
+    # that already contain those columns.
+    for path in file_migrations:
+        if path.name in applied:
+            continue
+        if path.name < "014_":
+            await db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (path.name, _now()),
+            )
+            await db.commit()
+            continue
+        sql = path.read_text()
+        if sql.strip():
+            logger.info("Applying migration file %s", path.name)
+            await db.executescript(sql)
+        await db.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+            (path.name, _now()),
+        )
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -1534,6 +1586,103 @@ async def delete_feature_flag(db: aiosqlite.Connection, key: str) -> bool:
     cursor = await db.execute("DELETE FROM feature_flags WHERE key = ?", (key,))
     await db.commit()
     return bool(cursor.rowcount > 0)
+
+
+
+
+def _row_to_orchestration_operation(row: aiosqlite.Row) -> OrchestrationOperation:
+    d = dict(row)
+    return OrchestrationOperation(**d)
+
+
+async def get_orchestration_operation(
+    db: aiosqlite.Connection,
+    operation_id: str,
+) -> OrchestrationOperation | None:
+    cursor = await db.execute(
+        "SELECT * FROM orchestration_operations WHERE operation_id = ?",
+        (operation_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _row_to_orchestration_operation(row)
+
+
+async def create_orchestration_operation(
+    db: aiosqlite.Connection,
+    operation_id: str,
+    operation_type: str,
+    request_payload: str,
+    *,
+    session_id: str | None = None,
+    response_payload: str | None = None,
+    status: str = "accepted",
+) -> OrchestrationOperation:
+    now = _now()
+    op = OrchestrationOperation(
+        operation_id=operation_id,
+        operation_type=operation_type,
+        session_id=session_id,
+        request_payload=request_payload,
+        response_payload=response_payload,
+        status=status,
+        created_at=now,
+        updated_at=now,
+    )
+    await db.execute(
+        """INSERT INTO orchestration_operations
+           (operation_id, operation_type, session_id, request_payload, response_payload, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            op.operation_id,
+            op.operation_type,
+            op.session_id,
+            op.request_payload,
+            op.response_payload,
+            op.status,
+            op.created_at,
+            op.updated_at,
+        ),
+    )
+    await db.commit()
+    return op
+
+
+async def update_orchestration_operation(
+    db: aiosqlite.Connection,
+    operation_id: str,
+    *,
+    session_id: str | None = None,
+    response_payload: str | None = None,
+    status: str | None = None,
+) -> OrchestrationOperation | None:
+    existing = await get_orchestration_operation(db, operation_id)
+    if existing is None:
+        return None
+
+    sets: list[str] = []
+    params: list[Any] = []
+    if session_id is not None:
+        sets.append("session_id = ?")
+        params.append(session_id)
+    if response_payload is not None:
+        sets.append("response_payload = ?")
+        params.append(response_payload)
+    if status is not None:
+        sets.append("status = ?")
+        params.append(status)
+
+    sets.append("updated_at = ?")
+    params.append(_now())
+    params.append(operation_id)
+
+    await db.execute(
+        f"UPDATE orchestration_operations SET {', '.join(sets)} WHERE operation_id = ?",
+        params,
+    )
+    await db.commit()
+    return await get_orchestration_operation(db, operation_id)
 
 
 async def is_feature_enabled(db: aiosqlite.Connection, key: str) -> bool:
