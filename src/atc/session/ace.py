@@ -26,21 +26,12 @@ from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.base import ProviderSpawnRequest
-from atc.agents.claude_runtime import (
-    INSTRUCTION_MAX_RETRIES,
-    TUI_READY_POLL_INTERVAL,
-    TUI_READY_TIMEOUT,
-    accept_startup_dialogs,
-    check_tui_ready as claude_check_tui_ready,
-    send_instruction as claude_send_instruction,
-    wait_for_prompt as claude_wait_for_prompt,
-)
+from atc.agents.claude_runtime import accept_startup_dialogs
 from atc.session.state_machine import (
     SessionStatus,
     transition,
 )
 from atc.state import db as db_ops
-from atc.terminal.control import send_instruction_async
 
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
@@ -265,74 +256,6 @@ async def _get_alternate_on(pane_id: str) -> bool:
     return result.strip() == "1"
 
 
-# ---------------------------------------------------------------------------
-# TUI readiness check
-# ---------------------------------------------------------------------------
-
-
-async def wait_for_prompt(
-    pane_id: str,
-    *,
-    timeout: float = 10.0,
-    poll_interval: float = 0.5,
-) -> bool:
-    """Backward-compatible wrapper around Claude-specific prompt readiness."""
-    return await claude_wait_for_prompt(
-        pane_id,
-        get_alternate_on=_get_alternate_on,
-        capture_pane=_capture_pane,
-        timeout=timeout,
-        poll_interval=poll_interval,
-    )
-
-
-async def check_tui_ready(
-    pane_id: str,
-    *,
-    timeout: float = TUI_READY_TIMEOUT,
-    poll_interval: float = TUI_READY_POLL_INTERVAL,
-) -> bool:
-    """Backward-compatible wrapper around Claude-specific TUI readiness."""
-    return await claude_check_tui_ready(
-        pane_id,
-        get_alternate_on=_get_alternate_on,
-        timeout=timeout,
-        poll_interval=poll_interval,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Atomic instruction sending
-# ---------------------------------------------------------------------------
-
-
-async def send_instruction(
-    pane_id: str,
-    text: str,
-    *,
-    verify: bool = True,
-    max_retries: int = INSTRUCTION_MAX_RETRIES,
-) -> bool:
-    """Backward-compatible wrapper around Claude-specific instruction delivery."""
-    import atc.agents.claude_runtime as _claude_runtime
-
-    original_send = _claude_runtime.send_instruction_async
-    _claude_runtime.send_instruction_async = send_instruction_async
-    try:
-        return await claude_send_instruction(
-            pane_id,
-            text,
-            capture_pane=_capture_pane,
-            pane_is_alive=_pane_is_alive,
-            wait_for_prompt_fn=wait_for_prompt,
-            check_tui_ready_fn=check_tui_ready,
-            verify=verify,
-            max_retries=max_retries,
-        )
-    finally:
-        _claude_runtime.send_instruction_async = original_send
-
-
 # Legacy wrapper kept for backward compatibility with existing callers
 async def _send_keys(pane_id: str, keys: str) -> None:
     """Send keystrokes to a tmux pane (atomic: text + Enter in one call)."""
@@ -496,6 +419,27 @@ async def create_ace(
     return session.id
 
 
+async def _send_session_instruction(
+    conn: aiosqlite.Connection,
+    session_id: str,
+    instruction: str,
+) -> bool:
+    """Send an instruction through the configured provider for a session."""
+    from atc.agents.factory import create_provider
+
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        raise ValueError(f"Session {session_id} not found")
+    if not session.project_id:
+        raise ValueError(f"Session {session_id} has no project")
+
+    project = await db_ops.get_project(conn, session.project_id)
+    provider_name = project.agent_provider if project and project.agent_provider else "claude_code"
+    provider = create_provider(provider_name)
+    result = await provider.send_prompt(session_id, instruction)
+    return result.accepted
+
+
 async def start_ace(
     conn: aiosqlite.Connection,
     session_id: str,
@@ -518,8 +462,8 @@ async def start_ace(
     await transition(session_id, current, SessionStatus.WORKING, event_bus)
     await db_ops.update_session_status(conn, session_id, SessionStatus.WORKING.value)
 
-    if instruction and session.tmux_pane:
-        delivered = await send_instruction(session.tmux_pane, instruction)
+    if instruction:
+        delivered = await _send_session_instruction(conn, session_id, instruction)
         if not delivered:
             logger.error("Session %s: instruction delivery failed, marking error", session_id)
             await transition(session_id, SessionStatus.WORKING, SessionStatus.ERROR, event_bus)

@@ -1,7 +1,6 @@
 """Unit tests for creation reliability features (design doc §10a).
 
-Tests TUI readiness checking, atomic instruction sending, and
-three-phase verification loop.
+Tests generic verification logic and session-lifecycle invariants.
 """
 
 from __future__ import annotations
@@ -10,15 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from atc.session.ace import (
-    VerificationResult,
-    _get_alternate_on,
-    check_tui_ready,
-    send_instruction,
-    verify_alive,
-    verify_progressing,
-    verify_working,
-)
+from atc.session.ace import VerificationResult, _get_alternate_on, verify_alive, verify_progressing, verify_working
 from atc.state.models import Session
 
 # ---------------------------------------------------------------------------
@@ -45,11 +36,6 @@ def _make_session(
     )
 
 
-# ---------------------------------------------------------------------------
-# TUI readiness
-# ---------------------------------------------------------------------------
-
-
 class TestGetAlternateOn:
     @pytest.mark.asyncio
     @patch("atc.session.ace._tmux_run", new_callable=AsyncMock)
@@ -63,190 +49,6 @@ class TestGetAlternateOn:
     async def test_alternate_on_false(self, mock_tmux: AsyncMock) -> None:
         mock_tmux.return_value = "0"
         assert await _get_alternate_on("%0") is False
-
-
-class TestCheckTuiReady:
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._get_alternate_on", new_callable=AsyncMock)
-    async def test_ready_immediately(self, mock_alt: AsyncMock) -> None:
-        mock_alt.return_value = False
-        result = await check_tui_ready("%0", timeout=1.0, poll_interval=0.1)
-        assert result is True
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._get_alternate_on", new_callable=AsyncMock)
-    async def test_ready_after_delay(self, mock_alt: AsyncMock) -> None:
-        # First two calls return True (TUI active), then False
-        mock_alt.side_effect = [True, True, False]
-        result = await check_tui_ready("%0", timeout=5.0, poll_interval=0.1)
-        assert result is True
-        assert mock_alt.call_count == 3
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._get_alternate_on", new_callable=AsyncMock)
-    async def test_timeout(self, mock_alt: AsyncMock) -> None:
-        mock_alt.return_value = True  # TUI always active
-        result = await check_tui_ready("%0", timeout=0.3, poll_interval=0.1)
-        assert result is False
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._get_alternate_on", new_callable=AsyncMock)
-    async def test_pane_dies(self, mock_alt: AsyncMock) -> None:
-        mock_alt.side_effect = RuntimeError("pane dead")
-        result = await check_tui_ready("%0", timeout=1.0, poll_interval=0.1)
-        assert result is False
-
-
-# ---------------------------------------------------------------------------
-# Atomic instruction sending
-# ---------------------------------------------------------------------------
-
-
-class TestSendInstruction:
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
-    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
-    async def test_success(
-        self,
-        mock_wait: AsyncMock,
-        mock_ready: AsyncMock,
-        mock_send_async: AsyncMock,
-        mock_capture: AsyncMock,
-    ) -> None:
-        # send_instruction calls wait_for_prompt on attempt 1, check_tui_ready on retries
-        mock_wait.return_value = True
-        mock_ready.return_value = True
-        mock_send_async.return_value = None
-        mock_capture.return_value = "$ do something important\noutput here"
-
-        result = await send_instruction("%0", "do something important", max_retries=1)
-        assert result is True
-        mock_send_async.assert_called_once_with("atc", "%0", "do something important")
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
-    async def test_tui_not_ready(self, mock_wait: AsyncMock, mock_ready: AsyncMock) -> None:
-        mock_wait.return_value = False
-        mock_ready.return_value = False
-        result = await send_instruction("%0", "test", max_retries=2)
-        assert result is False
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
-    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
-    async def test_retry_on_verification_failure(
-        self,
-        mock_wait: AsyncMock,
-        mock_ready: AsyncMock,
-        mock_send_async: AsyncMock,
-        mock_capture: AsyncMock,
-    ) -> None:
-        mock_wait.return_value = True
-        mock_ready.return_value = True
-        mock_send_async.return_value = None
-        # First attempt: instruction not in output; second: found
-        mock_capture.side_effect = ["$ \n", "$ run tests\nrunning..."]
-
-        result = await send_instruction("%0", "run tests", max_retries=2)
-        assert result is True
-        assert mock_send_async.call_count == 2  # sent twice
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
-    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    async def test_skip_verification(self, mock_ready: AsyncMock, mock_send_async: AsyncMock) -> None:
-        mock_ready.return_value = True
-        mock_send_async.return_value = None
-
-        result = await send_instruction("%0", "test", verify=False)
-        assert result is True
-        mock_send_async.assert_called_once_with("atc", "%0", "test")
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
-    @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
-    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
-    async def test_prompt_disappearing_counts_as_accepted_delivery(
-        self,
-        mock_wait: AsyncMock,
-        mock_ready: AsyncMock,
-        mock_send_async: AsyncMock,
-        mock_capture: AsyncMock,
-        mock_alive: AsyncMock,
-    ) -> None:
-        mock_wait.side_effect = [True, False]
-        mock_ready.return_value = True
-        mock_send_async.return_value = None
-        mock_capture.return_value = "$ \n"
-        mock_alive.return_value = True
-
-        result = await send_instruction("%0", "run tests", max_retries=1)
-        assert result is True
-        mock_send_async.assert_called_once_with("atc", "%0", "run tests")
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
-    @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
-    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
-    async def test_prompt_disappearing_with_dead_pane_is_not_treated_as_success(
-        self,
-        mock_wait: AsyncMock,
-        mock_ready: AsyncMock,
-        mock_send_async: AsyncMock,
-        mock_capture: AsyncMock,
-        mock_alive: AsyncMock,
-    ) -> None:
-        mock_wait.side_effect = [True, False]
-        mock_ready.return_value = True
-        mock_send_async.return_value = None
-        mock_capture.return_value = "$ \n"
-        mock_alive.return_value = False
-
-        result = await send_instruction("%0", "run tests", max_retries=1)
-        assert result is False
-        mock_send_async.assert_called_once_with("atc", "%0", "run tests")
-
-    @pytest.mark.asyncio
-    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
-    @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace.send_instruction_async", new_callable=AsyncMock)
-    @patch("atc.session.ace.check_tui_ready", new_callable=AsyncMock)
-    @patch("atc.session.ace.wait_for_prompt", new_callable=AsyncMock)
-    async def test_prompt_disappearing_with_visible_dialog_is_not_treated_as_success(
-        self,
-        mock_wait: AsyncMock,
-        mock_ready: AsyncMock,
-        mock_send_async: AsyncMock,
-        mock_capture: AsyncMock,
-        mock_alive: AsyncMock,
-    ) -> None:
-        mock_wait.side_effect = [True, False]
-        mock_ready.return_value = True
-        mock_send_async.return_value = None
-
-        async def capture_side_effect(*args, **kwargs):
-            capture_side_effect.calls += 1
-            if capture_side_effect.calls == 1:
-                return "$ \\n"
-            return "[Pasted text #1 +21 lines]\\nbypass permissions on (shift+tab to cycle)\\n"
-
-        capture_side_effect.calls = 0
-        mock_capture.side_effect = capture_side_effect
-        mock_alive.return_value = True
-
-        result = await send_instruction("%0", "run tests", max_retries=1)
-        assert result is False
-        mock_send_async.assert_called_once_with("atc", "%0", "run tests")
-
 
 # ---------------------------------------------------------------------------
 # Verification checks
