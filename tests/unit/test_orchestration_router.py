@@ -190,3 +190,52 @@ async def test_wait_for_session_route(app_and_db) -> None:
     body = response.json()
     assert body['id'] == session.id
     assert body['status'] == 'ready'
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_route_soft_stop(app_and_db) -> None:
+    app, conn = app_and_db
+    project = await db_ops.create_project(conn, 'ATC')
+    session = await db_ops.create_session(
+        conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='working',
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url='http://test') as client:
+        response = await client.post(
+            f'/api/orchestration/sessions/{session.id}/cancel',
+            json={
+                'session_id': 'ignored-by-route',
+                'force': False,
+            },
+        )
+    assert response.status_code == 202
+    body = response.json()
+    assert body['id'] == session.id
+    assert body['status'] == 'blocked'
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_route_force_destroy(app_and_db) -> None:
+    app, conn = app_and_db
+    project = await db_ops.create_project(conn, 'ATC')
+    session = await db_ops.create_session(
+        conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='working',
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url='http://test') as client:
+        response = await client.post(
+            f'/api/orchestration/sessions/{session.id}/cancel',
+            json={
+                'session_id': 'ignored-by-route',
+                'force': True,
+            },
+        )
+    assert response.status_code == 204

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from atc.orchestration.errors import OrchestrationException
 from atc.orchestration.models import (
+    CancelSessionRequest,
     ListSessionsRequest,
     OperationAcceptedResponse,
     SendInstructionRequest,
@@ -65,6 +66,24 @@ async def wait_for_session(
     try:
         payload = body.model_copy(update={"session_id": session_id})
         return await service.wait_for_session(payload)
+    except OrchestrationException as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
+
+
+@router.post("/sessions/{session_id}/cancel", response_model=SessionSummary | None, status_code=202)
+async def cancel_session(
+    session_id: str,
+    body: CancelSessionRequest,
+    request: Request,
+    response: Response,
+) -> SessionSummary | None:
+    service = await _get_service(request)
+    try:
+        payload = body.model_copy(update={"session_id": session_id})
+        result = await service.cancel_session(payload)
+        if result is None:
+            response.status_code = status.HTTP_204_NO_CONTENT
+        return result
     except OrchestrationException as exc:
         raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
 
