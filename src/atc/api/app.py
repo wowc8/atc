@@ -662,6 +662,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         heartbeat,
         leader,
         memory,
+        orchestration,
         projects,
         qa,
         system,
@@ -685,6 +686,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(feature_flags.router, prefix="/api/feature-flags", tags=["feature_flags"])
     app.include_router(context.router, prefix="/api", tags=["context"])
     app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
+    app.include_router(orchestration.router, prefix="/api/orchestration", tags=["orchestration"])
     app.include_router(backup.router, prefix="/api/backup", tags=["backup"])
     app.include_router(qa.router, prefix="/api/qa", tags=["qa"])
     app.include_router(system.router, prefix="/api/system", tags=["system"])
