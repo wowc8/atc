@@ -8,6 +8,7 @@ from atc.orchestration.models import (
     OperationAcceptedResponse,
     SendInstructionRequest,
     SessionSummary,
+    SpawnAceRequest,
     SpawnLeaderRequest,
     WaitForSessionRequest,
 )
@@ -27,6 +28,15 @@ async def spawn_leader(body: SpawnLeaderRequest, request: Request) -> OperationA
     service = await _get_service(request)
     try:
         return await service.spawn_leader(body)
+    except OrchestrationException as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
+
+
+@router.post("/aces", response_model=OperationAcceptedResponse, status_code=202)
+async def spawn_ace(body: SpawnAceRequest, request: Request) -> OperationAcceptedResponse:
+    service = await _get_service(request)
+    try:
+        return await service.spawn_ace(body)
     except OrchestrationException as exc:
         raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
 

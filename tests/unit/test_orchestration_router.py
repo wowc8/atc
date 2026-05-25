@@ -8,6 +8,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from atc.api.app import create_app
+from atc.orchestration.models import OrchestrationRole, OrchestrationStatus, SessionSummary
 from atc.state import db as db_ops
 
 
@@ -97,6 +98,43 @@ async def test_spawn_orchestration_leader(app_and_db) -> None:
     assert body['operation_id'] == 'goal-1'
     assert body['session']['role'] == 'leader'
     assert body['session']['status'] == 'starting'
+
+
+@pytest.mark.asyncio
+async def test_spawn_orchestration_ace(app_and_db) -> None:
+    app, conn = app_and_db
+    project = await db_ops.create_project(conn, 'ATC', repo_path='/tmp/atc-repo')
+    task = await db_ops.create_task_graph(conn, project.id, 'Task 1')
+    fake_summary = SessionSummary(
+        id='session-123',
+        role=OrchestrationRole.ACE,
+        raw_session_type='ace',
+        project_id=project.id,
+        status=OrchestrationStatus.READY,
+        raw_status='idle',
+        name='ace-Task 1',
+        created_at='now',
+        updated_at='now',
+    )
+    with patch('atc.orchestration.service.ace_ops.create_ace', new=AsyncMock(return_value='session-123')), \
+         patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=True)), \
+         patch('atc.orchestration.service.OrchestrationService.get_session', new=AsyncMock(return_value=fake_summary)):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url='http://test') as client:
+            response = await client.post(
+                '/api/orchestration/aces',
+                json={
+                    'project_id': project.id,
+                    'task_id': task.id,
+                    'instruction': 'Start work',
+                    'idempotency_key': 'assign-1',
+                    'context': {'task_title': 'Task 1'},
+                },
+            )
+    assert response.status_code == 202
+    body = response.json()
+    assert body['operation_id'] == 'assign-1'
+    assert body['session']['id'] == 'session-123'
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,8 @@ from atc.orchestration.models import (
     OrchestrationRole,
     OrchestrationStatus,
     SendInstructionRequest,
+    SessionSummary,
+    SpawnAceRequest,
     SpawnLeaderRequest,
     WaitForSessionRequest,
 )
@@ -143,6 +145,49 @@ async def test_spawn_leader_maps_busy_error(db_conn) -> None:
         )
     assert exc.value.code.value == "CONCURRENCY_LIMIT_REACHED"
     assert exc.value.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_spawn_ace_creates_session_and_assigns_task(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, 'ATC', repo_path='/tmp/atc-repo')
+    task = await db_ops.create_task_graph(db_conn, project.id, 'Task 1')
+    fake_session_id = 'session-123'
+    await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-Task 1',
+        task_id=task.id,
+        status='idle',
+    )
+    fake_summary = SessionSummary(
+        id=fake_session_id,
+        role=OrchestrationRole.ACE,
+        raw_session_type='ace',
+        project_id=project.id,
+        status=OrchestrationStatus.READY,
+        raw_status='idle',
+        name='ace-Task 1',
+        created_at='now',
+        updated_at='now',
+    )
+    with patch('atc.orchestration.service.ace_ops.create_ace', new=AsyncMock(return_value=fake_session_id)), \
+         patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=True)), \
+         patch.object(OrchestrationService, 'get_session', new=AsyncMock(return_value=fake_summary)):
+        service = OrchestrationService(db_conn)
+        response = await service.spawn_ace(
+            SpawnAceRequest(
+                project_id=project.id,
+                task_id=task.id,
+                instruction='Start work',
+                idempotency_key='assign-1',
+                context={'task_title': 'Task 1'},
+            )
+        )
+    assignment = await db_ops.get_task_assignment(db_conn, 'assign-1')
+    assert response.operation_id == 'assign-1'
+    assert assignment is not None
+    assert assignment.ace_session_id == fake_session_id
 
 
 @pytest.mark.asyncio
