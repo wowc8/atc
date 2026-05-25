@@ -21,6 +21,7 @@ from atc.agents.base import (
     PromptResult,
     ProviderCapabilities,
     ProviderError,
+    ProviderSpawnRequest,
     SessionInfo,
     SessionStatus,
 )
@@ -147,6 +148,18 @@ class ClaudeCodeProvider:
 
         logger.info("Spawned Claude Code session %s in pane %s", session_id, pane_id)
         return tracked.to_info()
+
+    async def spawn_for_session(self, request: ProviderSpawnRequest) -> SessionInfo:
+        """Spawn a Claude runtime pane for an existing ATC session row."""
+        info = await self.spawn_session(
+            request.session.id,
+            working_dir=request.working_dir,
+            env=request.env,
+            context_file=request.context_file,
+            role=request.role,
+        )
+        await self.handle_startup(request.session.id)
+        return info
 
     async def handle_startup(self, session_id: str) -> None:
         """Handle Claude-specific startup dialogs for a tracked session."""

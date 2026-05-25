@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING
 from atc.agents.deploy import _DEFAULT_STAGING_ROOT, TowerDeploySpec, deploy_tower_files
 from atc.agents.factory import get_launch_command
 from atc.session.ace import (
-    ATC_TMUX_SESSION,
     _accept_trust_dialog,
     _ensure_tmux_session,
     _kill_pane,
     _pane_is_alive,
     _send_keys,
     _spawn_pane,
+    _spawn_provider_session,
 )
 from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
@@ -160,18 +160,16 @@ async def start_tower_session(
             try:
                 provider = project.agent_provider if project else "claude_code"
                 launch_cmd = get_launch_command(provider)
-                await _ensure_tmux_session(ATC_TMUX_SESSION)
-                pane_id = await _spawn_pane(ATC_TMUX_SESSION, launch_cmd, working_dir=working_dir)
-                try:
-                    from atc.agents.factory import create_provider
-
-                    provider_obj = create_provider(provider)
-                    if hasattr(provider_obj, "_sessions"):
-                        provider_obj._sessions[sess.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
-                    await provider_obj.handle_startup(sess.id)
-                except Exception:
-                    await _accept_trust_dialog(pane_id)
-                await db_ops.update_session_tmux(conn, sess.id, ATC_TMUX_SESSION, pane_id)
+                tmux_session, pane_id = await _spawn_provider_session(
+                    conn,
+                    sess.id,
+                    project_id=project_id,
+                    session_type="tower",
+                    working_dir=working_dir,
+                    context_file=staging_dir / "CLAUDE.md" if (staging_dir / "CLAUDE.md").is_file() else None,
+                    launch_command=launch_cmd,
+                )
+                await db_ops.update_session_tmux(conn, sess.id, tmux_session, pane_id)
                 await transition(sess.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
                 await db_ops.update_session_status(conn, sess.id, SessionStatus.IDLE.value)
             except Exception as exc:
@@ -228,22 +226,16 @@ async def start_tower_session(
         # --- Runtime debug: verify CLAUDE.md is present at working_dir ---
         _log_working_dir_contents(working_dir, session.id, "start_tower_session")
 
-        await _ensure_tmux_session(ATC_TMUX_SESSION)
-        pane_id = await _spawn_pane(
-            ATC_TMUX_SESSION,
-            launch_cmd,
+        tmux_session, pane_id = await _spawn_provider_session(
+            conn,
+            session.id,
+            project_id=project_id,
+            session_type="tower",
             working_dir=working_dir,
+            context_file=deployed.claude_md_path if deployed.claude_md_path.exists() else None,
+            launch_command=launch_cmd,
         )
-        try:
-            from atc.agents.factory import create_provider
-
-            provider_obj = create_provider(provider)
-            if hasattr(provider_obj, "_sessions"):
-                provider_obj._sessions[session.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
-            await provider_obj.handle_startup(session.id)
-        except Exception:
-            await _accept_trust_dialog(pane_id)
-        await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
+        await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
         await db_ops.update_session_status(conn, session.id, SessionStatus.IDLE.value)

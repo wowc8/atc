@@ -138,14 +138,12 @@ class TestTowerToLeaderWiring:
         assert spec.goal == "Build feature X"
         assert spec.project_name == "test-proj"
 
-    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     @patch("atc.leader.leader.deploy_manager_files")
     async def test_start_leader_launches_claude(
         self,
         mock_deploy: AsyncMock,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         db,
         event_bus: EventBus,
     ) -> None:
@@ -160,23 +158,18 @@ class TestTowerToLeaderWiring:
 
         await start_leader(db, project.id, goal="Build it", event_bus=event_bus)
 
-        # Verify tmux pane was spawned with claude command and working_dir
-        mock_spawn.assert_called_once()
-        args, kwargs = mock_spawn.call_args
-        assert args[0] == "atc"  # tmux session name
-        assert args[1] == get_launch_command("claude_code")
-        # Leader uses repo_path when set (so Claude works in the actual repo);
-        # falls back to staging dir only when repo_path is None.
-        assert kwargs.get("working_dir") == "/tmp/repo"
+        mock_spawn_provider.assert_called_once()
+        _, kwargs = mock_spawn_provider.call_args
+        assert kwargs["session_type"] == "manager"
+        assert kwargs["launch_command"] == get_launch_command("claude_code")
+        assert kwargs["working_dir"] == "/tmp/repo"
 
-    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     @patch("atc.leader.leader.deploy_manager_files")
     async def test_start_leader_uses_deploy_root_when_no_repo(
         self,
         mock_deploy: AsyncMock,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         db,
         event_bus: EventBus,
     ) -> None:
@@ -191,18 +184,15 @@ class TestTowerToLeaderWiring:
 
         await start_leader(db, project.id, goal="Test", event_bus=event_bus)
 
-        # Without repo_path, should fall back to deployed root
-        _, kwargs = mock_spawn.call_args
-        assert kwargs.get("working_dir") == "/tmp/atc-agents/leader-1"
+        _, kwargs = mock_spawn_provider.call_args
+        assert kwargs["working_dir"] == "/tmp/atc-agents/leader-1"
 
-    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     @patch("atc.leader.leader.deploy_manager_files")
     async def test_start_leader_uses_project_agent_provider(
         self,
         mock_deploy: AsyncMock,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         db,
         event_bus: EventBus,
     ) -> None:
@@ -224,10 +214,10 @@ class TestTowerToLeaderWiring:
 
         await start_leader(db, project.id, goal="Build it", event_bus=event_bus)
 
-        mock_spawn.assert_called_once()
-        args, _ = mock_spawn.call_args
-        assert args[1] == get_launch_command("opencode")
-        assert args[1] == "opencode"
+        mock_spawn_provider.assert_called_once()
+        _, kwargs = mock_spawn_provider.call_args
+        assert kwargs["launch_command"] == get_launch_command("opencode")
+        assert kwargs["launch_command"] == "opencode"
 
 
 # ---------------------------------------------------------------------------

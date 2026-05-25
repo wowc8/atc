@@ -39,12 +39,10 @@ class TestDBFirstCreation:
     """Verify that the DB row is written before tmux operations."""
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock)
     async def test_session_row_created_before_tmux(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
@@ -59,13 +57,13 @@ class TestDBFirstCreation:
             call_order.append("db_create")
             return result
 
-        mock_spawn.return_value = "%1"
+        mock_spawn_provider.return_value = ("atc", "%1")
 
         async def tracking_spawn(*args, **kwargs):
             call_order.append("tmux_spawn")
-            return "%1"
+            return ("atc", "%1")
 
-        mock_spawn.side_effect = tracking_spawn
+        mock_spawn_provider.side_effect = tracking_spawn
 
         # Create project first
         project = await db_ops.create_project(conn, "test-project")
@@ -81,16 +79,13 @@ class TestDBFirstCreation:
         assert session is not None
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%2"))
     async def test_session_moves_to_idle_on_success(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_spawn.return_value = "%2"
         project = await db_ops.create_project(conn, "test-project")
 
         session_id = await create_ace(conn, project.id, "test-ace", event_bus=event_bus)
@@ -101,22 +96,17 @@ class TestDBFirstCreation:
         assert session.tmux_pane == "%2"
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, side_effect=RuntimeError("tmux not available"))
     async def test_session_moves_to_error_on_failure(
         self,
-        mock_ensure: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
         """If tmux spawn fails, the session row should still exist with error status."""
         project = await db_ops.create_project(conn, "test-project")
 
-        # _spawn_pane is not mocked, so it will fail (no tmux)
-        with patch(
-            "atc.session.ace._spawn_pane",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("tmux not available"),
-        ), pytest.raises(RuntimeError, match="tmux not available"):
+        with pytest.raises(RuntimeError, match="tmux not available"):
             await create_ace(conn, project.id, "test-ace", event_bus=event_bus)
 
         # Session must exist with error status — no ghost session
@@ -125,16 +115,13 @@ class TestDBFirstCreation:
         assert sessions[0].status == SessionStatus.ERROR.value
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%3"))
     async def test_creation_event_published(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_spawn.return_value = "%3"
         received: list[dict] = []
 
         async def handler(data: dict) -> None:
@@ -155,17 +142,14 @@ class TestAtomicInstructionSending:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace.send_instruction", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%4"))
     async def test_start_ace_uses_send_instruction(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_send: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_spawn.return_value = "%4"
         mock_send.return_value = True
 
         project = await db_ops.create_project(conn, "test-project")
@@ -177,17 +161,14 @@ class TestAtomicInstructionSending:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace.send_instruction", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%5"))
     async def test_start_ace_errors_on_failed_delivery(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_send: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_spawn.return_value = "%5"
         mock_send.return_value = False  # delivery failed
 
         project = await db_ops.create_project(conn, "test-project")
@@ -207,17 +188,14 @@ class TestVerificationChecks:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%6"))
     async def test_verify_session_alive(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_alive: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_spawn.return_value = "%6"
         mock_alive.return_value = True
 
         project = await db_ops.create_project(conn, "test-project")
@@ -227,17 +205,14 @@ class TestVerificationChecks:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_pane", new_callable=AsyncMock)
-    @patch("atc.session.ace._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%7"))
     async def test_verify_session_dead_pane(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_alive: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_spawn.return_value = "%7"
         mock_alive.return_value = False
 
         project = await db_ops.create_project(conn, "test-project")

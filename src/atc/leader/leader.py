@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING, Any
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
 from atc.agents.factory import get_launch_command
 from atc.session.ace import (
-    ATC_TMUX_SESSION,
     _accept_trust_dialog,
     _ensure_tmux_session,
     _kill_pane,
     _spawn_pane,
+    _spawn_provider_session,
     send_instruction,
 )
 from atc.session.state_machine import SessionStatus, transition
@@ -195,22 +195,16 @@ async def start_leader(
                 _prep_exc,
             )
 
-        await _ensure_tmux_session(ATC_TMUX_SESSION)
-        pane_id = await _spawn_pane(
-            ATC_TMUX_SESSION,
-            launch_cmd,
+        tmux_session, pane_id = await _spawn_provider_session(
+            conn,
+            session.id,
+            project_id=project_id,
+            session_type="manager",
             working_dir=working_dir,
+            context_file=deployed.claude_md_path if deployed.claude_md_path.exists() else None,
+            launch_command=launch_cmd,
         )
-        try:
-            from atc.agents.factory import create_provider
-
-            provider = create_provider(project.agent_provider if project else "claude_code")
-            if hasattr(provider, "_sessions"):
-                provider._sessions[session.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
-            await provider.handle_startup(session.id)
-        except Exception:
-            await _accept_trust_dialog(pane_id)
-        await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
+        await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
         await db_ops.update_session_status(conn, session.id, SessionStatus.IDLE.value)

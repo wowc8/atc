@@ -14,14 +14,7 @@ from typing import TYPE_CHECKING
 from atc.agents.deploy import TowerDeploySpec, deploy_tower_files
 from atc.agents.factory import get_launch_command
 from atc.leader.leader import _build_manager_deploy_spec
-from atc.session.ace import (
-    ATC_TMUX_SESSION,
-    _accept_trust_dialog,
-    _ensure_tmux_session,
-    _kill_pane,
-    _pane_is_alive,
-    _spawn_pane,
-)
+from atc.session.ace import _kill_pane, _pane_is_alive, _spawn_provider_session
 from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
 
@@ -173,23 +166,24 @@ async def reconnect_session(
         if working_dir:
             _log_reconnect_working_dir(working_dir, session_id)
 
-        await _ensure_tmux_session(ATC_TMUX_SESSION)
-        pane_id = await _spawn_pane(
-            ATC_TMUX_SESSION,
-            launch_cmd,
-            working_dir=working_dir,
-        )
-        try:
-            from atc.agents.factory import create_provider
+        context_file = None
+        if getattr(session, "session_type", None) == "tower" and project:
+            _candidate = deployed.root / "CLAUDE.md"
+            context_file = _candidate if _candidate.exists() else None
+        elif getattr(session, "session_type", None) == "manager" and project:
+            _candidate = deployed.root / "CLAUDE.md"
+            context_file = _candidate if _candidate.exists() else None
 
-            provider_name = project.agent_provider or "claude_code" if project else "claude_code"
-            provider = create_provider(provider_name)
-            if hasattr(provider, "_sessions"):
-                provider._sessions[session_id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
-            await provider.handle_startup(session_id)
-        except Exception:
-            await _accept_trust_dialog(pane_id)
-        await db_ops.update_session_tmux(conn, session_id, ATC_TMUX_SESSION, pane_id)
+        tmux_session, pane_id = await _spawn_provider_session(
+            conn,
+            session_id,
+            project_id=session.project_id,
+            session_type=getattr(session, "session_type", "ace"),
+            working_dir=working_dir,
+            context_file=context_file,
+            launch_command=launch_cmd,
+        )
+        await db_ops.update_session_tmux(conn, session_id, tmux_session, pane_id)
 
         await transition(session_id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
         await db_ops.update_session_status(conn, session_id, SessionStatus.IDLE.value)
