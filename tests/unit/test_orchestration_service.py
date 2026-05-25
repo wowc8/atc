@@ -9,6 +9,7 @@ import pytest_asyncio
 
 from atc.orchestration.errors import OrchestrationException
 from atc.orchestration.models import (
+    CancelSessionRequest,
     ListSessionsRequest,
     OrchestrationRole,
     OrchestrationStatus,
@@ -152,14 +153,6 @@ async def test_spawn_ace_creates_session_and_assigns_task(db_conn) -> None:
     project = await db_ops.create_project(db_conn, 'ATC', repo_path='/tmp/atc-repo')
     task = await db_ops.create_task_graph(db_conn, project.id, 'Task 1')
     fake_session_id = 'session-123'
-    await db_ops.create_session(
-        db_conn,
-        project_id=project.id,
-        session_type='ace',
-        name='ace-Task 1',
-        task_id=task.id,
-        status='idle',
-    )
     fake_summary = SessionSummary(
         id=fake_session_id,
         role=OrchestrationRole.ACE,
@@ -290,3 +283,57 @@ async def test_wait_for_session_times_out(db_conn) -> None:
         )
     assert exc.value.code.value == 'SESSION_NOT_READY'
     assert exc.value.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_ace_soft_stop_returns_summary(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, 'ATC')
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='working',
+    )
+    service = OrchestrationService(db_conn)
+    summary = await service.cancel_session(CancelSessionRequest(session_id=session.id, force=False))
+    assert summary is not None
+    assert summary.status == OrchestrationStatus.BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_cancel_ace_force_destroy_returns_none(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, 'ATC')
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='working',
+    )
+    service = OrchestrationService(db_conn)
+    result = await service.cancel_session(CancelSessionRequest(session_id=session.id, force=True))
+    assert result is None
+    assert await db_ops.get_session(db_conn, session.id) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_leader_unlinks_session(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, 'ATC')
+    leader = await db_ops.create_leader(db_conn, project.id, goal='Ship it')
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type='manager',
+        name='leader-ATC',
+        status='working',
+    )
+    await db_conn.execute(
+        "UPDATE leaders SET session_id = ?, status = 'managing' WHERE id = ?",
+        (session.id, leader.id),
+    )
+    await db_conn.commit()
+    service = OrchestrationService(db_conn)
+    summary = await service.cancel_session(CancelSessionRequest(session_id=session.id, force=False))
+    assert summary is not None
+    assert summary.status == OrchestrationStatus.READY

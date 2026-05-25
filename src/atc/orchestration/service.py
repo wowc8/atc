@@ -4,8 +4,10 @@ import asyncio
 from typing import Any
 
 from atc.agents.factory import get_launch_command
+from atc.leader import leader as leader_ops
 from atc.orchestration.errors import OrchestrationErrorCode, OrchestrationException
 from atc.orchestration.models import (
+    CancelSessionRequest,
     ListSessionsRequest,
     OperationAcceptedResponse,
     OrchestrationRole,
@@ -236,6 +238,38 @@ class OrchestrationService:
                     retryable=True,
                 )
             await asyncio.sleep(0.5)
+
+    async def cancel_session(self, request: CancelSessionRequest) -> SessionSummary | None:
+        session = await db_ops.get_session(self._db, request.session_id)
+        if session is None:
+            raise OrchestrationException(
+                OrchestrationErrorCode.SESSION_NOT_FOUND,
+                f"Session {request.session_id} not found",
+            )
+
+        role = normalize_role(session.session_type)
+
+        if role == OrchestrationRole.ACE:
+            if request.force:
+                await ace_ops.destroy_ace(self._db, session.id)
+                return None
+            await ace_ops.stop_ace(self._db, session.id)
+            return await self.get_session(session.id)
+
+        if role == OrchestrationRole.LEADER:
+            await leader_ops.stop_leader(self._db, session.project_id)
+            return await self.get_session(session.id)
+
+        if role == OrchestrationRole.TOWER:
+            raise OrchestrationException(
+                OrchestrationErrorCode.INVALID_ROLE,
+                "Tower session cancellation is not yet supported through the orchestration surface",
+            )
+
+        raise OrchestrationException(
+            OrchestrationErrorCode.INVALID_ROLE,
+            f"Unsupported role for cancellation: {role.value}",
+        )
 
     async def _build_session_summary(self, session: Any) -> SessionSummary:
         role = normalize_role(session.session_type)
