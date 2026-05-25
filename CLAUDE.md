@@ -7,10 +7,11 @@ in isolated Claude Code sessions.
 
 ## Before You Write Any Code
 
-1. Read `docs/ARCHITECTURE.md` to understand the subsystem you're touching
-2. Read `docs/PATTERNS.md` — these are non-negotiable conventions
-3. Read `docs/ANTI_PATTERNS.md` — these are things you must never do
-4. Check `docs/design_logs/` for any decisions relevant to your change
+1. Read `CODE_STRUCTURE.md` for the high-level architectural contract, provider-agnostic rules, and code hygiene expectations
+2. Read `docs/ARCHITECTURE.md` to understand the subsystem you're touching
+3. Read `docs/PATTERNS.md` — these are non-negotiable conventions
+4. Read `docs/ANTI_PATTERNS.md` — these are things you must never do
+5. Check `docs/design_logs/` for any decisions relevant to your change
 
 ## Build & Run Commands
 

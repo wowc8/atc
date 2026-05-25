@@ -88,6 +88,7 @@ tests/          → Unit, integration, e2e tests
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) — AI agent guide (read first)
+- [CODE_STRUCTURE.md](CODE_STRUCTURE.md) — high-level code structure, provider-agnostic architecture, and hygiene rules
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — System architecture
 - [docs/FEATURES.md](docs/FEATURES.md) — Feature guide
 - [docs/API.md](docs/API.md) — REST API + WebSocket reference

@@ -496,6 +496,27 @@ async def create_ace(
     return session.id
 
 
+async def _send_session_instruction(
+    conn: aiosqlite.Connection,
+    session_id: str,
+    instruction: str,
+) -> bool:
+    """Send an instruction through the configured provider for a session."""
+    from atc.agents.factory import create_provider
+
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        raise ValueError(f"Session {session_id} not found")
+    if not session.project_id:
+        raise ValueError(f"Session {session_id} has no project")
+
+    project = await db_ops.get_project(conn, session.project_id)
+    provider_name = project.agent_provider if project and project.agent_provider else "claude_code"
+    provider = create_provider(provider_name)
+    result = await provider.send_prompt(session_id, instruction)
+    return result.accepted
+
+
 async def start_ace(
     conn: aiosqlite.Connection,
     session_id: str,
@@ -518,8 +539,8 @@ async def start_ace(
     await transition(session_id, current, SessionStatus.WORKING, event_bus)
     await db_ops.update_session_status(conn, session_id, SessionStatus.WORKING.value)
 
-    if instruction and session.tmux_pane:
-        delivered = await send_instruction(session.tmux_pane, instruction)
+    if instruction:
+        delivered = await _send_session_instruction(conn, session_id, instruction)
         if not delivered:
             logger.error("Session %s: instruction delivery failed, marking error", session_id)
             await transition(session_id, SessionStatus.WORKING, SessionStatus.ERROR, event_bus)

@@ -141,7 +141,7 @@ class TestAtomicInstructionSending:
     """Verify that start_ace uses atomic instruction sending."""
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace.send_instruction", new_callable=AsyncMock)
+    @patch("atc.session.ace._send_session_instruction", new_callable=AsyncMock)
     @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%4"))
     async def test_start_ace_uses_send_instruction(
         self,
@@ -157,10 +157,10 @@ class TestAtomicInstructionSending:
 
         await start_ace(conn, session_id, instruction="do work", event_bus=event_bus)
 
-        mock_send.assert_called_once_with("%4", "do work")
+        mock_send.assert_called_once_with(conn, session_id, "do work")
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace.send_instruction", new_callable=AsyncMock)
+    @patch("atc.session.ace._send_session_instruction", new_callable=AsyncMock)
     @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%5"))
     async def test_start_ace_errors_on_failed_delivery(
         self,
