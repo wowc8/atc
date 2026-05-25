@@ -60,13 +60,11 @@ async def test_reuses_most_recent_disconnected_session_with_valid_staging_dir(
             "atc.tower.session._DEFAULT_STAGING_ROOT",
             str(tmp_path),
         ),
-        patch("atc.tower.session._ensure_tmux_session", new_callable=AsyncMock),
         patch(
-            "atc.tower.session._spawn_pane",
+            "atc.tower.session._spawn_provider_session",
             new_callable=AsyncMock,
-            return_value=mock_pane_id,
+            return_value=("atc", mock_pane_id),
         ),
-        patch("atc.tower.session._accept_trust_dialog", new_callable=AsyncMock),
         patch("atc.tower.session._pane_is_alive", new_callable=AsyncMock, return_value=False),
         patch("atc.tower.session.get_launch_command", return_value="claude"),
         patch("atc.tower.session.transition", new_callable=AsyncMock),
@@ -107,13 +105,11 @@ async def test_creates_new_session_when_no_valid_staging_dir(db, tmp_path: Path)
             "atc.tower.session._DEFAULT_STAGING_ROOT",
             str(tmp_path),
         ),
-        patch("atc.tower.session._ensure_tmux_session", new_callable=AsyncMock),
         patch(
-            "atc.tower.session._spawn_pane",
+            "atc.tower.session._spawn_provider_session",
             new_callable=AsyncMock,
-            return_value=mock_pane_id,
+            return_value=("atc", mock_pane_id),
         ),
-        patch("atc.tower.session._accept_trust_dialog", new_callable=AsyncMock),
         patch("atc.tower.session._pane_is_alive", new_callable=AsyncMock, return_value=False),
         patch("atc.tower.session.get_launch_command", return_value="claude"),
         patch("atc.tower.session.transition", new_callable=AsyncMock),
@@ -123,8 +119,11 @@ async def test_creates_new_session_when_no_valid_staging_dir(db, tmp_path: Path)
         mock_root = tmp_path / "new-sess"
         mock_root.mkdir()
         (mock_root / "CLAUDE.md").write_text("# Tower\n")
-        mock_deployed = AsyncMock()
+        from unittest.mock import Mock
+
+        mock_deployed = Mock()
         mock_deployed.root = mock_root
+        mock_deployed.claude_md_path = mock_root / "CLAUDE.md"
         mock_deploy.return_value = mock_deployed
 
         returned_id = await start_tower_session(db, project.id)

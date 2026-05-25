@@ -11,6 +11,8 @@ import enum
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from atc.state.models import Project, Session
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
@@ -83,6 +85,19 @@ class ProviderMetadata:
     version: str = "0.0.0"
     description: str = ""
     author: str = ""
+
+
+@dataclass(frozen=True)
+class ProviderSpawnRequest:
+    """Provider-owned spawn request for lifecycle operations."""
+
+    session: Session
+    project: Project | None = None
+    working_dir: str | None = None
+    launch_command: str | None = None
+    env: dict[str, str] = field(default_factory=dict)
+    context_file: Path | None = None
+    role: str = "ace"
 
 
 @runtime_checkable
@@ -162,6 +177,10 @@ class AgentProvider(Protocol):
         perform other provider-specific initialization needed before the
         session is considered ready.
         """
+        ...
+
+    async def spawn_for_session(self, request: ProviderSpawnRequest) -> SessionInfo:
+        """Spawn a runtime pane/process for an existing ATC session row."""
         ...
 
     async def send_prompt(self, session_id: str, prompt: str) -> PromptResult:

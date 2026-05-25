@@ -23,6 +23,7 @@ from atc.agents.base import (
     PromptResult,
     ProviderCapabilities,
     ProviderError,
+    ProviderSpawnRequest,
     SessionInfo,
     SessionStatus,
 )
@@ -203,6 +204,15 @@ class OpenCodeProvider:
         """OpenCode has no tmux/TUI startup dialog flow."""
         self._require_tracked(session_id)
         return None
+
+    async def spawn_for_session(self, request: ProviderSpawnRequest) -> SessionInfo:
+        return await self.spawn_session(
+            request.session.id,
+            working_dir=request.working_dir,
+            env=request.env,
+            context_file=request.context_file,
+            role=request.role,
+        )
 
     async def send_prompt(self, session_id: str, prompt: str) -> PromptResult:
         self._require_tracked(session_id)

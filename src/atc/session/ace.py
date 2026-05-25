@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
+from atc.agents.base import ProviderSpawnRequest
 from atc.agents.claude_runtime import (
     INSTRUCTION_MAX_RETRIES,
     TUI_READY_POLL_INTERVAL,
@@ -343,6 +344,49 @@ async def _send_keys(pane_id: str, keys: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _spawn_provider_session(
+    conn: aiosqlite.Connection,
+    session_id: str,
+    *,
+    project_id: str | None,
+    session_type: str,
+    working_dir: str | None,
+    context_file: _Path | None = None,
+    launch_command: str | None = None,
+) -> tuple[str, str]:
+    from atc.agents.factory import create_provider
+
+    project = await db_ops.get_project(conn, project_id) if project_id else None
+    provider_name = project.agent_provider if project and project.agent_provider else "claude_code"
+    provider = create_provider(provider_name)
+
+    session = await db_ops.get_session(conn, session_id)
+    if session is None:
+        raise ValueError(f"Session {session_id} not found")
+
+    role = {
+        "ace": "ace",
+        "manager": "leader",
+        "tower": "tower",
+    }.get(session_type, "ace")
+
+    info = await provider.spawn_for_session(
+        ProviderSpawnRequest(
+            session=session,
+            project=project,
+            working_dir=working_dir,
+            launch_command=launch_command,
+            context_file=context_file,
+            role=role,
+        )
+    )
+    pane_id = str(info.metadata.get("pane_id") or "")
+    tmux_session = str(info.metadata.get("tmux_session") or ATC_TMUX_SESSION)
+    if not pane_id:
+        raise RuntimeError(f"Provider {provider_name} did not return a pane_id for {session_id}")
+    return tmux_session, pane_id
+
+
 async def create_ace(
     conn: aiosqlite.Connection,
     project_id: str,
@@ -381,6 +425,7 @@ async def create_ace(
     # Step 1b: Deploy config files with the real session_id so hooks,
     # CLAUDE.md, and heartbeat all reference the correct ID.
     effective_working_dir = working_dir
+    deployed = None
     if deploy_spec_kwargs is not None:
         from atc.agents.deploy import AceDeploySpec, deploy_ace_files
 
@@ -419,27 +464,16 @@ async def create_ace(
                     _prep_exc,
                 )
 
-        await _ensure_tmux_session(ATC_TMUX_SESSION)
-        pane_id = await _spawn_pane(
-            ATC_TMUX_SESSION,
-            launch_command,
+        tmux_session, pane_id = await _spawn_provider_session(
+            conn,
+            session.id,
+            project_id=project_id,
+            session_type="ace",
             working_dir=effective_working_dir,
+            context_file=deployed.claude_md_path if deployed and deployed.claude_md_path.exists() else None,
+            launch_command=launch_command,
         )
-        try:
-            from atc.agents.factory import create_provider
-
-            provider_name = "claude_code"
-            if project_id:
-                project = await db_ops.get_project(conn, project_id)
-                if project and project.agent_provider:
-                    provider_name = project.agent_provider
-            provider = create_provider(provider_name)
-            if hasattr(provider, "_sessions"):
-                provider._sessions[session.id] = type("Tracked", (), {"pane_id": pane_id, "status": None})()
-            await provider.handle_startup(session.id)
-        except Exception:
-            await _accept_trust_dialog(pane_id)
-        await db_ops.update_session_tmux(conn, session.id, ATC_TMUX_SESSION, pane_id)
+        await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 
         # Step 4a: success → idle
         await transition(session.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)

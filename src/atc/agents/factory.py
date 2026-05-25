@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from atc.agents.base import AgentProvider, ProviderError, ProviderMetadata
+from atc.config import load_settings
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,12 @@ def create_provider(name: str, **kwargs: Any) -> AgentProvider:
             "factory",
             f"Unknown provider {name!r}. Available: {available}",
         )
+    if not kwargs and name == "claude_code":
+        try:
+            settings = load_settings()
+            kwargs = {"claude_command": settings.agent_provider.claude_command}
+        except Exception:
+            kwargs = {}
     provider: AgentProvider = cls(**kwargs)
     logger.info("Created agent provider: %s (%s)", name, cls.__name__)
     return provider
