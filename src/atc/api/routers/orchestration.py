@@ -6,6 +6,7 @@ from atc.orchestration.errors import OrchestrationException
 from atc.orchestration.models import (
     ListSessionsRequest,
     OperationAcceptedResponse,
+    SendInstructionRequest,
     SessionSummary,
     SpawnLeaderRequest,
 )
@@ -25,6 +26,20 @@ async def spawn_leader(body: SpawnLeaderRequest, request: Request) -> OperationA
     service = await _get_service(request)
     try:
         return await service.spawn_leader(body)
+    except OrchestrationException as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
+
+
+@router.post("/sessions/{session_id}/instruction", response_model=OperationAcceptedResponse, status_code=202)
+async def send_instruction(
+    session_id: str,
+    body: SendInstructionRequest,
+    request: Request,
+) -> OperationAcceptedResponse:
+    service = await _get_service(request)
+    try:
+        payload = body.model_copy(update={"session_id": session_id})
+        return await service.send_instruction(payload)
     except OrchestrationException as exc:
         raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
 

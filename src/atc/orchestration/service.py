@@ -8,11 +8,13 @@ from atc.orchestration.models import (
     OperationAcceptedResponse,
     OrchestrationRole,
     OrchestrationStatus,
+    SendInstructionRequest,
     SessionSummary,
     SpawnLeaderRequest,
     normalize_role,
     normalize_status,
 )
+from atc.session.ace import _send_session_instruction
 from atc.state import db as db_ops
 from atc.tower.controller import BudgetConstrainedError, TowerBusyError, TowerController
 
@@ -98,6 +100,46 @@ class OrchestrationService:
             )
 
         summary = await self.get_session(leader_session_id)
+        return OperationAcceptedResponse(
+            request_status="accepted",
+            operation_id=request.idempotency_key,
+            session=summary,
+        )
+
+    async def send_instruction(self, request: SendInstructionRequest) -> OperationAcceptedResponse:
+        session = await db_ops.get_session(self._db, request.session_id)
+        if session is None:
+            raise OrchestrationException(
+                OrchestrationErrorCode.SESSION_NOT_FOUND,
+                f"Session {request.session_id} not found",
+            )
+
+        try:
+            delivered = await _send_session_instruction(
+                self._db,
+                request.session_id,
+                request.instruction,
+            )
+        except ValueError as exc:
+            raise OrchestrationException(
+                OrchestrationErrorCode.SESSION_NOT_READY,
+                str(exc),
+                retryable=True,
+            ) from exc
+        except Exception as exc:
+            raise OrchestrationException(
+                OrchestrationErrorCode.INTERNAL_STORAGE_ERROR,
+                f"Instruction delivery failed for session {request.session_id}",
+            ) from exc
+
+        if not delivered:
+            raise OrchestrationException(
+                OrchestrationErrorCode.SESSION_NOT_READY,
+                f"Instruction delivery was not accepted for session {request.session_id}",
+                retryable=True,
+            )
+
+        summary = await self.get_session(request.session_id)
         return OperationAcceptedResponse(
             request_status="accepted",
             operation_id=request.idempotency_key,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -10,6 +11,7 @@ from atc.orchestration.models import (
     ListSessionsRequest,
     OrchestrationRole,
     OrchestrationStatus,
+    SendInstructionRequest,
     SpawnLeaderRequest,
 )
 from atc.orchestration.service import OrchestrationService
@@ -138,4 +140,54 @@ async def test_spawn_leader_maps_busy_error(db_conn) -> None:
             SpawnLeaderRequest(project_id=project.id, goal="Ship it", idempotency_key="goal-2")
         )
     assert exc.value.code.value == "CONCURRENCY_LIMIT_REACHED"
+    assert exc.value.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_send_instruction_returns_accepted_response(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, "ATC")
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type="ace",
+        name="ace-1",
+        status="working",
+    )
+    service = OrchestrationService(db_conn)
+    with patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=True)) as mock_send:
+        response = await service.send_instruction(
+            SendInstructionRequest(
+                session_id=session.id,
+                instruction='Do the thing',
+                idempotency_key='send-1',
+            )
+        )
+    assert response.request_status == 'accepted'
+    assert response.operation_id == 'send-1'
+    assert response.session is not None
+    assert response.session.id == session.id
+    mock_send.assert_awaited_once_with(db_conn, session.id, 'Do the thing')
+
+
+@pytest.mark.asyncio
+async def test_send_instruction_maps_rejected_delivery(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, "ATC")
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type="ace",
+        name="ace-1",
+        status="working",
+    )
+    service = OrchestrationService(db_conn)
+    with patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=False)):
+        with pytest.raises(OrchestrationException) as exc:
+            await service.send_instruction(
+                SendInstructionRequest(
+                    session_id=session.id,
+                    instruction='Do the thing',
+                    idempotency_key='send-2',
+                )
+            )
+    assert exc.value.code.value == 'SESSION_NOT_READY'
     assert exc.value.retryable is True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -8,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 
 from atc.api.app import create_app
 from atc.state import db as db_ops
-from atc.tower.controller import TowerState
 
 
 class _FakeTowerController:
@@ -97,3 +97,31 @@ async def test_spawn_orchestration_leader(app_and_db) -> None:
     assert body['operation_id'] == 'goal-1'
     assert body['session']['role'] == 'leader'
     assert body['session']['status'] == 'starting'
+
+
+@pytest.mark.asyncio
+async def test_send_instruction_route(app_and_db) -> None:
+    app, conn = app_and_db
+    project = await db_ops.create_project(conn, 'ATC')
+    session = await db_ops.create_session(
+        conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='working',
+    )
+    transport = ASGITransport(app=app)
+    with patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=True)):
+        async with AsyncClient(transport=transport, base_url='http://test') as client:
+            response = await client.post(
+                f'/api/orchestration/sessions/{session.id}/instruction',
+                json={
+                    'session_id': 'ignored-by-route',
+                    'instruction': 'Do the thing',
+                    'idempotency_key': 'send-1',
+                },
+            )
+    assert response.status_code == 202
+    body = response.json()
+    assert body['operation_id'] == 'send-1'
+    assert body['session']['id'] == session.id
