@@ -60,6 +60,21 @@ GET    /api/tower/memory                      → list tower memory entries
 DELETE /api/tower/memory/{key}                → forget a memory entry
 ```
 
+## Orchestration
+
+```
+GET    /api/orchestration/sessions                     → list normalized sessions
+GET    /api/orchestration/sessions/{id}                → normalized single session view
+POST   /api/orchestration/leaders                      → spawn leader via Tower goal path
+POST   /api/orchestration/sessions/{id}/instruction    → send provider-owned instruction to a session
+POST   /api/orchestration/sessions/{id}/wait           → wait until session reaches target normalized status
+```
+
+Notes:
+- This surface exposes normalized orchestration roles (`tower`, `leader`, `ace`) and statuses (`starting`, `ready`, `running`, etc.) rather than raw internal DB strings.
+- `send_instruction` deliberately reuses the existing provider-owned delivery path instead of creating a second prompt-delivery implementation.
+- `wait` is currently a polling contract over session state, which keeps the API stable while backend event plumbing evolves.
+
 ## Usage & Budget
 
 ```

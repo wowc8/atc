@@ -20,10 +20,23 @@ User → Tower → Leader → Ace
 
 FastAPI application with:
 - **App factory** (`app.py`): `create_app()` with lifespan management
-- **REST routers** (`routers/`): tower, projects, tasks, aces, usage, settings
+- **REST routers** (`routers/`): tower, projects, tasks, aces, orchestration, usage, settings
 - **WebSocket hub** (`ws/`): channel-based pub/sub for real-time state
 
 ### Domain Layer
+
+### Orchestration Boundary (`src/atc/orchestration/`)
+
+The new orchestration package is an internal normalization boundary that sits between ATC's product-specific internals and future external control surfaces like MCP.
+
+Current responsibilities:
+- normalize raw session types/statuses into orchestration roles and statuses
+- expose session-oriented service methods (`get_session`, `list_sessions`, `spawn_leader`, `send_instruction`, `wait_for_session`)
+- translate Tower/provider/runtime failures into a stable orchestration error vocabulary
+- back the first orchestration REST routes under `/api/orchestration/*`
+
+Design rule:
+- Orchestration should wrap existing high-level flows where they already exist, not duplicate runtime behavior. For example, `spawn_leader` goes through Tower's submit-goal path, and `send_instruction` goes through the existing provider-owned delivery path.
 
 | Package | Responsibility |
 |---|---|
