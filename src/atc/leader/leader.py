@@ -22,9 +22,9 @@ from atc.session.ace import (
     _accept_trust_dialog,
     _ensure_tmux_session,
     _kill_pane,
+    _send_session_instruction,
     _spawn_pane,
     _spawn_provider_session,
-    send_instruction,
 )
 from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
@@ -287,7 +287,9 @@ async def send_leader_message(
         raise ValueError(f"No active leader for project {project_id}")
 
     session = await db_ops.get_session(conn, leader.session_id)
-    if session is None or session.tmux_pane is None:
+    if session is None:
+        raise ValueError("Leader session not found")
+    if session.tmux_pane is None:
         raise ValueError("Leader session has no tmux pane")
 
     current = SessionStatus(session.status)
@@ -306,4 +308,6 @@ async def send_leader_message(
     if not await _pane_is_alive(session.tmux_pane):
         raise ValueError("Leader tmux pane is dead — stop and restart the leader")
 
-    await send_instruction(session.tmux_pane, message)
+    delivered = await _send_session_instruction(conn, session.id, message)
+    if not delivered:
+        raise ValueError("Leader instruction delivery failed")
