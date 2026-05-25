@@ -125,3 +125,30 @@ async def test_send_instruction_route(app_and_db) -> None:
     body = response.json()
     assert body['operation_id'] == 'send-1'
     assert body['session']['id'] == session.id
+
+
+@pytest.mark.asyncio
+async def test_wait_for_session_route(app_and_db) -> None:
+    app, conn = app_and_db
+    project = await db_ops.create_project(conn, 'ATC')
+    session = await db_ops.create_session(
+        conn,
+        project_id=project.id,
+        session_type='ace',
+        name='ace-1',
+        status='idle',
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url='http://test') as client:
+        response = await client.post(
+            f'/api/orchestration/sessions/{session.id}/wait',
+            json={
+                'session_id': 'ignored-by-route',
+                'target_statuses': ['ready'],
+                'timeout_ms': 100,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body['id'] == session.id
+    assert body['status'] == 'ready'

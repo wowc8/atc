@@ -9,6 +9,7 @@ from atc.orchestration.models import (
     SendInstructionRequest,
     SessionSummary,
     SpawnLeaderRequest,
+    WaitForSessionRequest,
 )
 from atc.orchestration.service import OrchestrationService
 
@@ -40,6 +41,20 @@ async def send_instruction(
     try:
         payload = body.model_copy(update={"session_id": session_id})
         return await service.send_instruction(payload)
+    except OrchestrationException as exc:
+        raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
+
+
+@router.post("/sessions/{session_id}/wait", response_model=SessionSummary)
+async def wait_for_session(
+    session_id: str,
+    body: WaitForSessionRequest,
+    request: Request,
+) -> SessionSummary:
+    service = await _get_service(request)
+    try:
+        payload = body.model_copy(update={"session_id": session_id})
+        return await service.wait_for_session(payload)
     except OrchestrationException as exc:
         raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
 
