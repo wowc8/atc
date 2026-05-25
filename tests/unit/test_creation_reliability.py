@@ -1,6 +1,9 @@
 """Unit tests for creation reliability features (design doc §10a).
 
-Tests generic verification logic and session-lifecycle invariants.
+Tests the current verification contract:
+- ``verify_alive`` is the hard liveness gate
+- ``verify_working`` and ``verify_progressing`` are tmux-output heuristics
+- session-lifecycle invariants stay intact across those checks
 """
 
 from __future__ import annotations

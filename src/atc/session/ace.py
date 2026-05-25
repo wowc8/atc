@@ -522,7 +522,12 @@ async def destroy_ace(
 
 @dataclass
 class VerificationResult:
-    """Result of a single verification check."""
+    """Result of a single session verification check.
+
+    Note: only the ``alive`` phase is intended as a provider-agnostic liveness
+    gate. The later ``working`` and ``progressing`` phases are output-based
+    heuristics for tmux-backed sessions, not universal provider health signals.
+    """
 
     ok: bool
     phase: str  # "alive", "working", "progressing"
@@ -534,6 +539,11 @@ async def verify_alive(
     session_id: str,
 ) -> VerificationResult:
     """Check 1 (t+10s): Is the session alive?
+
+    This is the hard, provider-agnostic verification gate used by creation
+    reliability. Today it still relies on tmux-pane presence because ATC's live
+    session transport is tmux-backed, but conceptually this phase is about
+    session liveness, not Claude-specific behavior.
 
     - Session row exists with status != 'error'
     - tmux pane is alive
@@ -560,8 +570,14 @@ async def verify_working(
     conn: aiosqlite.Connection,
     session_id: str,
 ) -> VerificationResult:
-    """Check 2 (t+60s): Did the session start working?
+    """Check 2 (t+60s): Is there evidence of output activity?
 
+    This is a soft heuristic for tmux-backed sessions, not a universal provider
+    readiness contract. A session can be healthy without satisfying these exact
+    output expectations once ATC supports non-tmux or differently-behaving
+    providers.
+
+    Current signals:
     - Status has transitioned from idle → working or waiting
     - Pane output is non-empty (scrollback has content)
     """
@@ -598,10 +614,15 @@ async def verify_progressing(
     *,
     previous_output: str = "",
 ) -> VerificationResult:
-    """Check 3 (t+120s): Is the session making progress?
+    """Check 3 (t+120s): Is tmux output still changing?
 
+    This is another soft heuristic for tmux-backed sessions. It should be read
+    as "output appears to be progressing" rather than a generic provider-level
+    guarantee that useful work is happening.
+
+    Current signals:
     - Pane output has changed since last check
-    - No error patterns in output
+    - No common error patterns in output
     """
     session = await db_ops.get_session(conn, session_id)
     if session is None:
@@ -647,9 +668,12 @@ async def schedule_verification(
     """Schedule the three-phase verification loop after entity creation.
 
     Runs as a background task:
-      - t+10s:  alive check
-      - t+60s:  working check (re-sends instruction on failure)
-      - t+120s: progressing check (marks stalled on failure)
+      - t+10s:  hard liveness check
+      - t+60s:  soft output-activity check
+      - t+120s: soft output-progress check
+
+    Only the first phase is treated as a hard creation gate. Later phases are
+    tmux-output heuristics that help surface likely stalls for current providers.
     """
 
     async def _run_checks() -> None:
@@ -666,7 +690,7 @@ async def schedule_verification(
         result = await verify_working(conn, session_id)
         if not result.ok:
             logger.warning(
-                "Session %s: working check failed (%s), may need instruction re-send",
+                "Session %s: output-activity check failed (%s), may need attention",
                 session_id,
                 result.detail,
             )
@@ -692,7 +716,7 @@ async def schedule_verification(
         await asyncio.sleep(60)  # 120s total
         result = await verify_progressing(conn, session_id, previous_output=mid_output)
         if not result.ok:
-            logger.warning("Session %s: progress check failed (%s)", session_id, result.detail)
+            logger.warning("Session %s: output-progress check failed (%s)", session_id, result.detail)
             await _handle_stalled(conn, session_id, event_bus)
 
     asyncio.create_task(_run_checks())
