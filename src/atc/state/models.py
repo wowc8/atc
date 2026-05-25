@@ -286,3 +286,15 @@ class FeatureFlag:
     metadata: str | None = None  # optional JSON
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass
+class OrchestrationOperation:
+    operation_id: str
+    operation_type: str
+    request_payload: str
+    status: str
+    session_id: str | None = None
+    response_payload: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
