@@ -95,14 +95,12 @@ class TestBuildManagerDeploySpec:
 class TestTowerToLeaderWiring:
     """Verify that Tower → Leader flow deploys config and launches claude."""
 
-    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     @patch("atc.leader.leader.deploy_manager_files")
     async def test_start_leader_deploys_config(
         self,
         mock_deploy: AsyncMock,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         db,
         event_bus: EventBus,
     ) -> None:
