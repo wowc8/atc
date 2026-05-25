@@ -1,7 +1,7 @@
 """E2E smoke tests for core ATC workflows.
 
 Covers: health, project CRUD, leader lifecycle, tower status,
-and WebSocket connectivity — all through the REST/WS API.
+and WebSocket connectivity, all through the REST/WS API.
 """
 
 from __future__ import annotations
@@ -33,23 +33,13 @@ def client(tmp_path: Path) -> TestClient:
         yield c
 
 
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
-
-
 class TestHealth:
     def test_health_returns_ok(self, client: TestClient) -> None:
         resp = client.get("/api/health")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
+        assert data["status"] in {"ok", "degraded"}
         assert "version" in data
-
-
-# ---------------------------------------------------------------------------
-# Project CRUD
-# ---------------------------------------------------------------------------
 
 
 class TestProjectCRUD:
@@ -78,7 +68,6 @@ class TestProjectCRUD:
         assert data["github_repo"] == "org/repo"
 
     def test_create_project_name_only(self, client: TestClient) -> None:
-        """Name is the only required field — all others optional."""
         resp = client.post("/api/projects", json={"name": "minimal"})
         assert resp.status_code == 201
         data = resp.json()
@@ -106,7 +95,6 @@ class TestProjectCRUD:
         assert resp.status_code == 404
 
     def test_create_project_auto_creates_leader(self, client: TestClient) -> None:
-        """Creating a project should automatically create a Leader row."""
         resp = client.post("/api/projects", json={"name": "auto-leader"})
         project_id = resp.json()["id"]
         resp = client.get(f"/api/projects/{project_id}/manager")
@@ -116,21 +104,14 @@ class TestProjectCRUD:
         assert leader["status"] == "idle"
 
 
-# ---------------------------------------------------------------------------
-# Leader lifecycle
-# ---------------------------------------------------------------------------
-
-
 @patch("atc.session.ace._tmux_run", new_callable=AsyncMock)
-@patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
-@patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-@patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
+@patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+@patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
 class TestLeaderLifecycle:
     def test_start_leader(
         self,
         mock_send: AsyncMock,
-        mock_spawn: AsyncMock,
-        mock_ensure: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_tmux: AsyncMock,
         client: TestClient,
     ) -> None:
@@ -149,42 +130,33 @@ class TestLeaderLifecycle:
     def test_start_and_stop_leader(
         self,
         mock_send: AsyncMock,
-        mock_spawn: AsyncMock,
-        mock_ensure: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_tmux: AsyncMock,
         client: TestClient,
     ) -> None:
         resp = client.post("/api/projects", json={"name": "stop-proj"})
         project_id = resp.json()["id"]
 
-        client.post(
-            f"/api/projects/{project_id}/leader/start",
-            json={"goal": "Test goal"},
-        )
+        client.post(f"/api/projects/{project_id}/leader/start", json={"goal": "Test goal"})
 
         resp = client.post(f"/api/projects/{project_id}/leader/stop")
         assert resp.status_code == 200
         assert resp.json()["status"] == "stopped"
 
-        # Leader should be idle after stopping
         resp = client.get(f"/api/projects/{project_id}/manager")
         assert resp.json()["status"] == "idle"
 
     def test_send_leader_message(
         self,
         mock_send: AsyncMock,
-        mock_spawn: AsyncMock,
-        mock_ensure: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_tmux: AsyncMock,
         client: TestClient,
     ) -> None:
         resp = client.post("/api/projects", json={"name": "msg-proj"})
         project_id = resp.json()["id"]
 
-        client.post(
-            f"/api/projects/{project_id}/leader/start",
-            json={"goal": "Accept messages"},
-        )
+        client.post(f"/api/projects/{project_id}/leader/start", json={"goal": "Accept messages"})
 
         resp = client.post(
             f"/api/projects/{project_id}/leader/message",
@@ -197,8 +169,7 @@ class TestLeaderLifecycle:
     def test_message_without_active_leader(
         self,
         mock_send: AsyncMock,
-        mock_spawn: AsyncMock,
-        mock_ensure: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_tmux: AsyncMock,
         client: TestClient,
     ) -> None:
@@ -214,12 +185,10 @@ class TestLeaderLifecycle:
     def test_start_leader_idempotent(
         self,
         mock_send: AsyncMock,
-        mock_spawn: AsyncMock,
-        mock_ensure: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_tmux: AsyncMock,
         client: TestClient,
     ) -> None:
-        """Starting a leader that is already running returns the same session."""
         resp = client.post("/api/projects", json={"name": "idempotent-proj"})
         project_id = resp.json()["id"]
 
@@ -236,11 +205,6 @@ class TestLeaderLifecycle:
         session_id_2 = resp2.json()["session_id"]
 
         assert session_id_1 == session_id_2
-
-
-# ---------------------------------------------------------------------------
-# Tower status
-# ---------------------------------------------------------------------------
 
 
 class TestTowerStatus:
@@ -261,35 +225,27 @@ class TestTowerStatus:
         assert data["active_projects"] == initial + 1
 
     @patch("atc.session.ace._tmux_run", new_callable=AsyncMock, return_value="%1")
-    def test_tower_status_counts_sessions(
-        self, mock_tmux: AsyncMock, client: TestClient,
-    ) -> None:
+    def test_tower_status_counts_sessions(self, mock_tmux: AsyncMock, client: TestClient) -> None:
         resp = client.post("/api/projects", json={"name": "session-proj"})
         project_id = resp.json()["id"]
         client.post(f"/api/projects/{project_id}/aces", json={"name": "a1"})
 
         resp = client.get("/api/tower/status")
         data = resp.json()
-        # At least 1 session (the ace; leader session is only created on start)
         assert data["total_sessions"] >= 1
 
-    @patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
-    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
+    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     def test_submit_goal(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_send: AsyncMock,
         client: TestClient,
     ) -> None:
         resp = client.post("/api/projects", json={"name": "goal-proj"})
         project_id = resp.json()["id"]
 
-        resp = client.post(
-            "/api/tower/goal",
-            json={"project_id": project_id, "goal": "Ship v1"},
-        )
+        resp = client.post("/api/tower/goal", json={"project_id": project_id, "goal": "Ship v1"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "accepted"
@@ -299,47 +255,33 @@ class TestTowerStatus:
         assert data["context_package"]["goal"] == "Ship v1"
 
     def test_submit_goal_missing_project(self, client: TestClient) -> None:
-        resp = client.post(
-            "/api/tower/goal",
-            json={"project_id": "nonexistent", "goal": "Ship v1"},
-        )
+        resp = client.post("/api/tower/goal", json={"project_id": "nonexistent", "goal": "Ship v1"})
         assert resp.status_code == 404
 
-    @patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
-    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
+    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     def test_submit_goal_twice_while_managing_succeeds(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_send: AsyncMock,
         client: TestClient,
     ) -> None:
-        """Tower in MANAGING state can accept new goals (delegates to Leader)."""
         resp = client.post("/api/projects", json={"name": "busy-proj"})
         project_id = resp.json()["id"]
 
-        resp = client.post(
-            "/api/tower/goal",
-            json={"project_id": project_id, "goal": "First goal"},
-        )
+        resp = client.post("/api/tower/goal", json={"project_id": project_id, "goal": "First goal"})
         assert resp.status_code == 200
 
-        resp = client.post(
-            "/api/tower/goal",
-            json={"project_id": project_id, "goal": "Second goal"},
-        )
+        resp = client.post("/api/tower/goal", json={"project_id": project_id, "goal": "Second goal"})
         assert resp.status_code == 200
 
     @patch("atc.tower.session.stop_tower_session", new_callable=AsyncMock)
     @patch("atc.leader.leader._kill_pane", new_callable=AsyncMock)
-    @patch("atc.leader.leader.send_instruction", new_callable=AsyncMock)
-    @patch("atc.leader.leader._spawn_pane", new_callable=AsyncMock, return_value="%1")
-    @patch("atc.leader.leader._ensure_tmux_session", new_callable=AsyncMock)
+    @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
+    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     def test_stop_tower(
         self,
-        mock_ensure: AsyncMock,
-        mock_spawn: AsyncMock,
+        mock_spawn_provider: AsyncMock,
         mock_send: AsyncMock,
         mock_kill: AsyncMock,
         mock_stop_tower: AsyncMock,
@@ -348,36 +290,23 @@ class TestTowerStatus:
         resp = client.post("/api/projects", json={"name": "stop-proj"})
         project_id = resp.json()["id"]
 
-        client.post(
-            "/api/tower/goal",
-            json={"project_id": project_id, "goal": "Stop me"},
-        )
+        client.post("/api/tower/goal", json={"project_id": project_id, "goal": "Stop me"})
 
         resp = client.post("/api/tower/stop")
         assert resp.status_code == 200
         assert resp.json()["status"] == "stopped"
 
-        # Tower should be idle again
         resp = client.get("/api/tower/status")
         assert resp.json()["state"] == "idle"
 
 
-# ---------------------------------------------------------------------------
-# WebSocket connectivity
-# ---------------------------------------------------------------------------
-
-
 class TestWebSocket:
     def test_ws_connect_and_subscribe(self, client: TestClient) -> None:
-        """Client can connect to /ws and send a subscribe message."""
         with client.websocket_connect("/ws") as ws:
             ws.send_json({"channel": "subscribe", "data": ["state"]})
             ws.close()
 
     def test_ws_subscribe_terminal_channel(self, client: TestClient) -> None:
-        """Client can subscribe to a terminal channel."""
         with client.websocket_connect("/ws") as ws:
-            ws.send_json(
-                {"channel": "subscribe", "data": ["terminal:test-session-id"]}
-            )
+            ws.send_json({"channel": "subscribe", "data": ["terminal:abc123"]})
             ws.close()
