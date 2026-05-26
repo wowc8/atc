@@ -4,6 +4,7 @@ import json
 import sys
 from typing import Any, TextIO
 
+from atc.orchestration.errors import OrchestrationException
 from atc.orchestration.models import (
     CancelSessionRequest,
     ListOperationsRequest,
@@ -36,37 +37,37 @@ class MCPServer:
             {"name": "cancel_session", "description": "Cancel or stop an orchestration session", "inputSchema": {"type": "object", "required": ["session_id"]}},
         ]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         if name == "list_sessions":
             result = await self._service.list_sessions(ListSessionsRequest.model_validate(arguments))
-            return {"content": [item.model_dump(mode="json") for item in result]}
+            return [item.model_dump(mode="json") for item in result]
         if name == "get_session":
             result = await self._service.get_session(arguments["session_id"])
-            return {"content": result.model_dump(mode="json")}
+            return result.model_dump(mode="json")
         if name == "list_operations":
             result = await self._service.list_operations(ListOperationsRequest.model_validate(arguments))
-            return {"content": [item.model_dump(mode="json") for item in result]}
+            return [item.model_dump(mode="json") for item in result]
         if name == "get_operation":
             result = await self._service.get_operation(arguments["operation_id"])
-            return {"content": result.model_dump(mode="json")}
+            return result.model_dump(mode="json")
         if name == "list_session_events":
             result = await self._service.list_session_events(arguments["session_id"], limit=arguments.get("limit"))
-            return {"content": [item.model_dump(mode="json") for item in result]}
+            return [item.model_dump(mode="json") for item in result]
         if name == "spawn_leader":
             result = await self._service.spawn_leader(SpawnLeaderRequest.model_validate(arguments))
-            return {"content": result.model_dump(mode="json")}
+            return result.model_dump(mode="json")
         if name == "spawn_ace":
             result = await self._service.spawn_ace(SpawnAceRequest.model_validate(arguments))
-            return {"content": result.model_dump(mode="json")}
+            return result.model_dump(mode="json")
         if name == "send_instruction":
             result = await self._service.send_instruction(SendInstructionRequest.model_validate(arguments))
-            return {"content": result.model_dump(mode="json")}
+            return result.model_dump(mode="json")
         if name == "wait_for_session":
             result = await self._service.wait_for_session(WaitForSessionRequest.model_validate(arguments))
-            return {"content": result.model_dump(mode="json")}
+            return result.model_dump(mode="json")
         if name == "cancel_session":
             result = await self._service.cancel_session(CancelSessionRequest.model_validate(arguments))
-            return {"content": None if result is None else result.model_dump(mode="json")}
+            return None if result is None else result.model_dump(mode="json")
         raise ValueError(f"Unknown MCP tool: {name}")
 
 
@@ -76,18 +77,41 @@ class MCPStdioServer:
         self._stdin = stdin or sys.stdin
         self._stdout = stdout or sys.stdout
 
+    def _success_response(self, request_id: Any, result: Any) -> dict[str, Any]:
+        return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+    def _error_response(self, request_id: Any, code: int, message: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+        if data is not None:
+            payload["error"]["data"] = data
+        return payload
+
     async def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        request_id = message.get("id")
         method = message.get("method")
-        if method == "tools/list":
-            return {"tools": self._server.list_tools()}
-        if method == "tools/call":
-            params = message.get("params") or {}
-            name = params.get("name")
-            arguments = params.get("arguments") or {}
-            if not name:
-                raise ValueError("tools/call requires params.name")
-            return await self._server.call_tool(name, arguments)
-        raise ValueError(f"Unknown MCP method: {method}")
+        try:
+            if method == "tools/list":
+                return self._success_response(request_id, {"tools": self._server.list_tools()})
+            if method == "tools/call":
+                params = message.get("params") or {}
+                name = params.get("name")
+                arguments = params.get("arguments") or {}
+                if not name:
+                    return self._error_response(request_id, -32602, "tools/call requires params.name")
+                result = await self._server.call_tool(name, arguments)
+                return self._success_response(request_id, {"content": result})
+            return self._error_response(request_id, -32601, f"Unknown MCP method: {method}")
+        except OrchestrationException as exc:
+            return self._error_response(
+                request_id,
+                -32001,
+                exc.message,
+                {"code": str(exc.code.value).lower(), "retryable": exc.retryable, "details": exc.details},
+            )
+        except ValueError as exc:
+            return self._error_response(request_id, -32602, str(exc))
+        except Exception as exc:
+            return self._error_response(request_id, -32000, str(exc))
 
     async def run_once(self) -> bool:
         line = self._stdin.readline()
