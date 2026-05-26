@@ -3,14 +3,12 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LeaderConsole from "../LeaderConsole";
 import { renderWithProviders } from "../../../test/helpers";
-import type { Leader } from "../../../types";
+import type { Leader, Project } from "../../../types";
 
-// Mock useTerminal to avoid xterm.js dependencies
 vi.mock("../../../hooks/useTerminal", () => ({
   useTerminal: () => ({ attachRef: vi.fn() }),
 }));
 
-// Mock WebSocket
 class MockWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((e: MessageEvent) => void) | null = null;
@@ -50,6 +48,18 @@ const planningLeader: Leader = {
   ...idleLeader,
   status: "planning",
   session_id: "sess-2",
+};
+
+const codexProject: Project = {
+  id: "proj-1",
+  name: "Codex Project",
+  description: null,
+  repo_path: null,
+  github_repo: null,
+  agent_provider: "codex",
+  status: "active",
+  created_at: "2024-01-01T00:00:00Z",
+  updated_at: "2024-01-01T00:00:00Z",
 };
 
 describe("LeaderConsole", () => {
@@ -153,10 +163,8 @@ describe("LeaderConsole", () => {
       <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={onRefresh} />,
     );
 
-    // Click the Stop button (wrapped in ConfirmPopover)
     await user.click(screen.getByText("Stop"));
 
-    // Find and click the confirm button inside the popover
     const confirmButtons = screen.getAllByText("Stop");
     const confirmBtn = confirmButtons.find(
       (el) => el.closest(".confirm-popover__confirm") !== null,
@@ -186,7 +194,14 @@ describe("LeaderConsole", () => {
     await user.click(screen.getByText("Start"));
     expect(screen.getByText("Starting...")).toBeInTheDocument();
 
-    // Resolve to clean up
     resolvePost(new Response(JSON.stringify({ status: "started" }), { status: 200 }));
+  });
+
+  it("treats codex as a terminal-backed provider", () => {
+    renderWithProviders(
+      <LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} project={codexProject} />,
+      { initialState: { projects: [codexProject] } },
+    );
+    expect(screen.queryByLabelText("Goal (optional)")).not.toBeInTheDocument();
   });
 });

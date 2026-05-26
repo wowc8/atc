@@ -34,7 +34,7 @@ describe("TowerConsole", () => {
     expect(screen.getByTestId("tower-console-start")).toHaveTextContent("Start");
   });
 
-  it("shows goal input and project select when idle", () => {
+  it("shows goal input and project select when idle for non-terminal providers", () => {
     renderWithProviders(<TowerConsole />);
     expect(screen.getByTestId("tower-console-goal")).toBeInTheDocument();
     expect(screen.getByTestId("tower-console-project")).toBeInTheDocument();
@@ -42,7 +42,6 @@ describe("TowerConsole", () => {
 
   it("shows status badge", () => {
     renderWithProviders(<TowerConsole />);
-    // The status badge should render with the brain status
     expect(screen.getByText("idle")).toBeInTheDocument();
   });
 
@@ -53,7 +52,27 @@ describe("TowerConsole", () => {
 
   it("disables Start when no project is selected", () => {
     renderWithProviders(<TowerConsole />);
-    // No projects available, so no project is selected
     expect(screen.getByTestId("tower-console-start")).toBeDisabled();
+  });
+
+  it("treats codex as a terminal-backed provider", () => {
+    renderWithProviders(<TowerConsole />, {
+      initialState: {
+        projects: [
+          {
+            id: "proj-1",
+            name: "Codex Project",
+            description: null,
+            repo_path: null,
+            github_repo: null,
+            agent_provider: "codex",
+            status: "active",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        ],
+      },
+    });
+    expect(screen.queryByTestId("tower-console-goal")).not.toBeInTheDocument();
   });
 });
