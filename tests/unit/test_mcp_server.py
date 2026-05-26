@@ -44,7 +44,7 @@ async def test_call_tool_delegates_spawn_leader() -> None:
         'goal': 'Ship it',
         'idempotency_key': 'goal-1',
     })
-    assert result['content']['operation_id'] == 'goal-1'
+    assert result['operation_id'] == 'goal-1'
     service.spawn_leader.assert_awaited_once()
 
 
@@ -61,7 +61,7 @@ async def test_call_tool_delegates_cancel_session() -> None:
         'session_id': 'ace-1',
         'force': False,
     })
-    assert result['content']['id'] == 'ace-1'
+    assert result['id'] == 'ace-1'
     service.cancel_session.assert_awaited_once()
 
 
@@ -71,5 +71,5 @@ async def test_call_tool_delegates_list_operations() -> None:
     service.list_operations.return_value = []
     server = MCPServer(service)
     result = await server.call_tool('list_operations', {'limit': 5})
-    assert result['content'] == []
+    assert result == []
     service.list_operations.assert_awaited_once()
