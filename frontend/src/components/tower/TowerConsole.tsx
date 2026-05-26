@@ -22,16 +22,31 @@ export default function TowerConsole() {
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
+  const activeProject = projects.find((p) => p.status === "active");
+  const selectedProject = projects.find((p) => p.id === projectId) ?? activeProject;
+  const activeTowerProject = projects.find((p) => p.id === towerDetail.current_project_id) ?? null;
+  const terminalBackedProviders = new Set(["claude_code", "codex"]);
+
+  const selectedProvider = selectedProject?.agent_provider ?? null;
+  const activeTowerProvider = activeTowerProject?.agent_provider ?? null;
+  const isTerminalProvider = selectedProvider !== null && terminalBackedProviders.has(selectedProvider);
+  const towerSessionProvider = towerDetail.current_session_id ? activeTowerProvider : null;
+  const towerProviderMismatch = Boolean(
+    towerDetail.current_session_id &&
+      selectedProject &&
+      activeTowerProject &&
+      selectedProvider &&
+      towerSessionProvider &&
+      selectedProject.id !== activeTowerProject.id &&
+      selectedProvider !== towerSessionProvider,
+  );
+
   const isRunning =
     towerDetail.state === "planning" || towerDetail.state === "managing";
   const isIdle =
     towerDetail.state === "idle" ||
     towerDetail.state === "complete" ||
     towerDetail.state === "error";
-
-  // Check if the default project uses claude_code provider
-  const activeProject = projects.find((p) => p.status === "active");
-  const isTerminalProvider = activeProject?.agent_provider === "claude_code" || activeProject?.agent_provider === "codex";
 
   const terminalChannel = towerDetail.current_session_id
     ? `terminal:${towerDetail.current_session_id}`
@@ -42,13 +57,10 @@ export default function TowerConsole() {
     enabled: (isRunning || (isTerminalProvider && !!terminalChannel)) && !!terminalChannel,
   });
 
-  // Default to first active project
   if (!projectId && projects.length > 0) {
     if (activeProject) setProjectId(activeProject.id);
   }
 
-  // Auto-start for claude_code provider on app load.
-  // Respects userStopped ref to prevent re-starting after manual Stop.
   useEffect(() => {
     if (isTerminalProvider && isIdle && !loading && !autoStarted.current && !userStopped.current && projectId) {
       autoStarted.current = true;
@@ -62,18 +74,16 @@ export default function TowerConsole() {
     setLoading(true);
     try {
       if (isTerminalProvider) {
-        // For terminal-backed CLI providers: start Tower's own session
         const res = await api.post<{ session_id?: string }>("/tower/start", {
           project_id: projectId,
         });
         if (res.session_id) {
           dispatch({
             type: "SET_TOWER_DETAIL",
-            payload: { current_session_id: res.session_id },
+            payload: { current_session_id: res.session_id, current_project_id: projectId },
           });
         }
       } else {
-        // For other providers: submit a goal to start the Leader
         const res = await api.post<{ session_id?: string }>("/tower/goal", {
           project_id: projectId,
           goal: goal.trim() || null,
@@ -82,7 +92,7 @@ export default function TowerConsole() {
         if (res.session_id) {
           dispatch({
             type: "SET_TOWER_DETAIL",
-            payload: { current_session_id: res.session_id },
+            payload: { current_session_id: res.session_id, current_project_id: projectId },
           });
         }
       }
@@ -94,8 +104,6 @@ export default function TowerConsole() {
   }
 
   async function handleStop() {
-    // Set userStopped BEFORE any state changes to prevent the auto-start
-    // useEffect from firing during the async gap or re-render.
     userStopped.current = true;
     setLoading(true);
     try {
@@ -105,6 +113,7 @@ export default function TowerConsole() {
         payload: {
           state: "idle",
           current_session_id: null,
+          current_project_id: null,
           leader_session_id: null,
           current_goal: null,
         },
@@ -112,6 +121,36 @@ export default function TowerConsole() {
     } catch (err) {
       console.error("Failed to stop Tower:", err);
       userStopped.current = false;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRestartWithSelectedProvider() {
+    if (!projectId || !selectedProvider) return;
+    userStopped.current = false;
+    setLoading(true);
+    try {
+      await api.patch(`/projects/${projectId}/agent-provider`, {
+        agent_provider: selectedProvider,
+      });
+      if (towerDetail.current_session_id) {
+        await api.post("/tower/stop");
+      }
+      const res = await api.post<{ session_id?: string }>("/tower/start", {
+        project_id: projectId,
+      });
+      dispatch({
+        type: "SET_TOWER_DETAIL",
+        payload: {
+          current_session_id: res.session_id ?? null,
+          current_project_id: projectId,
+          current_goal: null,
+          leader_session_id: null,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to restart Tower with selected provider:", err);
     } finally {
       setLoading(false);
     }
@@ -129,7 +168,6 @@ export default function TowerConsole() {
 
   return (
     <div className="tower-console" data-testid="tower-console">
-      {/* Header */}
       <div className="tower-console__header">
         <h3>Tower</h3>
         <div className="tower-console__controls">
@@ -173,7 +211,20 @@ export default function TowerConsole() {
         </div>
       </div>
 
-      {/* Idle: goal form (only for non-claude_code providers) */}
+      {towerProviderMismatch && (
+        <div className="tower-console__error" data-testid="tower-console-provider-mismatch">
+          Tower is currently running with <strong>{towerSessionProvider}</strong>, but the selected project is set to <strong>{selectedProvider}</strong>.
+          <button
+            className="btn btn-sm"
+            onClick={handleRestartWithSelectedProvider}
+            disabled={loading}
+            data-testid="tower-console-restart-provider"
+          >
+            {loading ? "Applying..." : "Apply to Tower and restart"}
+          </button>
+        </div>
+      )}
+
       {isIdle && !isTerminalProvider && (
         <div className="tower-console__start-form">
           <div className="form-group">
@@ -213,12 +264,10 @@ export default function TowerConsole() {
         </div>
       )}
 
-      {/* Claude Code auto-starting indicator */}
       {isIdle && isTerminalProvider && loading && (
         <div className="tower-console__loading">Starting terminal...</div>
       )}
 
-      {/* Current goal display */}
       {towerDetail.current_goal && (
         <p
           className="tower-console__goal"
@@ -228,7 +277,6 @@ export default function TowerConsole() {
         </p>
       )}
 
-      {/* Error state */}
       {towerDetail.state === "error" && (
         <div className="tower-console__error">
           Tower encountered an error.
@@ -241,7 +289,6 @@ export default function TowerConsole() {
         </div>
       )}
 
-      {/* Running: terminal (input via xterm.js) */}
       {(isRunning || (isTerminalProvider && !!terminalChannel)) && (
         <div
           className="tower-console__terminal"

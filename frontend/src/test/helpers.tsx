@@ -1,8 +1,9 @@
+import React, { type ReactNode } from "react";
 import { render, type RenderOptions } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AppProvider } from "../context/AppContext";
-import type { ReactNode } from "react";
+import { AppProvider, AppContext } from "../context/AppContext";
+import type { AppState } from "../types";
 
 function createTestQueryClient() {
   return new QueryClient({
@@ -14,30 +15,49 @@ function createTestQueryClient() {
 
 interface WrapperOptions {
   initialRoute?: string;
+  initialState?: Partial<AppState>;
 }
 
-function createWrapper({ initialRoute = "/" }: WrapperOptions = {}) {
+function createWrapper({ initialRoute = "/", initialState }: WrapperOptions = {}) {
   const queryClient = createTestQueryClient();
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
         <AppProvider>
-          <MemoryRouter initialEntries={[initialRoute]}>
-            {children}
-          </MemoryRouter>
+          <AppContextStateInjector initialState={initialState}>
+            <MemoryRouter initialEntries={[initialRoute]}>
+              {children}
+            </MemoryRouter>
+          </AppContextStateInjector>
         </AppProvider>
       </QueryClientProvider>
     );
   };
 }
 
+function AppContextStateInjector({
+  children,
+  initialState,
+}: {
+  children: ReactNode;
+  initialState?: Partial<AppState>;
+}) {
+  const ctx = React.useContext(AppContext);
+  React.useEffect(() => {
+    if (ctx && initialState) {
+      ctx.dispatch({ type: "SET_STATE", payload: initialState });
+    }
+  }, [ctx, initialState]);
+  return <>{children}</>;
+}
+
 export function renderWithProviders(
   ui: React.ReactElement,
   options?: RenderOptions & WrapperOptions,
 ) {
-  const { initialRoute, ...renderOptions } = options ?? {};
+  const { initialRoute, initialState, ...renderOptions } = options ?? {};
   return render(ui, {
-    wrapper: createWrapper({ initialRoute }),
+    wrapper: createWrapper({ initialRoute, initialState }),
     ...renderOptions,
   });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import TowerConsole from "../TowerConsole";
 import { renderWithProviders } from "../../../test/helpers";
 
@@ -74,5 +74,45 @@ describe("TowerConsole", () => {
       },
     });
     expect(screen.queryByTestId("tower-console-goal")).not.toBeInTheDocument();
+  });
+
+  it("does not show a mismatch warning just because a different project is selected", () => {
+    renderWithProviders(<TowerConsole />, {
+      initialState: {
+        projects: [
+          {
+            id: "proj-1",
+            name: "Codex Project",
+            description: null,
+            repo_path: null,
+            github_repo: null,
+            agent_provider: "codex",
+            status: "active",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          {
+            id: "proj-2",
+            name: "Claude Project",
+            description: null,
+            repo_path: null,
+            github_repo: null,
+            agent_provider: "claude_code",
+            status: "paused",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        ],
+        towerDetail: {
+          state: "managing",
+          current_goal: null,
+          current_project_id: "proj-2",
+          current_session_id: "tower-1",
+          leader_session_id: null,
+          leader_activity_preview: null,
+        },
+      },
+    });
+    expect(screen.queryByTestId("tower-console-provider-mismatch")).not.toBeInTheDocument();
   });
 });
