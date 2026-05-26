@@ -59,6 +59,24 @@ python3 -m uvicorn atc.api.app:create_app --factory --reload --port 8420
 cd frontend && npm run dev
 ```
 
+## MCP Entry Point
+
+ATC now includes a thin MCP-oriented stdio entrypoint on top of the orchestration boundary:
+
+```bash
+atc-mcp
+```
+
+It currently supports line-delimited JSON requests for `tools/list` and `tools/call`.
+
+Example:
+
+```bash
+printf '{"id":1,"method":"tools/list"}\n' | atc-mcp
+```
+
+See [docs/mcp.md](docs/mcp.md) for request/response examples and the current tool surface.
+
 ## Configuration
 
 Runtime config lives in `config.yaml`. Override locally with `config.local.yaml` (gitignored).

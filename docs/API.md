@@ -75,6 +75,34 @@ Notes:
 - `send_instruction` deliberately reuses the existing provider-owned delivery path instead of creating a second prompt-delivery implementation.
 - `wait` is currently a polling contract over session state, which keeps the API stable while backend event plumbing evolves.
 
+## MCP
+
+ATC also exposes a thin MCP-oriented stdio interface through `atc-mcp`.
+
+Current request methods:
+
+```
+tools/list
+tools/call
+```
+
+Current tool names:
+
+```
+list_sessions
+get_session
+list_operations
+get_operation
+list_session_events
+spawn_leader
+spawn_ace
+send_instruction
+wait_for_session
+cancel_session
+```
+
+See `docs/mcp.md` for example request/response envelopes and usage notes.
+
 ## Usage & Budget
 
 ```
