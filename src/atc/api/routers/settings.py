@@ -175,7 +175,6 @@ async def get_agent_provider(request: Request) -> AgentProviderResponse:
         tmux_session=cfg.tmux_session,
         claude_command=cfg.claude_command,
         codex_command=cfg.codex_command,
-        codex_command=cfg.codex_command,
     )
 
 
