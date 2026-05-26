@@ -376,7 +376,9 @@ async def create_ace(
             try:
                 from atc.agents.factory import create_provider
 
-                _provider = create_provider("claude_code")
+                project = await db_ops.get_project(conn, project_id)
+                provider_name = project.agent_provider if project and project.agent_provider else "claude_code"
+                _provider = create_provider(provider_name)
                 await _provider.prepare_workspace(
                     session.id, working_dir=effective_working_dir
                 )

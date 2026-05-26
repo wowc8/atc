@@ -23,6 +23,7 @@ from atc.agents.base import (
     SessionStatus,
 )
 from atc.agents.claude_provider import ClaudeCodeProvider
+from atc.agents.codex_provider import CodexProvider
 from atc.agents.factory import (
     _LAUNCH_COMMANDS,
     _METADATA,
@@ -147,6 +148,9 @@ class TestProtocolCompliance:
     def test_opencode_is_agent_provider(self) -> None:
         assert isinstance(OpenCodeProvider(), AgentProvider)
 
+    def test_codex_is_agent_provider(self) -> None:
+        assert isinstance(CodexProvider(), AgentProvider)
+
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -158,6 +162,7 @@ class TestFactory:
         names = list_providers()
         assert "claude_code" in names
         assert "opencode" in names
+        assert "codex" in names
 
     def test_create_claude_code(self) -> None:
         provider = create_provider("claude_code")
@@ -166,6 +171,10 @@ class TestFactory:
     def test_create_opencode(self) -> None:
         provider = create_provider("opencode", base_url="http://localhost:9999")
         assert provider.name == "opencode"
+
+    def test_create_codex(self) -> None:
+        provider = create_provider("codex")
+        assert provider.name == "codex"
 
     def test_create_unknown_raises(self) -> None:
         with pytest.raises(ProviderError, match="Unknown provider"):
@@ -595,6 +604,7 @@ class TestConfigIntegration:
         cfg = AgentProviderConfig()
         assert cfg.default == "claude_code"
         assert cfg.opencode_url == "http://localhost:4096"
+        assert cfg.codex_command == "codex"
         assert cfg.tmux_session == "atc"
 
     def test_settings_has_agent_provider(self) -> None:
@@ -602,6 +612,7 @@ class TestConfigIntegration:
 
         settings = Settings()
         assert settings.agent_provider.default == "claude_code"
+        assert settings.agent_provider.codex_command == "codex"
 
     def test_create_provider_from_config(self) -> None:
         from atc.config import AgentProviderConfig

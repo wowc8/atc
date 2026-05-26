@@ -28,6 +28,7 @@ _METADATA: dict[str, ProviderMetadata] = {}
 _LAUNCH_COMMANDS: dict[str, str] = {
     "claude_code": "claude --dangerously-skip-permissions",
     "opencode": "opencode",
+    "codex": "codex",
 }
 _SCANNED_DIRS: set[str] = set()
 
@@ -61,6 +62,12 @@ def create_provider(name: str, **kwargs: Any) -> AgentProvider:
         try:
             settings = load_settings()
             kwargs = {"claude_command": settings.agent_provider.claude_command}
+        except Exception:
+            kwargs = {}
+    if not kwargs and name == "codex":
+        try:
+            settings = load_settings()
+            kwargs = {"codex_command": settings.agent_provider.codex_command}
         except Exception:
             kwargs = {}
     provider: AgentProvider = cls(**kwargs)
@@ -162,6 +169,7 @@ def _register_builtins() -> None:
     """Register the built-in providers (claude_code, opencode)."""
     from atc.agents.claude_provider import ClaudeCodeProvider
     from atc.agents.opencode_provider import OpenCodeProvider
+    from atc.agents.codex_provider import CodexProvider
 
     register_provider(
         "claude_code",
@@ -170,6 +178,16 @@ def _register_builtins() -> None:
             name="claude_code",
             version="1.0.0",
             description="Claude Code via tmux panes",
+            author="ATC",
+        ),
+    )
+    register_provider(
+        "codex",
+        CodexProvider,
+        metadata=ProviderMetadata(
+            name="codex",
+            version="1.0.0",
+            description="Codex CLI via tmux panes",
             author="ATC",
         ),
     )
