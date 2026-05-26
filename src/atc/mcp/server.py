@@ -23,6 +23,17 @@ class MCPServer:
     def __init__(self, service: OrchestrationService) -> None:
         self._service = service
 
+    def server_info(self) -> dict[str, Any]:
+        return {
+            "name": "atc-mcp",
+            "version": "0.1.0",
+        }
+
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "tools": {"listChanged": False},
+        }
+
     def list_tools(self) -> list[dict[str, Any]]:
         return [
             {"name": "list_sessions", "description": "List normalized orchestration sessions", "inputSchema": {"type": "object", "properties": {"project_id": {"type": "string"}, "role": {"type": "string"}, "active_only": {"type": "boolean"}, "limit": {"type": "integer"}}}},
@@ -76,6 +87,7 @@ class MCPStdioServer:
         self._server = server
         self._stdin = stdin or sys.stdin
         self._stdout = stdout or sys.stdout
+        self._initialized = False
 
     def _success_response(self, request_id: Any, result: Any) -> dict[str, Any]:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -86,10 +98,25 @@ class MCPStdioServer:
             payload["error"]["data"] = data
         return payload
 
-    async def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
+    async def handle_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
         request_id = message.get("id")
         method = message.get("method")
         try:
+            if method == "initialize":
+                self._initialized = True
+                return self._success_response(
+                    request_id,
+                    {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": self._server.capabilities(),
+                        "serverInfo": self._server.server_info(),
+                    },
+                )
+            if method == "notifications/initialized":
+                self._initialized = True
+                return None
+            if not self._initialized:
+                return self._error_response(request_id, -32002, "Server not initialized")
             if method == "tools/list":
                 return self._success_response(request_id, {"tools": self._server.list_tools()})
             if method == "tools/call":
@@ -121,6 +148,7 @@ class MCPStdioServer:
         if not line:
             return True
         response = await self.handle_message(json.loads(line))
-        self._stdout.write(json.dumps(response) + "\n")
-        self._stdout.flush()
+        if response is not None:
+            self._stdout.write(json.dumps(response) + "\n")
+            self._stdout.flush()
         return True
