@@ -28,6 +28,8 @@ from atc.agents.base import (
     SessionStatus,
 )
 
+from atc.session.ace import _ensure_tmux_session
+
 logger = logging.getLogger(__name__)
 
 _TMUX_CMD = "tmux"
@@ -97,6 +99,7 @@ class OpenCodeProvider:
         if shutil.which(_TMUX_CMD) is None:
             raise ProviderError(self.name, "tmux is not installed or not on PATH")
 
+        await _ensure_tmux_session(self._tmux_session)
         server_session = f"{self._tmux_session}-opencode-server"
 
         # Check if the tmux session already exists
