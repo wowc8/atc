@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+import sys
+from typing import Any, TextIO
 
 from atc.orchestration.models import (
     CancelSessionRequest,
@@ -57,3 +59,44 @@ class MCPServer:
             result = await self._service.cancel_session(CancelSessionRequest.model_validate(arguments))
             return {"content": None if result is None else result.model_dump(mode="json")}
         raise ValueError(f"Unknown MCP tool: {name}")
+
+
+class MCPStdioServer:
+    """Tiny stdio transport for the current MCP adapter.
+
+    Input lines are JSON objects with:
+    - {"method": "tools/list"}
+    - {"method": "tools/call", "params": {"name": ..., "arguments": {...}}}
+
+    Output is one JSON object per line.
+    """
+
+    def __init__(self, server: MCPServer, *, stdin: TextIO | None = None, stdout: TextIO | None = None) -> None:
+        self._server = server
+        self._stdin = stdin or sys.stdin
+        self._stdout = stdout or sys.stdout
+
+    async def handle_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        method = message.get("method")
+        if method == "tools/list":
+            return {"tools": self._server.list_tools()}
+        if method == "tools/call":
+            params = message.get("params") or {}
+            name = params.get("name")
+            arguments = params.get("arguments") or {}
+            if not name:
+                raise ValueError("tools/call requires params.name")
+            return await self._server.call_tool(name, arguments)
+        raise ValueError(f"Unknown MCP method: {method}")
+
+    async def run_once(self) -> bool:
+        line = self._stdin.readline()
+        if line == "":
+            return False
+        line = line.strip()
+        if not line:
+            return True
+        response = await self.handle_message(json.loads(line))
+        self._stdout.write(json.dumps(response) + "\n")
+        self._stdout.flush()
+        return True

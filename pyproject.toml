@@ -40,6 +40,7 @@ backup = [
 [project.scripts]
 atc-server = "atc.api.app:main"
 atc = "atc.cli.main:main"
+atc-mcp = "atc.mcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/atc"]
