@@ -141,6 +141,7 @@ class AgentProviderResponse(BaseModel):
     opencode_url: str
     tmux_session: str
     claude_command: str
+    codex_command: str
 
 
 class AgentProviderUpdateRequest(BaseModel):
@@ -150,6 +151,7 @@ class AgentProviderUpdateRequest(BaseModel):
     opencode_url: str | None = None
     tmux_session: str | None = None
     claude_command: str | None = None
+    codex_command: str | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -172,6 +174,8 @@ async def get_agent_provider(request: Request) -> AgentProviderResponse:
         opencode_url=cfg.opencode_url,
         tmux_session=cfg.tmux_session,
         claude_command=cfg.claude_command,
+        codex_command=cfg.codex_command,
+        codex_command=cfg.codex_command,
     )
 
 
@@ -200,12 +204,15 @@ async def update_agent_provider(
         cfg.tmux_session = body.tmux_session
     if body.claude_command is not None:
         cfg.claude_command = body.claude_command
+    if body.codex_command is not None:
+        cfg.codex_command = body.codex_command
 
     return AgentProviderResponse(
         default=cfg.default,
         opencode_url=cfg.opencode_url,
         tmux_session=cfg.tmux_session,
         claude_command=cfg.claude_command,
+        codex_command=cfg.codex_command,
     )
 
 
