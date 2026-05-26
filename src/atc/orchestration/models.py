@@ -143,3 +143,31 @@ class SessionEvent(BaseModel):
     event_type: str
     created_at: str
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ListOperationsRequest(BaseModel):
+    operation_type: str | None = None
+    session_id: str | None = None
+    limit: int | None = None
+
+
+class OperationRecord(BaseModel):
+    operation_id: str
+    operation_type: str
+    session_id: str | None = None
+    status: str
+    request_payload: dict[str, Any]
+    response_payload: dict[str, Any] | None = None
+    created_at: str
+    updated_at: str
+
+
+class SessionEventRecord(BaseModel):
+    id: str
+    level: str
+    category: str
+    message: str
+    created_at: str
+    detail: dict[str, Any] | None = None
+    project_id: str | None = None
+    session_id: str | None = None

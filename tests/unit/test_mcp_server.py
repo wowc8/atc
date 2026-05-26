@@ -16,12 +16,16 @@ async def test_list_tools_includes_orchestration_surface() -> None:
     assert names == [
         'list_sessions',
         'get_session',
+        'list_operations',
+        'get_operation',
+        'list_session_events',
         'spawn_leader',
         'spawn_ace',
         'send_instruction',
         'wait_for_session',
         'cancel_session',
     ]
+    assert all('inputSchema' in tool for tool in server.list_tools())
 
 
 @pytest.mark.asyncio
@@ -59,3 +63,13 @@ async def test_call_tool_delegates_cancel_session() -> None:
     })
     assert result['content']['id'] == 'ace-1'
     service.cancel_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_call_tool_delegates_list_operations() -> None:
+    service = AsyncMock()
+    service.list_operations.return_value = []
+    server = MCPServer(service)
+    result = await server.call_tool('list_operations', {'limit': 5})
+    assert result['content'] == []
+    service.list_operations.assert_awaited_once()
