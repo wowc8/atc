@@ -6,7 +6,7 @@ export interface Project {
   description: string | null;
   repo_path: string | null;
   github_repo: string | null;
-  agent_provider: "claude_code" | "opencode";
+  agent_provider: "claude_code" | "codex" | "opencode";
   status: "active" | "paused" | "archived";
   position?: number;
   created_at: string;
@@ -18,6 +18,7 @@ export interface AgentProviderConfig {
   opencode_url: string;
   tmux_session: string;
   claude_command: string;
+  codex_command: string;
 }
 
 export interface ProviderInfo {

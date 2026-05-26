@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { api } from "../../utils/api";
-import type { Project } from "../../types";
+import type { AgentProviderConfig, Project, ProviderInfo } from "../../types";
 import "./CreateProjectModal.css";
 
 const GITHUB_ORG_KEY = "atc:github_default_org";
@@ -20,11 +20,35 @@ export default function CreateProjectModal({
   const [description, setDescription] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
+  const [agentProvider, setAgentProvider] = useState<Project["agent_provider"]>("claude_code");
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
   const defaultOrg = localStorage.getItem(GITHUB_ORG_KEY) ?? "";
+
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const [providerList, providerConfig] = await Promise.all([
+          api.get<ProviderInfo[]>("/settings/providers"),
+          api.get<AgentProviderConfig>("/settings/agent-provider"),
+        ]);
+        if (!mounted) return;
+        setProviders(providerList);
+        if (providerConfig.default === "claude_code" || providerConfig.default === "codex" || providerConfig.default === "opencode") {
+          setAgentProvider(providerConfig.default);
+        }
+      } catch {
+        if (!mounted) return;
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -62,6 +86,7 @@ export default function CreateProjectModal({
         description: description.trim() || null,
         repo_path: repoPath.trim() || null,
         github_repo: githubRepo.trim() || null,
+        agent_provider: agentProvider,
       });
       onCreated(project);
       onClose();
@@ -112,6 +137,21 @@ export default function CreateProjectModal({
                 placeholder="What this project does..."
                 rows={2}
               />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="project-provider">Agent Provider</label>
+              <select
+                id="project-provider"
+                value={agentProvider}
+                onChange={(e) => setAgentProvider(e.target.value as Project["agent_provider"])}
+              >
+                {providers.map((provider) => (
+                  <option key={provider.name} value={provider.name}>
+                    {provider.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="form-group">

@@ -37,7 +37,7 @@ export default function LeaderConsole({
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
-  const isClaudeCode = project?.agent_provider === "claude_code";
+  const isTerminalProvider = project?.agent_provider === "claude_code" || project?.agent_provider === "codex";
 
   const isRunning =
     leader?.status === "planning" || leader?.status === "managing";
@@ -50,7 +50,7 @@ export default function LeaderConsole({
 
   const { attachRef } = useTerminal({
     channel: terminalChannel,
-    enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
+    enabled: (isRunning || (isTerminalProvider && !!terminalChannel)) && !!terminalChannel,
   });
 
   // Reset auto-start flag when the project changes so Leader
@@ -64,11 +64,11 @@ export default function LeaderConsole({
   // Respects userStopped ref to prevent re-starting after manual Stop.
   // Note: does NOT require `leader` to exist — handleStart() creates one if needed.
   useEffect(() => {
-    if (isClaudeCode && isIdle && !loading && !autoStarted.current && !userStopped.current) {
+    if (isTerminalProvider && isIdle && !loading && !autoStarted.current && !userStopped.current) {
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isClaudeCode, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isTerminalProvider, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
     userStopped.current = false;
@@ -170,7 +170,7 @@ export default function LeaderConsole({
         </div>
       )}
 
-      {!isRunning && !isClaudeCode && (
+      {!isRunning && !isTerminalProvider && (
         <div className="leader-console__start-form">
           <div className="form-group">
             <label htmlFor="leader-goal">Goal (optional)</label>
@@ -188,12 +188,12 @@ export default function LeaderConsole({
         </div>
       )}
 
-      {!isRunning && isClaudeCode && loading && (
+      {!isRunning && isTerminalProvider && loading && (
         <div className="leader-console__loading">Starting terminal...</div>
       )}
 
       {/* Terminal — always keep alive when running */}
-      {(isRunning || (isClaudeCode && !!terminalChannel)) && (
+      {(isRunning || (isTerminalProvider && !!terminalChannel)) && (
         <div className="leader-console__terminal" ref={attachRef} />
       )}
 

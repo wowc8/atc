@@ -31,7 +31,7 @@ export default function TowerConsole() {
 
   // Check if the default project uses claude_code provider
   const activeProject = projects.find((p) => p.status === "active");
-  const isClaudeCode = activeProject?.agent_provider === "claude_code";
+  const isTerminalProvider = activeProject?.agent_provider === "claude_code" || activeProject?.agent_provider === "codex";
 
   const terminalChannel = towerDetail.current_session_id
     ? `terminal:${towerDetail.current_session_id}`
@@ -39,7 +39,7 @@ export default function TowerConsole() {
 
   const { attachRef } = useTerminal({
     channel: terminalChannel,
-    enabled: (isRunning || (isClaudeCode && !!terminalChannel)) && !!terminalChannel,
+    enabled: (isRunning || (isTerminalProvider && !!terminalChannel)) && !!terminalChannel,
   });
 
   // Default to first active project
@@ -50,19 +50,19 @@ export default function TowerConsole() {
   // Auto-start for claude_code provider on app load.
   // Respects userStopped ref to prevent re-starting after manual Stop.
   useEffect(() => {
-    if (isClaudeCode && isIdle && !loading && !autoStarted.current && !userStopped.current && projectId) {
+    if (isTerminalProvider && isIdle && !loading && !autoStarted.current && !userStopped.current && projectId) {
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isClaudeCode, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isTerminalProvider, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
     if (!projectId) return;
     userStopped.current = false;
     setLoading(true);
     try {
-      if (isClaudeCode) {
-        // For claude_code: start Tower's own Claude Code session
+      if (isTerminalProvider) {
+        // For terminal-backed CLI providers: start Tower's own session
         const res = await api.post<{ session_id?: string }>("/tower/start", {
           project_id: projectId,
         });
@@ -174,7 +174,7 @@ export default function TowerConsole() {
       </div>
 
       {/* Idle: goal form (only for non-claude_code providers) */}
-      {isIdle && !isClaudeCode && (
+      {isIdle && !isTerminalProvider && (
         <div className="tower-console__start-form">
           <div className="form-group">
             <label htmlFor="tower-project">Project</label>
@@ -214,7 +214,7 @@ export default function TowerConsole() {
       )}
 
       {/* Claude Code auto-starting indicator */}
-      {isIdle && isClaudeCode && loading && (
+      {isIdle && isTerminalProvider && loading && (
         <div className="tower-console__loading">Starting terminal...</div>
       )}
 
@@ -242,7 +242,7 @@ export default function TowerConsole() {
       )}
 
       {/* Running: terminal (input via xterm.js) */}
-      {(isRunning || (isClaudeCode && !!terminalChannel)) && (
+      {(isRunning || (isTerminalProvider && !!terminalChannel)) && (
         <div
           className="tower-console__terminal"
           ref={attachRef}
