@@ -22,6 +22,7 @@ from atc.agents.base import (
     SessionStatus,
 )
 from atc.terminal.control import send_instruction_async
+from atc.session.ace import _ensure_tmux_session
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ class CodexProvider:
 
         if working_dir:
             await self.prepare_workspace(session_id, working_dir=working_dir, context_file=context_file)
+
+        await _ensure_tmux_session(self._tmux_session)
 
         tmux_args = [_TMUX_CMD, "new-window", "-t", self._tmux_session, "-d", "-P", "-F", "#{pane_id}"]
         if working_dir:

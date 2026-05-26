@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from atc.session.ace import (
     ATC_TMUX_SESSION,
     _capture_pane,
+    _ensure_tmux_session,
     _kill_pane,
     _spawn_pane,
     _tmux_run,
@@ -37,6 +38,7 @@ async def run_startup_smoke_test() -> HealthResult:
     pane_id: str | None = None
 
     try:
+        await _ensure_tmux_session(ATC_TMUX_SESSION)
         pane_id = await _spawn_pane(ATC_TMUX_SESSION, "bash")
 
         # Give bash a moment to start

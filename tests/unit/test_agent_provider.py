@@ -581,15 +581,19 @@ class TestOpenCodeProvider:
         mock_exec.side_effect = [
             # First: API check fails (server not running)
             _make_process(returncode=1, stderr=b"Connection refused"),
-            # Second: has-session check (session doesn't exist)
+            # Second: shared atc tmux session check (session doesn't exist)
             _make_process(returncode=1, stderr=b"no session"),
-            # Third: new-session to start opencode serve
+            # Third: create shared atc tmux session
             _make_process(returncode=0),
-            # Fourth: retry API check succeeds
+            # Fourth: opencode server session check (session doesn't exist)
+            _make_process(returncode=1, stderr=b"no session"),
+            # Fifth: new-session to start opencode serve
+            _make_process(returncode=0),
+            # Sixth: retry API check succeeds
             _make_process(stdout=b'{"sessions": []}'),
         ]
         await provider.ensure_server_running()
-        assert mock_exec.call_count == 4
+        assert mock_exec.call_count == 6
 
 
 # ---------------------------------------------------------------------------
