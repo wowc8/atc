@@ -6,6 +6,7 @@ from typing import Any, TextIO
 
 from atc.orchestration.models import (
     CancelSessionRequest,
+    ListOperationsRequest,
     ListSessionsRequest,
     SendInstructionRequest,
     SpawnAceRequest,
@@ -16,24 +17,23 @@ from atc.orchestration.service import OrchestrationService
 
 
 class MCPServer:
-    """Minimal MCP-facing adapter over the orchestration service.
-
-    This is intentionally not a full protocol transport yet. It is the first
-    contract slice that defines the MCP tool surface ATC intends to expose.
-    """
+    """Minimal MCP-facing adapter over the orchestration service."""
 
     def __init__(self, service: OrchestrationService) -> None:
         self._service = service
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [
-            {"name": "list_sessions", "description": "List normalized orchestration sessions"},
-            {"name": "get_session", "description": "Fetch a normalized orchestration session"},
-            {"name": "spawn_leader", "description": "Spawn a leader through Tower orchestration"},
-            {"name": "spawn_ace", "description": "Spawn an ace through orchestration"},
-            {"name": "send_instruction", "description": "Send an instruction to an orchestration session"},
-            {"name": "wait_for_session", "description": "Wait for a session to reach target orchestration statuses"},
-            {"name": "cancel_session", "description": "Cancel or stop an orchestration session"},
+            {"name": "list_sessions", "description": "List normalized orchestration sessions", "inputSchema": {"type": "object", "properties": {"project_id": {"type": "string"}, "role": {"type": "string"}, "active_only": {"type": "boolean"}, "limit": {"type": "integer"}}}},
+            {"name": "get_session", "description": "Fetch a normalized orchestration session", "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}}}},
+            {"name": "list_operations", "description": "List orchestration operations/history", "inputSchema": {"type": "object", "properties": {"operation_type": {"type": "string"}, "session_id": {"type": "string"}, "limit": {"type": "integer"}}}},
+            {"name": "get_operation", "description": "Fetch a single orchestration operation", "inputSchema": {"type": "object", "required": ["operation_id"], "properties": {"operation_id": {"type": "string"}}}},
+            {"name": "list_session_events", "description": "List app events for a session", "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}, "limit": {"type": "integer"}}}},
+            {"name": "spawn_leader", "description": "Spawn a leader through Tower orchestration", "inputSchema": {"type": "object", "required": ["project_id", "goal", "idempotency_key"]}},
+            {"name": "spawn_ace", "description": "Spawn an ace through orchestration", "inputSchema": {"type": "object", "required": ["project_id", "instruction", "idempotency_key"]}},
+            {"name": "send_instruction", "description": "Send an instruction to an orchestration session", "inputSchema": {"type": "object", "required": ["session_id", "instruction", "idempotency_key"]}},
+            {"name": "wait_for_session", "description": "Wait for a session to reach target orchestration statuses", "inputSchema": {"type": "object", "required": ["session_id", "target_statuses"]}},
+            {"name": "cancel_session", "description": "Cancel or stop an orchestration session", "inputSchema": {"type": "object", "required": ["session_id"]}},
         ]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -43,6 +43,15 @@ class MCPServer:
         if name == "get_session":
             result = await self._service.get_session(arguments["session_id"])
             return {"content": result.model_dump(mode="json")}
+        if name == "list_operations":
+            result = await self._service.list_operations(ListOperationsRequest.model_validate(arguments))
+            return {"content": [item.model_dump(mode="json") for item in result]}
+        if name == "get_operation":
+            result = await self._service.get_operation(arguments["operation_id"])
+            return {"content": result.model_dump(mode="json")}
+        if name == "list_session_events":
+            result = await self._service.list_session_events(arguments["session_id"], limit=arguments.get("limit"))
+            return {"content": [item.model_dump(mode="json") for item in result]}
         if name == "spawn_leader":
             result = await self._service.spawn_leader(SpawnLeaderRequest.model_validate(arguments))
             return {"content": result.model_dump(mode="json")}
@@ -62,15 +71,6 @@ class MCPServer:
 
 
 class MCPStdioServer:
-    """Tiny stdio transport for the current MCP adapter.
-
-    Input lines are JSON objects with:
-    - {"method": "tools/list"}
-    - {"method": "tools/call", "params": {"name": ..., "arguments": {...}}}
-
-    Output is one JSON object per line.
-    """
-
     def __init__(self, server: MCPServer, *, stdin: TextIO | None = None, stdout: TextIO | None = None) -> None:
         self._server = server
         self._stdin = stdin or sys.stdin

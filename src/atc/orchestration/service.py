@@ -9,11 +9,14 @@ from atc.leader import leader as leader_ops
 from atc.orchestration.errors import OrchestrationErrorCode, OrchestrationException
 from atc.orchestration.models import (
     CancelSessionRequest,
+    ListOperationsRequest,
+    OperationRecord,
     ListSessionsRequest,
     OperationAcceptedResponse,
     OrchestrationRole,
     OrchestrationStatus,
     SendInstructionRequest,
+    SessionEventRecord,
     SessionSummary,
     SpawnAceRequest,
     SpawnLeaderRequest,
@@ -36,6 +39,63 @@ class OrchestrationService:
     ) -> None:
         self._db = db
         self._tower_controller = tower_controller
+
+
+    async def list_operations(self, request: ListOperationsRequest | None = None) -> list[OperationRecord]:
+        request = request or ListOperationsRequest()
+        ops = await db_ops.list_orchestration_operations(
+            self._db,
+            operation_type=request.operation_type,
+            session_id=request.session_id,
+            limit=request.limit,
+        )
+        return [
+            OperationRecord(
+                operation_id=op.operation_id,
+                operation_type=op.operation_type,
+                session_id=op.session_id,
+                status=op.status,
+                request_payload=json.loads(op.request_payload),
+                response_payload=(json.loads(op.response_payload) if op.response_payload else None),
+                created_at=op.created_at,
+                updated_at=op.updated_at,
+            )
+            for op in ops
+        ]
+
+    async def get_operation(self, operation_id: str) -> OperationRecord:
+        op = await db_ops.get_orchestration_operation(self._db, operation_id)
+        if op is None:
+            raise OrchestrationException(
+                OrchestrationErrorCode.SESSION_NOT_FOUND,
+                f"Operation {operation_id} not found",
+            )
+        return OperationRecord(
+            operation_id=op.operation_id,
+            operation_type=op.operation_type,
+            session_id=op.session_id,
+            status=op.status,
+            request_payload=json.loads(op.request_payload),
+            response_payload=(json.loads(op.response_payload) if op.response_payload else None),
+            created_at=op.created_at,
+            updated_at=op.updated_at,
+        )
+
+    async def list_session_events(self, session_id: str, *, limit: int | None = None) -> list[SessionEventRecord]:
+        events = await db_ops.list_app_events(self._db, session_id=session_id, limit=limit)
+        return [
+            SessionEventRecord(
+                id=event.id,
+                level=event.level,
+                category=event.category,
+                message=event.message,
+                created_at=event.created_at,
+                detail=(json.loads(event.detail) if event.detail else None),
+                project_id=event.project_id,
+                session_id=event.session_id,
+            )
+            for event in events
+        ]
 
     async def get_session(self, session_id: str) -> SessionSummary:
         session = await db_ops.get_session(self._db, session_id)

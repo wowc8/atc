@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite  # type: ignore[import-not-found]
 
 from atc.state.models import (
+    AppEvent,
     ContextEntry,
     FeatureFlag,
     GitHubPR,
@@ -1683,6 +1684,52 @@ async def update_orchestration_operation(
     )
     await db.commit()
     return await get_orchestration_operation(db, operation_id)
+
+
+async def list_orchestration_operations(
+    db: aiosqlite.Connection,
+    *,
+    operation_type: str | None = None,
+    session_id: str | None = None,
+    limit: int | None = None,
+) -> list[OrchestrationOperation]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if operation_type is not None:
+        clauses.append("operation_type = ?")
+        params.append(operation_type)
+    if session_id is not None:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    sql = f"SELECT * FROM orchestration_operations{where} ORDER BY created_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    cursor = await db.execute(sql, params)
+    rows = await cursor.fetchall()
+    return [_row_to_orchestration_operation(r) for r in rows]
+
+
+async def list_app_events(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str | None = None,
+    limit: int | None = None,
+) -> list[AppEvent]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if session_id is not None:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    sql = f"SELECT * FROM app_events{where} ORDER BY created_at DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    cursor = await db.execute(sql, params)
+    rows = await cursor.fetchall()
+    return [AppEvent(**dict(r)) for r in rows]
 
 
 async def is_feature_enabled(db: aiosqlite.Connection, key: str) -> bool:
