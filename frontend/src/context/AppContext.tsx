@@ -242,7 +242,7 @@ interface AppContextValue {
   backendError: string | null;
 }
 
-const AppContext = createContext<AppContextValue | null>(null);
+export const AppContext = createContext<AppContextValue | null>(null);
 
 export function useAppContext(): AppContextValue {
   const ctx = useContext(AppContext);

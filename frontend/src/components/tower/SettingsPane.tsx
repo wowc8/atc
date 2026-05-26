@@ -128,7 +128,7 @@ export default function SettingsPane({ onClose }: Props) {
             <span className="form-hint">
               {terminalBackedProviders.has(providerConfig.default)
                 ? "This provider uses live tmux terminal panes in the app."
-                : "This provider may use a non-terminal control flow even if a visibility pane exists."} Default provider applies to new projects. Existing projects keep their saved provider until changed per-project.
+                : "This provider may use a non-terminal control flow even if a visibility pane exists."} Default provider applies to new projects. Existing projects keep their saved provider until changed per-project, and any already-running Tower session keeps its current provider until restarted.
             </span>
           </div>
 
