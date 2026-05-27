@@ -375,6 +375,7 @@ export function AppProvider({ children }: AppProviderProps) {
           type: "SET_TOWER_DETAIL",
           payload: {
             current_session_id: (data.session_id as string) ?? null,
+            current_project_id: (data.project_id as string) ?? null,
           },
         });
       } else if (data.type === "leader_status") {

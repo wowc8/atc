@@ -164,14 +164,19 @@ class TowerController:
         Returns the tower session id.  If a session already exists, returns
         its id without spawning a new one.
         """
-        self._current_project_id = project_id
+        requested_project_id = project_id
+        self._current_project_id = requested_project_id
 
         session_id = await start_tower_session(
             self._db,
-            project_id,
+            requested_project_id,
             event_bus=self._event_bus,
         )
         self._current_session_id = session_id
+
+        session = await db_ops.get_session(self._db, session_id)
+        actual_project_id = session.project_id if session is not None else requested_project_id
+        self._current_project_id = actual_project_id
 
         # Transition to MANAGING so the frontend shows the terminal
         if self._state in (TowerState.IDLE, TowerState.COMPLETE, TowerState.ERROR):
@@ -190,7 +195,8 @@ class TowerController:
                     "type": "tower_session",
                     "session_id": session_id,
                     "status": "idle",
-                    "project_id": project_id,
+                    "project_id": actual_project_id,
+                    "requested_project_id": requested_project_id,
                     "provider": session.provider if session else None,
                 },
             )
