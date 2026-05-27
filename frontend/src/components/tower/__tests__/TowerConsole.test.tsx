@@ -76,7 +76,7 @@ describe("TowerConsole", () => {
     expect(screen.queryByTestId("tower-console-goal")).not.toBeInTheDocument();
   });
 
-  it("does not show a mismatch warning just because a different project is selected", () => {
+  it("shows a mismatch warning when Tower is attached to a different project", () => {
     renderWithProviders(<TowerConsole />, {
       initialState: {
         projects: [
@@ -113,6 +113,9 @@ describe("TowerConsole", () => {
         },
       },
     });
-    expect(screen.queryByTestId("tower-console-provider-mismatch")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tower-console-provider-mismatch")).toBeInTheDocument();
+    expect(screen.getByTestId("tower-console-restart-provider")).toHaveTextContent(
+      "Apply selected project and restart Tower",
+    );
   });
 });
