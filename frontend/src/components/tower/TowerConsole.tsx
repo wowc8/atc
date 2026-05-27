@@ -31,14 +31,20 @@ export default function TowerConsole() {
   const activeTowerProvider = activeTowerProject?.agent_provider ?? null;
   const isTerminalProvider = selectedProvider !== null && terminalBackedProviders.has(selectedProvider);
   const towerSessionProvider = towerDetail.current_session_id ? activeTowerProvider : null;
-  const towerProviderMismatch = Boolean(
+  const towerProjectMismatch = Boolean(
     towerDetail.current_session_id &&
       selectedProject &&
       activeTowerProject &&
+      selectedProject.id !== activeTowerProject.id,
+  );
+  const towerProviderMismatch = Boolean(
+    towerSessionProvider &&
       selectedProvider &&
-      towerSessionProvider &&
-      selectedProject.id !== activeTowerProject.id &&
+      towerProjectMismatch &&
       selectedProvider !== towerSessionProvider,
+  );
+  const canApplySelectedProvider = Boolean(
+    selectedProject && selectedProvider && isTerminalProvider,
   );
 
   const isRunning =
@@ -127,13 +133,16 @@ export default function TowerConsole() {
   }
 
   async function handleRestartWithSelectedProvider() {
-    if (!projectId || !selectedProvider) return;
+    if (!projectId || !selectedProvider || !canApplySelectedProvider) return;
     userStopped.current = false;
     setLoading(true);
     try {
-      await api.patch(`/projects/${projectId}/agent-provider`, {
+      const updatedProject = await api.patch<typeof selectedProject>(`/projects/${projectId}/agent-provider`, {
         agent_provider: selectedProvider,
       });
+      if (updatedProject) {
+        dispatch({ type: "UPDATE_PROJECT", payload: updatedProject });
+      }
       if (towerDetail.current_session_id) {
         await api.post("/tower/stop");
       }
@@ -143,6 +152,7 @@ export default function TowerConsole() {
       dispatch({
         type: "SET_TOWER_DETAIL",
         payload: {
+          state: "managing",
           current_session_id: res.session_id ?? null,
           current_project_id: projectId,
           current_goal: null,
@@ -211,16 +221,28 @@ export default function TowerConsole() {
         </div>
       </div>
 
-      {towerProviderMismatch && (
+      {towerProjectMismatch && (
         <div className="tower-console__error" data-testid="tower-console-provider-mismatch">
-          Tower is currently running with <strong>{towerSessionProvider}</strong>, but the selected project is set to <strong>{selectedProvider}</strong>.
+          Tower is currently attached to <strong>{activeTowerProject?.name ?? "another project"}</strong>
+          {towerSessionProvider ? (
+            <>
+              {" "}using <strong>{towerSessionProvider}</strong>
+            </>
+          ) : null}
+          , while the selected project is <strong>{selectedProject?.name}</strong>
+          {selectedProvider ? (
+            <>
+              {" "}with <strong>{selectedProvider}</strong>
+            </>
+          ) : null}
+          . Restart Tower to switch live session context.
           <button
             className="btn btn-sm"
             onClick={handleRestartWithSelectedProvider}
-            disabled={loading}
+            disabled={loading || !canApplySelectedProvider}
             data-testid="tower-console-restart-provider"
           >
-            {loading ? "Applying..." : "Apply to Tower and restart"}
+            {loading ? "Applying..." : "Apply selected project and restart Tower"}
           </button>
         </div>
       )}
