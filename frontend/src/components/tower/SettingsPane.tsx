@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppContext } from "../../context/AppContext";
 import { api } from "../../utils/api";
-import type { AgentProviderConfig, Project, ProviderInfo } from "../../types";
+import type { AgentProviderConfig, ProviderInfo } from "../../types";
 import { BackupPanel } from "../settings/BackupPanel";
 import { ResourceLimitsPanel } from "../settings/ResourceLimitsPanel";
 import "./SettingsPane.css";
@@ -21,7 +21,7 @@ const EMPTY_PROVIDER_CONFIG: AgentProviderConfig = {
 };
 
 export default function SettingsPane({ onClose }: Props) {
-  const { state, dispatch } = useAppContext();
+  const { state } = useAppContext();
   const [githubOrg, setGithubOrg] = useState(
     () => localStorage.getItem(GITHUB_ORG_KEY) ?? "",
   );
@@ -29,8 +29,6 @@ export default function SettingsPane({ onClose }: Props) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [savingProvider, setSavingProvider] = useState(false);
   const [providerMessage, setProviderMessage] = useState<string | null>(null);
-  const [providerActionProjectId, setProviderActionProjectId] = useState<string>("");
-  const [applyingProvider, setApplyingProvider] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -58,41 +56,10 @@ export default function SettingsPane({ onClose }: Props) {
     [state.projects],
   );
 
-  const selectedProviderActionProject =
-    activeProjects.find((project) => project.id === providerActionProjectId) ?? null;
   const activeTowerProject = state.towerDetail.current_project_id
     ? state.projects.find((project) => project.id === state.towerDetail.current_project_id) ?? null
     : null;
   const terminalBackedProviders = new Set(["claude_code", "codex"]);
-  const savedProjectProvider = selectedProviderActionProject?.agent_provider ?? null;
-  const defaultMatchesSelectedProject = Boolean(
-    savedProjectProvider && providerConfig.default === savedProjectProvider,
-  );
-  const towerAlreadyOnSelectedProject = Boolean(
-    state.towerDetail.current_session_id &&
-      activeTowerProject &&
-      selectedProviderActionProject &&
-      activeTowerProject.id === selectedProviderActionProject.id,
-  );
-  const towerNeedsRestartForSelectedProject = Boolean(
-    selectedProviderActionProject &&
-      terminalBackedProviders.has(selectedProviderActionProject.agent_provider) &&
-      (!towerAlreadyOnSelectedProject || activeTowerProject?.agent_provider !== selectedProviderActionProject.agent_provider),
-  );
-  const canRestartTowerWithSelectedProject = Boolean(
-    selectedProviderActionProject && terminalBackedProviders.has(selectedProviderActionProject.agent_provider),
-  );
-
-  useEffect(() => {
-    if (providerActionProjectId) return;
-    if (activeTowerProject) {
-      setProviderActionProjectId(activeTowerProject.id);
-      return;
-    }
-    if (activeProjects.length > 0) {
-      setProviderActionProjectId(activeProjects[0].id);
-    }
-  }, [providerActionProjectId, activeProjects, activeTowerProject]);
 
   function handleGithubOrgChange(value: string) {
     setGithubOrg(value);
@@ -105,67 +72,23 @@ export default function SettingsPane({ onClose }: Props) {
 
   async function saveProviderConfig(next: Partial<AgentProviderConfig>) {
     const optimistic = { ...providerConfig, ...next };
+    const providerChanged =
+      next.default !== undefined && next.default !== providerConfig.default;
     setProviderConfig(optimistic);
     setSavingProvider(true);
     setProviderMessage(null);
     try {
       const saved = await api.put<AgentProviderConfig>("/settings/agent-provider", next);
       setProviderConfig(saved);
-      setProviderMessage("Provider settings saved");
+      setProviderMessage(
+        providerChanged
+          ? "Provider updated globally. Existing sessions were restarted or marked for replacement as needed."
+          : "Provider settings saved",
+      );
     } catch (err) {
       setProviderMessage(err instanceof Error ? err.message : "Failed to save provider settings");
     } finally {
       setSavingProvider(false);
-    }
-  }
-
-  async function handleApplyProviderSettingToProject() {
-    if (!providerConfig.default || !providerActionProjectId) return;
-    setApplyingProvider(true);
-    setProviderMessage(null);
-    try {
-      const updatedProject = await api.patch<Project>(`/projects/${providerActionProjectId}/agent-provider`, {
-        agent_provider: providerConfig.default,
-      });
-      dispatch({ type: "UPDATE_PROJECT", payload: updatedProject });
-      setProviderMessage(
-        state.towerDetail.current_session_id && activeTowerProject?.id === providerActionProjectId
-          ? "Project provider updated. Restart Tower below to apply it to the live session."
-          : "Project provider updated.",
-      );
-    } catch (err) {
-      setProviderMessage(err instanceof Error ? err.message : "Failed to apply provider to project");
-    } finally {
-      setApplyingProvider(false);
-    }
-  }
-
-  async function handleRestartTowerForSelectedProject() {
-    if (!providerActionProjectId || !canRestartTowerWithSelectedProject) return;
-    setApplyingProvider(true);
-    setProviderMessage(null);
-    try {
-      if (state.towerDetail.current_session_id) {
-        await api.post("/tower/stop");
-      }
-      const res = await api.post<{ session_id?: string }>("/tower/start", {
-        project_id: providerActionProjectId,
-      });
-      setProviderMessage("Tower restarted with the selected project provider.");
-      dispatch({
-        type: "SET_TOWER_DETAIL",
-        payload: {
-          state: "managing",
-          current_session_id: res.session_id ?? null,
-          current_project_id: providerActionProjectId,
-          current_goal: null,
-          leader_session_id: null,
-        },
-      });
-    } catch (err) {
-      setProviderMessage(err instanceof Error ? err.message : "Failed to restart Tower");
-    } finally {
-      setApplyingProvider(false);
     }
   }
 
@@ -203,7 +126,7 @@ export default function SettingsPane({ onClose }: Props) {
         <section className="panel settings-pane__section">
           <h3>Agent Provider</h3>
           <div className="form-group">
-            <label htmlFor="provider-default">Default Provider</label>
+            <label htmlFor="provider-default">Global Provider</label>
             <select
               id="provider-default"
               value={providerConfig.default}
@@ -219,7 +142,9 @@ export default function SettingsPane({ onClose }: Props) {
             <span className="form-hint">
               {terminalBackedProviders.has(providerConfig.default)
                 ? "This provider uses live tmux terminal panes in the app."
-                : "This provider may use a non-terminal control flow even if a visibility pane exists."} Default provider applies to new projects. Existing projects keep their saved provider until changed per-project, and any already-running Tower session keeps its current provider until restarted.
+                : "This provider may use a non-terminal control flow even if a visibility pane exists."}{" "}
+              Changing the global provider affects all new sessions immediately. Existing live Tower, Leader,
+              and Ace sessions will be restarted or recreated as needed so stale provider-bound sessions do not linger.
             </span>
           </div>
 
@@ -267,75 +192,23 @@ export default function SettingsPane({ onClose }: Props) {
             />
           </div>
 
-          <div className="settings-pane__provider-actions">
-            <div className="form-group">
-              <label htmlFor="provider-action-project">Apply default provider to project</label>
-              <select
-                id="provider-action-project"
-                value={providerActionProjectId}
-                onChange={(e) => setProviderActionProjectId(e.target.value)}
-                disabled={applyingProvider || activeProjects.length === 0}
-                data-testid="provider-action-project"
-              >
-                <option value="" disabled>
-                  Select active project...
-                </option>
-                {activeProjects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              <span className="form-hint">
-                Changing the default provider only affects new projects. Use these actions to update an existing project and, if needed, restart the live Tower session with that project context.
+          <div className="settings-pane__provider-status" data-testid="provider-global-status">
+            <div className="settings-pane__info-row">
+              <span className="settings-pane__label">Global provider</span>
+              <span className="settings-pane__value">{providerConfig.default}</span>
+            </div>
+            <div className="settings-pane__info-row">
+              <span className="settings-pane__label">Active projects</span>
+              <span className="settings-pane__value">{activeProjects.length}</span>
+            </div>
+            <div className="settings-pane__info-row">
+              <span className="settings-pane__label">Live Tower session</span>
+              <span className="settings-pane__value">
+                {state.towerDetail.current_session_id
+                  ? `${activeTowerProject?.name ?? "Global"} (${providerConfig.default})`
+                  : "Not running"}
               </span>
             </div>
-
-            {selectedProviderActionProject && (
-              <div className="settings-pane__provider-status" data-testid="provider-action-status">
-                <div className="settings-pane__info-row">
-                  <span className="settings-pane__label">Default provider</span>
-                  <span className="settings-pane__value">{providerConfig.default}</span>
-                </div>
-                <div className="settings-pane__info-row">
-                  <span className="settings-pane__label">Selected project provider</span>
-                  <span className="settings-pane__value">{savedProjectProvider}</span>
-                </div>
-                <div className="settings-pane__info-row">
-                  <span className="settings-pane__label">Live Tower session</span>
-                  <span className="settings-pane__value">
-                    {state.towerDetail.current_session_id
-                      ? `${activeTowerProject?.name ?? "Unknown"} (${activeTowerProject?.agent_provider ?? "unknown"})`
-                      : "Not running"}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className="settings-pane__provider-action-buttons">
-              <button
-                className="btn btn-sm"
-                onClick={() => void handleApplyProviderSettingToProject()}
-                disabled={applyingProvider || !providerActionProjectId || defaultMatchesSelectedProject}
-                data-testid="provider-apply-project"
-              >
-                {applyingProvider ? "Applying..." : defaultMatchesSelectedProject ? "Project already matches default" : "Apply default to project"}
-              </button>
-              <button
-                className="btn btn-sm"
-                onClick={() => void handleRestartTowerForSelectedProject()}
-                disabled={applyingProvider || !canRestartTowerWithSelectedProject || !towerNeedsRestartForSelectedProject}
-                data-testid="provider-restart-tower"
-              >
-                {applyingProvider ? "Applying..." : towerNeedsRestartForSelectedProject ? "Restart Tower with selected project" : "Tower already matches selected project"}
-              </button>
-            </div>
-
-            <span className="form-hint">
-              {towerNeedsRestartForSelectedProject
-                ? "The saved project provider and the live Tower session are still distinct. Restart Tower after applying if you want the visible session to move over too."
-                : "The selected project and live Tower session already line up, so no restart is needed right now."}
-            </span>
           </div>
 
           {providerMessage && <div className="form-hint">{providerMessage}</div>}
