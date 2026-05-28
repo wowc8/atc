@@ -79,6 +79,14 @@ class LeaderOrchestrator:
     _max_concurrent_aces: int = 3
     _governor: ResourceGovernor = field(default_factory=ResourceGovernor)
 
+    def _current_provider_default(self) -> str:
+        app_state = getattr(getattr(self.conn, "_connection", None), "app_state", None)
+        if app_state is not None and getattr(app_state, "settings", None) is not None:
+            return app_state.settings.agent_provider.default
+        from atc.config import load_settings
+
+        return load_settings().agent_provider.default
+
     async def spawn_aces_for_ready_tasks(self) -> list[AceAssignment]:
         """Find ready tasks and spawn Ace sessions for them.
 
@@ -167,9 +175,12 @@ class LeaderOrchestrator:
                 )
                 context_entries = ctx.get("context_entries", [])
 
-            launch_cmd = get_launch_command(
-                project.agent_provider if project else "claude_code",
+            provider_name = (
+                project.agent_provider
+                if project and project.agent_provider
+                else self._current_provider_default()
             )
+            launch_cmd = get_launch_command(provider_name)
 
             session_id = await create_ace(
                 self.conn,
