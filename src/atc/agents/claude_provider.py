@@ -154,6 +154,8 @@ class ClaudeCodeProvider:
 
     async def spawn_for_session(self, request: ProviderSpawnRequest) -> SessionInfo:
         """Spawn a Claude runtime pane for an existing ATC session row."""
+        if request.launch_command:
+            self._claude_command = request.launch_command
         info = await self.spawn_session(
             request.session.id,
             working_dir=request.working_dir,
