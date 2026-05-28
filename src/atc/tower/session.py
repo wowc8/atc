@@ -147,58 +147,9 @@ async def start_tower_session(
                 },
             )
 
-    # Before creating a new session, check for a reusable disconnected session
-    # that still has its staging directory with CLAUDE.md deployed.
-    # `existing` is ordered by created_at DESC, so the first match is most recent.
-    for sess in existing:
-        staging_dir = Path(_DEFAULT_STAGING_ROOT) / sess.id
-        if (staging_dir / "CLAUDE.md").is_file() and sess.provider == current_provider:
-            logger.info(
-                "Reusing disconnected tower session %s — provider=%s, CLAUDE.md present at %s",
-                sess.id,
-                sess.provider,
-                staging_dir,
-            )
-            await db_ops.update_session_status(conn, sess.id, SessionStatus.CONNECTING.value)
-            if event_bus:
-                await event_bus.publish(
-                    "session_status_changed",
-                    {
-                        "session_id": sess.id,
-                        "previous_status": sess.status,
-                        "new_status": SessionStatus.CONNECTING.value,
-                    },
-                )
-            working_dir = str(staging_dir)
-            _log_working_dir_contents(working_dir, sess.id, "start_tower_session:reuse")
-            try:
-                launch_cmd = get_launch_command(current_provider)
-                tmux_session, pane_id = await _spawn_provider_session(
-                    conn,
-                    sess.id,
-                    project_id=project_id,
-                    session_type="tower",
-                    working_dir=working_dir,
-                    context_file=staging_dir / "CLAUDE.md" if (staging_dir / "CLAUDE.md").is_file() else None,
-                    launch_command=launch_cmd,
-                )
-                await db_ops.update_session_tmux(conn, sess.id, tmux_session, pane_id)
-                await transition(sess.id, SessionStatus.CONNECTING, SessionStatus.IDLE, event_bus)
-                await db_ops.update_session_status(conn, sess.id, SessionStatus.IDLE.value)
-            except Exception as exc:
-                logger.exception("Failed to spawn tower pane for reused session %s", sess.id)
-                await db_ops.update_session_status(conn, sess.id, SessionStatus.ERROR.value)
-                if event_bus:
-                    await event_bus.publish(
-                        "session_status_changed",
-                        {
-                            "session_id": sess.id,
-                            "previous_status": SessionStatus.CONNECTING.value,
-                            "new_status": SessionStatus.ERROR.value,
-                        },
-                    )
-                raise RuntimeError(str(exc)) from exc
-            return sess.id
+    # Tower sessions that were explicitly stopped should not be reused by id.
+    # A provider switch or manual Tower restart should produce a fresh Tower
+    # session born under the current provider instead of reviving a stale one.
 
     provider = current_provider
 
@@ -287,7 +238,12 @@ async def stop_tower_session(
     if session.tmux_pane:
         await _kill_pane(session.tmux_pane)
 
-    await db_ops.update_session_status(conn, session.id, SessionStatus.DISCONNECTED.value)
+    await db_ops.update_session_status(
+        conn,
+        session.id,
+        SessionStatus.DISCONNECTED.value,
+        clear_tmux=True,
+    )
 
     if event_bus:
         await event_bus.publish(
