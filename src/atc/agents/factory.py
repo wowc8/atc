@@ -61,17 +61,23 @@ def create_provider(name: str, **kwargs: Any) -> AgentProvider:
     if not kwargs and name == "claude_code":
         try:
             settings = load_settings()
-            kwargs = {"claude_command": settings.agent_provider.claude_command}
+            kwargs = {
+                "claude_command": settings.agent_provider.claude_command,
+                "tmux_session": settings.agent_provider.tmux_session,
+            }
         except Exception:
             kwargs = {}
     if not kwargs and name == "codex":
         try:
             settings = load_settings()
-            kwargs = {"codex_command": settings.agent_provider.codex_command}
+            kwargs = {
+                "codex_command": settings.agent_provider.codex_command,
+                "tmux_session": settings.agent_provider.tmux_session,
+            }
         except Exception:
             kwargs = {}
     provider: AgentProvider = cls(**kwargs)
-    logger.info("Created agent provider: %s (%s)", name, cls.__name__)
+    logger.info("Created agent provider: %s (%s) kwargs=%s", name, cls.__name__, sorted(kwargs.keys()))
     return provider
 
 
@@ -101,6 +107,12 @@ def get_launch_command(provider_name: str) -> str:
         script = Path(__file__).parent.parent.parent.parent / "scripts" / "atc-agent"
         if script.exists():
             return str(script)
+    if provider_name == "codex":
+        try:
+            settings = load_settings()
+            return settings.agent_provider.codex_command
+        except Exception:
+            pass
     return _LAUNCH_COMMANDS.get(provider_name, _LAUNCH_COMMANDS["claude_code"])
 
 
