@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await db.execute("PRAGMA foreign_keys=ON")
     await db.execute("PRAGMA busy_timeout=30000")
     db.row_factory = aiosqlite.Row
+    db.app_state = app.state
     app.state.db = db
 
     # 4. Start WebSocket hub
