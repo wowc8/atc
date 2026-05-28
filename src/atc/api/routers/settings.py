@@ -22,6 +22,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from atc.backup.service import export_all, export_project, import_all, import_project
+from atc.leader import leader as leader_ops
+from atc.session import ace as ace_ops
+from atc.state import db as db_ops
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -185,9 +188,15 @@ async def update_agent_provider(
 ) -> AgentProviderResponse:
     """Update agent provider configuration (runtime only, not persisted to file)."""
     from atc.agents.factory import list_providers
+    from atc.tower.controller import TowerState
 
     settings = request.app.state.settings
     cfg = settings.agent_provider
+    db = await _get_db(request)
+    event_bus = request.app.state.event_bus
+    tower = request.app.state.tower_controller
+
+    old_default = cfg.default
 
     if body.default is not None:
         available = list_providers()
@@ -205,6 +214,40 @@ async def update_agent_provider(
         cfg.claude_command = body.claude_command
     if body.codex_command is not None:
         cfg.codex_command = body.codex_command
+
+    provider_changed = body.default is not None and body.default != old_default
+    if provider_changed:
+        await db_ops.update_all_project_agent_providers(db, cfg.default)
+
+        active_ace_sessions = await db_ops.list_sessions(db, session_type="ace")
+        for session in active_ace_sessions:
+            if session.provider != cfg.default and session.status not in ("error", "disconnected"):
+                try:
+                    await ace_ops.stop_ace(db, session.id, event_bus=event_bus)
+                except Exception:
+                    logger.exception("Failed to pause stale ace session %s during provider switch", session.id)
+
+        leaders = await db.execute("SELECT project_id FROM leaders WHERE session_id IS NOT NULL")
+        leader_rows = await leaders.fetchall()
+        for row in leader_rows:
+            project_id = row[0]
+            try:
+                await leader_ops.stop_leader(db, project_id, event_bus=event_bus)
+            except Exception:
+                logger.exception("Failed to stop leader for project %s during provider switch", project_id)
+
+        tower_session_id = tower.current_session_id
+        tower_was_running = tower_session_id is not None and tower.state in (TowerState.MANAGING, TowerState.PLANNING, TowerState.IDLE)
+        if tower_session_id:
+            try:
+                await tower.stop_session()
+            except Exception:
+                logger.exception("Failed to stop Tower during provider switch")
+        if tower_was_running:
+            try:
+                await tower.start_session()
+            except Exception:
+                logger.exception("Failed to restart Tower during provider switch")
 
     return AgentProviderResponse(
         default=cfg.default,

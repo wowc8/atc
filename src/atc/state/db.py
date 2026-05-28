@@ -727,6 +727,19 @@ async def update_project_agent_provider(
     await db.commit()
 
 
+async def update_all_project_agent_providers(
+    db: aiosqlite.Connection,
+    agent_provider: str,
+) -> None:
+    """Update the agent provider for all projects."""
+    now = _now()
+    await db.execute(
+        "UPDATE projects SET agent_provider = ?, updated_at = ?",
+        (agent_provider, now),
+    )
+    await db.commit()
+
+
 async def archive_project(
     db: aiosqlite.Connection,
     project_id: str,
