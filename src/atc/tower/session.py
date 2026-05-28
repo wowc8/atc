@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from atc.agents.deploy import _DEFAULT_STAGING_ROOT, TowerDeploySpec, deploy_tower_files
 from atc.agents.factory import get_launch_command
+from atc.config import AgentProviderConfig
 from atc.session.ace import (
     _accept_trust_dialog,
     _ensure_tmux_session,
@@ -34,6 +35,15 @@ if TYPE_CHECKING:
     from atc.core.events import EventBus
 
 logger = logging.getLogger(__name__)
+
+
+def _current_provider_config(conn: "aiosqlite.Connection") -> AgentProviderConfig:
+    settings = getattr(getattr(conn, "_connection", None), "app_state", None)
+    if settings is not None and getattr(settings, "settings", None) is not None:
+        return settings.settings.agent_provider
+    from atc.config import load_settings
+
+    return load_settings().agent_provider
 
 
 async def _resolve_tower_project_id(conn: "aiosqlite.Connection") -> str:
@@ -82,7 +92,9 @@ async def start_tower_session(
         project_id = await _resolve_tower_project_id(conn)
 
     project = await db_ops.get_project(conn, project_id)
-    name = f"tower-{project.name}" if project else f"tower-{project_id[:8]}"
+    provider_cfg = _current_provider_config(conn)
+    current_provider = provider_cfg.default
+    name = f"tower-{current_provider}"
 
     # Check for existing tower session — validate tmux pane is actually alive
     # AND that the Tower identity files are deployed at the working directory.
@@ -103,10 +115,11 @@ async def start_tower_session(
             # Verify CLAUDE.md is deployed — a stale pane from a prior app run
             # may have been launched without Tower identity files.
             staging_dir = Path(_DEFAULT_STAGING_ROOT) / sess.id
-            if (staging_dir / "CLAUDE.md").is_file():
+            if (staging_dir / "CLAUDE.md").is_file() and sess.provider == current_provider:
                 logger.info(
-                    "Reusing existing tower session %s (CLAUDE.md present at %s)",
+                    "Reusing existing tower session %s (provider=%s, CLAUDE.md present at %s)",
                     sess.id,
+                    sess.provider,
                     staging_dir,
                 )
                 return sess.id
@@ -139,10 +152,11 @@ async def start_tower_session(
     # `existing` is ordered by created_at DESC, so the first match is most recent.
     for sess in existing:
         staging_dir = Path(_DEFAULT_STAGING_ROOT) / sess.id
-        if (staging_dir / "CLAUDE.md").is_file():
+        if (staging_dir / "CLAUDE.md").is_file() and sess.provider == current_provider:
             logger.info(
-                "Reusing disconnected tower session %s — CLAUDE.md present at %s",
+                "Reusing disconnected tower session %s — provider=%s, CLAUDE.md present at %s",
                 sess.id,
+                sess.provider,
                 staging_dir,
             )
             await db_ops.update_session_status(conn, sess.id, SessionStatus.CONNECTING.value)
@@ -158,8 +172,7 @@ async def start_tower_session(
             working_dir = str(staging_dir)
             _log_working_dir_contents(working_dir, sess.id, "start_tower_session:reuse")
             try:
-                provider = project.agent_provider if project else "claude_code"
-                launch_cmd = get_launch_command(provider)
+                launch_cmd = get_launch_command(current_provider)
                 tmux_session, pane_id = await _spawn_provider_session(
                     conn,
                     sess.id,
@@ -187,7 +200,7 @@ async def start_tower_session(
                 raise RuntimeError(str(exc)) from exc
             return sess.id
 
-    provider = project.agent_provider if project else "claude_code"
+    provider = current_provider
 
     session = await db_ops.create_session(
         conn,

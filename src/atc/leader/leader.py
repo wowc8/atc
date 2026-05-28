@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
 from atc.agents.factory import get_launch_command
+from atc.config import AgentProviderConfig
 from atc.session.ace import (
     _accept_trust_dialog,
     _ensure_tmux_session,
@@ -35,6 +36,15 @@ if TYPE_CHECKING:
     from atc.core.events import EventBus
 
 logger = logging.getLogger(__name__)
+
+
+def _current_provider_config(conn: aiosqlite.Connection) -> AgentProviderConfig:
+    settings = getattr(getattr(conn, "_connection", None), "app_state", None)
+    if settings is not None and getattr(settings, "settings", None) is not None:
+        return settings.settings.agent_provider
+    from atc.config import load_settings
+
+    return load_settings().agent_provider
 
 
 def _build_manager_deploy_spec(
@@ -97,7 +107,8 @@ async def start_leader(
     project = await db_ops.get_project(conn, project_id)
     name = f"leader-{project.name}" if project else f"leader-{project_id[:8]}"
 
-    provider = project.agent_provider if project and project.agent_provider else "claude_code"
+    provider_cfg = _current_provider_config(conn)
+    provider = provider_cfg.default
 
     session = await db_ops.create_session(
         conn,

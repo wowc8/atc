@@ -123,8 +123,23 @@ async def reconnect_session(
         if session.project_id:
             project = await db_ops.get_project(conn, session.project_id)
             if project:
-                provider = project.agent_provider or "claude_code"
-                launch_cmd = get_launch_command(provider)
+                app_state = getattr(getattr(conn, "_connection", None), "app_state", None)
+                if app_state is not None and getattr(app_state, "settings", None) is not None:
+                    current_provider = app_state.settings.agent_provider.default
+                else:
+                    from atc.config import load_settings
+
+                    current_provider = load_settings().agent_provider.default
+                if session.provider != current_provider:
+                    logger.info(
+                        "Session %s provider mismatch on reconnect (session=%s current=%s), forcing replacement instead of reuse",
+                        session_id,
+                        session.provider,
+                        current_provider,
+                    )
+                    await db_ops.update_session_status(conn, session_id, SessionStatus.DISCONNECTED.value)
+                    return False
+                launch_cmd = get_launch_command(current_provider)
                 working_dir = project.repo_path
 
         # Tower sessions need their identity files (CLAUDE.md, settings)

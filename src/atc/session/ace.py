@@ -336,7 +336,13 @@ async def create_ace(
     """
     # Step 1: DB row first — guarantees the UI always sees every entity
     project = await db_ops.get_project(conn, project_id)
-    provider = project.agent_provider if project and project.agent_provider else "claude_code"
+    provider_cfg = getattr(getattr(conn, "_connection", None), "app_state", None)
+    if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
+        provider = provider_cfg.settings.agent_provider.default
+    else:
+        from atc.config import load_settings
+
+        provider = load_settings().agent_provider.default
 
     session = await db_ops.create_session(
         conn,
