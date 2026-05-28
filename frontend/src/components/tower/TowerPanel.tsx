@@ -27,6 +27,7 @@ export default function TowerPanel() {
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [providerSwitchPending, setProviderSwitchPending] = useState(false);
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
@@ -72,16 +73,35 @@ export default function TowerPanel() {
   // Auto-start Tower session when idle (Tower is global — not provider-gated).
   // Respects userStopped ref to prevent re-starting after manual Stop.
   useEffect(() => {
+    const onProviderSwitching = () => {
+      setProviderSwitchPending(true);
+      autoStarted.current = true;
+    };
+    const onProviderSwitched = () => {
+      setProviderSwitchPending(false);
+      autoStarted.current = false;
+      userStopped.current = false;
+    };
+    window.addEventListener("atc:provider-switching", onProviderSwitching);
+    window.addEventListener("atc:provider-switched", onProviderSwitched);
+    return () => {
+      window.removeEventListener("atc:provider-switching", onProviderSwitching);
+      window.removeEventListener("atc:provider-switched", onProviderSwitched);
+    };
+  }, []);
+
+  useEffect(() => {
     if (
       isIdle &&
       !starting &&
+      !providerSwitchPending &&
       !autoStarted.current &&
       !userStopped.current
     ) {
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isIdle, starting]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isIdle, starting, providerSwitchPending]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-fit terminal when panel expands; also request a fresh snapshot so the
   // terminal isn't blank when the panel was collapsed during initial load.
@@ -149,6 +169,9 @@ export default function TowerPanel() {
           current_goal: null,
         },
       });
+      if (!providerSwitchPending) {
+        autoStarted.current = false;
+      }
     } catch (err) {
       console.error("Failed to stop tower:", err);
       userStopped.current = false;

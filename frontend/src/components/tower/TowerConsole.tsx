@@ -19,6 +19,7 @@ export default function TowerConsole() {
   const [goal, setGoal] = useState("");
   const [projectId, setProjectId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [providerSwitchPending, setProviderSwitchPending] = useState(false);
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
 
@@ -57,11 +58,29 @@ export default function TowerConsole() {
   }
 
   useEffect(() => {
-    if (isTerminalProvider && isIdle && !loading && !autoStarted.current && !userStopped.current && projectId) {
+    const onProviderSwitching = () => {
+      setProviderSwitchPending(true);
+      autoStarted.current = true;
+    };
+    const onProviderSwitched = () => {
+      setProviderSwitchPending(false);
+      autoStarted.current = false;
+      userStopped.current = false;
+    };
+    window.addEventListener("atc:provider-switching", onProviderSwitching);
+    window.addEventListener("atc:provider-switched", onProviderSwitched);
+    return () => {
+      window.removeEventListener("atc:provider-switching", onProviderSwitching);
+      window.removeEventListener("atc:provider-switched", onProviderSwitched);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isTerminalProvider && isIdle && !loading && !providerSwitchPending && !autoStarted.current && !userStopped.current && projectId) {
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isTerminalProvider, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isTerminalProvider, isIdle, loading, providerSwitchPending, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStart() {
     if (!projectId) return;
@@ -113,6 +132,9 @@ export default function TowerConsole() {
           current_goal: null,
         },
       });
+      if (!providerSwitchPending) {
+        autoStarted.current = false;
+      }
     } catch (err) {
       console.error("Failed to stop Tower:", err);
       userStopped.current = false;
