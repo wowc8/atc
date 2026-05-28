@@ -194,6 +194,13 @@ async def start_tower_session(
         # --- Runtime debug: verify CLAUDE.md is present at working_dir ---
         _log_working_dir_contents(working_dir, session.id, "start_tower_session")
 
+        logger.warning(
+            "TOWER SPAWN provider=%s launch_command=%s project_id=%s session_id=%s",
+            provider,
+            launch_cmd,
+            project_id,
+            session.id,
+        )
         tmux_session, pane_id = await _spawn_provider_session(
             conn,
             session.id,
