@@ -77,6 +77,9 @@ export default function SettingsPane({ onClose }: Props) {
     setProviderConfig(optimistic);
     setSavingProvider(true);
     setProviderMessage(null);
+    if (providerChanged) {
+      window.dispatchEvent(new CustomEvent("atc:provider-switching"));
+    }
     try {
       const saved = await api.put<AgentProviderConfig>("/settings/agent-provider", next);
       setProviderConfig(saved);
@@ -85,8 +88,14 @@ export default function SettingsPane({ onClose }: Props) {
           ? "Provider updated globally. Existing sessions were restarted or marked for replacement as needed."
           : "Provider settings saved",
       );
+      if (providerChanged) {
+        window.dispatchEvent(new CustomEvent("atc:provider-switched"));
+      }
     } catch (err) {
       setProviderMessage(err instanceof Error ? err.message : "Failed to save provider settings");
+      if (providerChanged) {
+        window.dispatchEvent(new CustomEvent("atc:provider-switched"));
+      }
     } finally {
       setSavingProvider(false);
     }
