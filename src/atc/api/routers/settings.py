@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -32,6 +33,35 @@ logger = logging.getLogger(__name__)
 
 async def _get_db(request: Request):  # noqa: ANN202
     return request.app.state.db
+
+
+async def _capture_provider_replacement_handoff(
+    request: Request,
+    db: Any,
+) -> dict[str, Any]:
+    tower = request.app.state.tower_controller
+
+    leader_rows_cursor = await db.execute(
+        "SELECT project_id, goal, context FROM leaders WHERE session_id IS NOT NULL"
+    )
+    leader_rows = await leader_rows_cursor.fetchall()
+
+    return {
+        "tower": {
+            "project_id": tower.current_project_id,
+            "goal": tower.current_goal,
+            "state": tower.state.value,
+            "session_id": tower.current_session_id,
+        },
+        "leaders": [
+            {
+                "project_id": row[0],
+                "goal": row[1],
+                "context": row[2],
+            }
+            for row in leader_rows
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +247,7 @@ async def update_agent_provider(
 
     provider_changed = body.default is not None and body.default != old_default
     if provider_changed:
+        handoff = await _capture_provider_replacement_handoff(request, db)
         await db_ops.update_all_project_agent_providers(db, cfg.default)
 
         active_ace_sessions = await db_ops.list_sessions(db, session_type="ace")
@@ -227,25 +258,26 @@ async def update_agent_provider(
                 except Exception:
                     logger.exception("Failed to pause stale ace session %s during provider switch", session.id)
 
-        leaders = await db.execute("SELECT project_id FROM leaders WHERE session_id IS NOT NULL")
-        leader_rows = await leaders.fetchall()
-        for row in leader_rows:
-            project_id = row[0]
+        for leader_info in handoff["leaders"]:
+            project_id = leader_info["project_id"]
             try:
                 await leader_ops.stop_leader(db, project_id, event_bus=event_bus)
             except Exception:
                 logger.exception("Failed to stop leader for project %s during provider switch", project_id)
 
-        tower_session_id = tower.current_session_id
-        tower_was_running = tower_session_id is not None and tower.state in (TowerState.MANAGING, TowerState.PLANNING, TowerState.IDLE)
-        if tower_session_id:
+        tower_was_running = handoff["tower"]["session_id"] is not None and handoff["tower"]["state"] in ("managing", "planning", "idle")
+        if handoff["tower"]["session_id"]:
             try:
                 await tower.stop_session()
             except Exception:
                 logger.exception("Failed to stop Tower during provider switch")
         if tower_was_running:
             try:
-                await tower.start_session()
+                restart_project_id = handoff["tower"]["project_id"]
+                if restart_project_id is not None:
+                    await tower.start_session(restart_project_id)
+                else:
+                    await tower.start_session()
             except Exception:
                 logger.exception("Failed to restart Tower during provider switch")
 
