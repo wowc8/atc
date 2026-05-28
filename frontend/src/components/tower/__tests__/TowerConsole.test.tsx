@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import TowerConsole from "../TowerConsole";
 import { renderWithProviders } from "../../../test/helpers";
 
@@ -76,7 +76,7 @@ describe("TowerConsole", () => {
     expect(screen.queryByTestId("tower-console-goal")).not.toBeInTheDocument();
   });
 
-  it("shows a mismatch warning when Tower is attached to a different project", () => {
+  it("shows a project-context restart warning when Tower is attached elsewhere", () => {
     renderWithProviders(<TowerConsole />, {
       initialState: {
         projects: [
@@ -115,7 +115,7 @@ describe("TowerConsole", () => {
     });
     expect(screen.getByTestId("tower-console-provider-mismatch")).toBeInTheDocument();
     expect(screen.getByTestId("tower-console-restart-provider")).toHaveTextContent(
-      "Apply selected project and restart Tower",
+      "Restart Tower for selected project",
     );
   });
 });
