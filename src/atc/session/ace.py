@@ -284,7 +284,16 @@ async def _spawn_provider_session(
     provider_name = session.provider if session and session.provider else (
         project.agent_provider if project and project.agent_provider else "claude_code"
     )
-    provider = create_provider(provider_name)
+    provider_cfg = getattr(getattr(conn, "_connection", None), "app_state", None)
+    provider_kwargs: dict[str, str] = {}
+    if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
+        live_cfg = provider_cfg.settings.agent_provider
+        provider_kwargs["tmux_session"] = live_cfg.tmux_session
+        if provider_name == "claude_code":
+            provider_kwargs["claude_command"] = live_cfg.claude_command
+        elif provider_name == "codex":
+            provider_kwargs["codex_command"] = live_cfg.codex_command
+    provider = create_provider(provider_name, **provider_kwargs)
 
     session = await db_ops.get_session(conn, session_id)
     if session is None:
@@ -450,8 +459,19 @@ async def _send_session_instruction(
         raise ValueError(f"Session {session_id} has no project")
 
     project = await db_ops.get_project(conn, session.project_id)
-    provider_name = project.agent_provider if project and project.agent_provider else "claude_code"
-    provider = create_provider(provider_name)
+    provider_name = session.provider if session.provider else (
+        project.agent_provider if project and project.agent_provider else "claude_code"
+    )
+    provider_cfg = getattr(getattr(conn, "_connection", None), "app_state", None)
+    provider_kwargs: dict[str, str] = {}
+    if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
+        live_cfg = provider_cfg.settings.agent_provider
+        provider_kwargs["tmux_session"] = live_cfg.tmux_session
+        if provider_name == "claude_code":
+            provider_kwargs["claude_command"] = live_cfg.claude_command
+        elif provider_name == "codex":
+            provider_kwargs["codex_command"] = live_cfg.codex_command
+    provider = create_provider(provider_name, **provider_kwargs)
     result = await provider.send_prompt(session_id, instruction)
     return result.accepted
 

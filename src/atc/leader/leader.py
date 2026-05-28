@@ -194,7 +194,12 @@ async def start_leader(
         try:
             from atc.agents.factory import create_provider
 
-            _provider = create_provider(provider)
+            provider_kwargs: dict[str, str] = {"tmux_session": provider_cfg.tmux_session}
+            if provider == "claude_code":
+                provider_kwargs["claude_command"] = provider_cfg.claude_command
+            elif provider == "codex":
+                provider_kwargs["codex_command"] = provider_cfg.codex_command
+            _provider = create_provider(provider, **provider_kwargs)
             _cmp = deployed.claude_md_path
             _ctx = _cmp if _cmp.exists() else None
             await _provider.prepare_workspace(
