@@ -138,7 +138,14 @@ async def start_tower(body: StartRequest, request: Request) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return {"status": "started", "session_id": session_id, "project_id": body.project_id}
+    session = await db.execute("SELECT provider FROM sessions WHERE id = ?", (session_id,))
+    row = await session.fetchone()
+    return {
+        "status": "started",
+        "session_id": session_id,
+        "project_id": body.project_id,
+        "provider": row[0] if row else None,
+    }
 
 
 @router.post("/stop")

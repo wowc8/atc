@@ -180,6 +180,8 @@ class TowerController:
             await self._transition(TowerState.PLANNING)
             await self._transition(TowerState.MANAGING)
 
+        session = await db_ops.get_session(self._db, session_id)
+
         # Broadcast tower session info so the frontend subscribes immediately
         if self._ws_hub is not None:
             await self._ws_hub.broadcast(
@@ -189,6 +191,7 @@ class TowerController:
                     "session_id": session_id,
                     "status": "idle",
                     "project_id": project_id,
+                    "provider": session.provider if session else None,
                 },
             )
 
