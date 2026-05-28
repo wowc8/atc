@@ -240,6 +240,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     task_id         TEXT,
     name            TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'idle',
+    provider        TEXT NOT NULL DEFAULT 'claude_code',
+    scope_type      TEXT NOT NULL DEFAULT 'project',
+    scope_id        TEXT,
     host            TEXT,
     tmux_session    TEXT,
     tmux_pane       TEXT,
@@ -845,6 +848,9 @@ async def create_session(
     session_type: str,
     name: str,
     *,
+    provider: str = "claude_code",
+    scope_type: str = "project",
+    scope_id: str | None = None,
     task_id: str | None = None,
     host: str | None = None,
     status: str = "connecting",
@@ -857,6 +863,9 @@ async def create_session(
         session_type=session_type,
         name=name,
         status=status,
+        provider=provider,
+        scope_type=scope_type,
+        scope_id=scope_id if scope_id is not None else project_id,
         task_id=task_id,
         host=host,
         created_at=now,
@@ -864,9 +873,9 @@ async def create_session(
     )
     await db.execute(
         """INSERT INTO sessions
-           (id, project_id, session_type, task_id, name, status, host,
+           (id, project_id, session_type, task_id, name, status, provider, scope_type, scope_id, host,
             tmux_session, tmux_pane, alternate_on, auto_accept, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             session.id,
             session.project_id,
@@ -874,6 +883,9 @@ async def create_session(
             session.task_id,
             session.name,
             session.status,
+            session.provider,
+            session.scope_type,
+            session.scope_id,
             session.host,
             session.tmux_session,
             session.tmux_pane,

@@ -97,11 +97,16 @@ async def start_leader(
     project = await db_ops.get_project(conn, project_id)
     name = f"leader-{project.name}" if project else f"leader-{project_id[:8]}"
 
+    provider = project.agent_provider if project and project.agent_provider else "claude_code"
+
     session = await db_ops.create_session(
         conn,
         project_id=project_id,
         session_type="manager",
         name=name,
+        provider=provider,
+        scope_type="project",
+        scope_id=project_id,
         status=SessionStatus.CONNECTING.value,
     )
 

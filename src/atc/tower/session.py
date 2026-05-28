@@ -187,11 +187,16 @@ async def start_tower_session(
                 raise RuntimeError(str(exc)) from exc
             return sess.id
 
+    provider = project.agent_provider if project else "claude_code"
+
     session = await db_ops.create_session(
         conn,
         project_id=project_id,
         session_type="tower",
         name=name,
+        provider=provider,
+        scope_type="global",
+        scope_id=None,
         status=SessionStatus.CONNECTING.value,
     )
 
@@ -202,7 +207,6 @@ async def start_tower_session(
         )
 
     try:
-        provider = project.agent_provider if project else "claude_code"
         launch_cmd = get_launch_command(provider)
         working_dir = project.repo_path if project and project.repo_path else None
 

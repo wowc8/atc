@@ -335,11 +335,17 @@ async def create_ace(
             hooks, settings.json) using the real session_id after DB creation.
     """
     # Step 1: DB row first — guarantees the UI always sees every entity
+    project = await db_ops.get_project(conn, project_id)
+    provider = project.agent_provider if project and project.agent_provider else "claude_code"
+
     session = await db_ops.create_session(
         conn,
         project_id=project_id,
         session_type="ace",
         name=name,
+        provider=provider,
+        scope_type="project",
+        scope_id=project_id,
         task_id=task_id,
         host=host,
         status=SessionStatus.CONNECTING.value,
@@ -376,8 +382,7 @@ async def create_ace(
             try:
                 from atc.agents.factory import create_provider
 
-                project = await db_ops.get_project(conn, project_id)
-                provider_name = project.agent_provider if project and project.agent_provider else "claude_code"
+                provider_name = provider
                 _provider = create_provider(provider_name)
                 await _provider.prepare_workspace(
                     session.id, working_dir=effective_working_dir

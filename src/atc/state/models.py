@@ -49,6 +49,9 @@ class Session:
     session_type: str  # ace|manager|tower
     name: str
     status: str  # idle|connecting|working|paused|waiting|disconnected|error
+    provider: str = "claude_code"
+    scope_type: str = "project"  # global|project
+    scope_id: str | None = None
     task_id: str | None = None
     host: str | None = None
     tmux_session: str | None = None
