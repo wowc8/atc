@@ -186,7 +186,7 @@ async def update_agent_provider(
     body: AgentProviderUpdateRequest,
     request: Request,
 ) -> AgentProviderResponse:
-    """Update agent provider configuration (runtime only, not persisted to file)."""
+    """Update agent provider configuration for the live app instance."""
     from atc.agents.factory import list_providers
     from atc.tower.controller import TowerState
 

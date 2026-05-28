@@ -280,7 +280,10 @@ async def _spawn_provider_session(
     from atc.agents.factory import create_provider
 
     project = await db_ops.get_project(conn, project_id) if project_id else None
-    provider_name = project.agent_provider if project and project.agent_provider else "claude_code"
+    session = await db_ops.get_session(conn, session_id)
+    provider_name = session.provider if session and session.provider else (
+        project.agent_provider if project and project.agent_provider else "claude_code"
+    )
     provider = create_provider(provider_name)
 
     session = await db_ops.get_session(conn, session_id)

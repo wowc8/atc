@@ -188,17 +188,13 @@ async def start_leader(
             logger.info("Ensured repo_path exists: %s", spec.repo_path)
         working_dir = spec.repo_path or str(deployed.root)
 
-        launch_cmd = get_launch_command(
-            project.agent_provider if project else "claude_code",
-        )
+        launch_cmd = get_launch_command(provider)
 
         # Provider workspace prep (alongside existing tmux logic — fallback safe)
         try:
             from atc.agents.factory import create_provider
 
-            _provider = create_provider(
-                project.agent_provider if project else "claude_code",
-            )
+            _provider = create_provider(provider)
             _cmp = deployed.claude_md_path
             _ctx = _cmp if _cmp.exists() else None
             await _provider.prepare_workspace(
