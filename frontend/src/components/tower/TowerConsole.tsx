@@ -6,11 +6,11 @@ import StatusBadge from "../common/StatusBadge";
 import "./TowerConsole.css";
 
 /**
- * Full interactive terminal panel for the Tower Claude session.
+ * Full interactive terminal panel for the Tower session.
  *
- * For claude_code provider: auto-starts as an open terminal on app load.
- * For other providers: shows goal form with Start button.
- * Running: Full PTY terminal (type directly into the terminal).
+ * Tower is now modeled as a global provider-bound runtime, even though it may
+ * still choose a project context for goals. The UI should not suggest that
+ * switching projects also means switching Tower's provider identity directly.
  */
 export default function TowerConsole() {
   const { state, dispatch } = useAppContext();
@@ -28,23 +28,12 @@ export default function TowerConsole() {
   const terminalBackedProviders = new Set(["claude_code", "codex"]);
 
   const selectedProvider = selectedProject?.agent_provider ?? null;
-  const activeTowerProvider = activeTowerProject?.agent_provider ?? null;
   const isTerminalProvider = selectedProvider !== null && terminalBackedProviders.has(selectedProvider);
-  const towerSessionProvider = towerDetail.current_session_id ? activeTowerProvider : null;
   const towerProjectMismatch = Boolean(
     towerDetail.current_session_id &&
       selectedProject &&
       activeTowerProject &&
       selectedProject.id !== activeTowerProject.id,
-  );
-  const towerProviderMismatch = Boolean(
-    towerSessionProvider &&
-      selectedProvider &&
-      towerProjectMismatch &&
-      selectedProvider !== towerSessionProvider,
-  );
-  const canApplySelectedProvider = Boolean(
-    selectedProject && selectedProvider && isTerminalProvider,
   );
 
   const isRunning =
@@ -132,17 +121,11 @@ export default function TowerConsole() {
     }
   }
 
-  async function handleRestartWithSelectedProvider() {
-    if (!projectId || !selectedProvider || !canApplySelectedProvider) return;
+  async function handleRestartForSelectedProject() {
+    if (!projectId) return;
     userStopped.current = false;
     setLoading(true);
     try {
-      const updatedProject = await api.patch<typeof selectedProject>(`/projects/${projectId}/agent-provider`, {
-        agent_provider: selectedProvider,
-      });
-      if (updatedProject) {
-        dispatch({ type: "UPDATE_PROJECT", payload: updatedProject });
-      }
       if (towerDetail.current_session_id) {
         await api.post("/tower/stop");
       }
@@ -160,7 +143,7 @@ export default function TowerConsole() {
         },
       });
     } catch (err) {
-      console.error("Failed to restart Tower with selected provider:", err);
+      console.error("Failed to restart Tower for selected project:", err);
     } finally {
       setLoading(false);
     }
@@ -223,26 +206,16 @@ export default function TowerConsole() {
 
       {towerProjectMismatch && (
         <div className="tower-console__error" data-testid="tower-console-provider-mismatch">
-          Tower is currently attached to <strong>{activeTowerProject?.name ?? "another project"}</strong>
-          {towerSessionProvider ? (
-            <>
-              {" "}using <strong>{towerSessionProvider}</strong>
-            </>
-          ) : null}
-          , while the selected project is <strong>{selectedProject?.name}</strong>
-          {selectedProvider ? (
-            <>
-              {" "}with <strong>{selectedProvider}</strong>
-            </>
-          ) : null}
-          . Restart Tower to switch live session context.
+          Tower is currently attached to <strong>{activeTowerProject?.name ?? "another project"}</strong>,
+          while the selected project is <strong>{selectedProject?.name}</strong>. Restart Tower if you want the
+          live session to move to the selected project context.
           <button
             className="btn btn-sm"
-            onClick={handleRestartWithSelectedProvider}
-            disabled={loading || !canApplySelectedProvider}
+            onClick={handleRestartForSelectedProject}
+            disabled={loading || !selectedProject}
             data-testid="tower-console-restart-provider"
           >
-            {loading ? "Applying..." : "Apply selected project and restart Tower"}
+            {loading ? "Restarting..." : "Restart Tower for selected project"}
           </button>
         </div>
       )}
