@@ -945,12 +945,20 @@ async def update_session_status(
     db: aiosqlite.Connection,
     session_id: str,
     status: str,
+    *,
+    clear_tmux: bool = False,
 ) -> None:
     """Update session status and updated_at timestamp."""
-    await db.execute(
-        "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
-        (status, _now(), session_id),
-    )
+    if clear_tmux:
+        await db.execute(
+            "UPDATE sessions SET status = ?, tmux_session = NULL, tmux_pane = NULL, updated_at = ? WHERE id = ?",
+            (status, _now(), session_id),
+        )
+    else:
+        await db.execute(
+            "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+            (status, _now(), session_id),
+        )
     await db.commit()
 
 
