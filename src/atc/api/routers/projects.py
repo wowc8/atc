@@ -249,9 +249,9 @@ async def update_project_provider(
     request: Request,
 ) -> ProjectResponse:
     """Update the agent provider for a project."""
-    from atc.agents.factory import list_providers
+    from atc.providers.registry import list_provider_runtimes
 
-    available = list_providers()
+    available = list_provider_runtimes()
     if body.agent_provider not in available:
         raise HTTPException(
             status_code=422,

@@ -332,6 +332,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
             for ts in tower_sessions:
                 if ts.status not in ("error", "disconnected") and ts.tmux_pane:
+                    current_provider = settings.agent_provider.default
+                    if ts.provider != current_provider:
+                        logger.warning(
+                            "Tower session %s provider mismatch on restore (session=%s current=%s) — refusing restore",
+                            ts.id,
+                            ts.provider,
+                            current_provider,
+                        )
+                        await db_ops.update_session_status(db, ts.id, "disconnected")
+                        continue
                     # Verify the tmux pane is actually alive — don't restore
                     # state for dead panes (let frontend auto-start instead).
                     if not await _pane_is_alive(ts.tmux_pane):
@@ -540,7 +550,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Resolve the claude binary path at startup to handle nvm / non-standard installs.
     # On macOS with nvm, tmux panes spawn without sourcing shell RC files, so the
     # bare "claude" command is not in PATH.  We resolve it once here and update the
-    # settings so every call to get_launch_command() picks up the absolute path.
+    # settings so provider runtime registry lookups pick up the absolute path.
     _resolve_claude_binary(settings)
 
     logger.info("ATC startup complete")
@@ -614,7 +624,7 @@ def _resolve_claude_binary(settings: "Settings") -> None:
                     "agent_provider",
                     settings.agent_provider.model_copy(update={"claude_command": new_cmd}),
                 )
-            # Also update the factory registry so get_launch_command() uses the full path
+            # Also update the legacy launch-command cache so older fallback paths use the full path
             from atc.agents import factory as _factory
             _factory._LAUNCH_COMMANDS["claude_code"] = new_cmd
             return

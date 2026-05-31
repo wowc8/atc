@@ -4,7 +4,6 @@ import asyncio
 import json
 from typing import Any
 
-from atc.agents.factory import get_launch_command
 from atc.leader import leader as leader_ops
 from atc.orchestration.errors import OrchestrationErrorCode, OrchestrationException
 from atc.orchestration.models import (
@@ -225,7 +224,6 @@ class OrchestrationService:
             request.model_dump_json(),
         )
 
-        launch_cmd = get_launch_command(project.agent_provider)
         ace_name = request.context.get("task_title") if request.context else None
         ace_name = ace_name or (f"ace-{request.task_id[:8]}" if request.task_id else "ace-orchestration")
 
@@ -237,7 +235,6 @@ class OrchestrationService:
                 task_id=request.task_id,
                 host=request.host,
                 working_dir=project.repo_path,
-                launch_command=launch_cmd,
                 deploy_spec_kwargs={
                     "project_name": project.name,
                     "task_title": (request.context or {}).get("task_title") or ace_name,
