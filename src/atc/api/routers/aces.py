@@ -19,7 +19,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from atc.agents.factory import get_launch_command
 from atc.core.errors import CreationFailedError, SessionNotFoundError, SessionStaleError
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
@@ -124,8 +123,6 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
 
-    launch_cmd = get_launch_command(project.agent_provider)
-
     try:
         session_id = await ace_ops.create_ace(
             db,
@@ -135,7 +132,6 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
             host=body.host,
             event_bus=event_bus,
             working_dir=project.repo_path,
-            launch_command=launch_cmd,
             # Pass deploy info so create_ace can deploy with the real session_id
             deploy_spec_kwargs={
                 "project_name": project.name,

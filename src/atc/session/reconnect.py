@@ -12,7 +12,6 @@ import os
 from typing import TYPE_CHECKING
 
 from atc.agents.deploy import TowerDeploySpec, deploy_tower_files
-from atc.agents.factory import get_launch_command
 from atc.leader.leader import _build_manager_deploy_spec
 from atc.session.ace import _kill_pane, _pane_is_alive, _spawn_provider_session
 from atc.session.state_machine import SessionStatus, transition
@@ -116,8 +115,9 @@ async def reconnect_session(
         await db_ops.update_session_status(conn, session_id, SessionStatus.CONNECTING.value)
 
     try:
-        # Look up the project's agent provider to get the correct launch command
-        launch_cmd: str | None = None
+        # Reconnect must honor the provider stamped on the session row.
+        # If the currently desired provider has changed, do not silently reuse
+        # or mutate the old session in place.
         working_dir: str | None = None
         project = None
         if session.project_id:
@@ -132,14 +132,15 @@ async def reconnect_session(
                     current_provider = load_settings().agent_provider.default
                 if session.provider != current_provider:
                     logger.info(
-                        "Session %s provider mismatch on reconnect (session=%s current=%s), forcing replacement instead of reuse",
+                        "Session %s provider mismatch on reconnect (session=%s current=%s), refusing reuse so a replacement session can be created",
                         session_id,
                         session.provider,
                         current_provider,
                     )
-                    await db_ops.update_session_status(conn, session_id, SessionStatus.DISCONNECTED.value)
+                    await db_ops.update_session_status(
+                        conn, session_id, SessionStatus.DISCONNECTED.value
+                    )
                     return False
-                launch_cmd = get_launch_command(current_provider)
                 working_dir = project.repo_path
 
         # Tower sessions need their identity files (CLAUDE.md, settings)
@@ -196,7 +197,6 @@ async def reconnect_session(
             session_type=getattr(session, "session_type", "ace"),
             working_dir=working_dir,
             context_file=context_file,
-            launch_command=launch_cmd,
         )
         await db_ops.update_session_tmux(conn, session_id, tmux_session, pane_id)
 

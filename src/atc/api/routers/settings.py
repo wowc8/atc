@@ -187,7 +187,7 @@ async def update_agent_provider(
     request: Request,
 ) -> AgentProviderResponse:
     """Update agent provider configuration for the live app instance."""
-    from atc.agents.factory import list_providers
+    from atc.providers.registry import list_provider_runtimes
     from atc.tower.controller import TowerState
 
     settings = request.app.state.settings
@@ -199,7 +199,7 @@ async def update_agent_provider(
     old_default = cfg.default
 
     if body.default is not None:
-        available = list_providers()
+        available = list_provider_runtimes()
         if body.default not in available:
             raise HTTPException(
                 status_code=422,
@@ -260,35 +260,19 @@ async def update_agent_provider(
 
 @router.get("/providers")
 async def list_available_providers() -> list[ProviderInfo]:
-    """List all registered agent providers with their capabilities."""
-    from atc.agents.factory import create_provider, list_providers
+    """List all registered provider runtimes via the registry boundary."""
+    from atc.providers.registry import list_provider_runtime_infos
 
-    result: list[ProviderInfo] = []
-    for name in list_providers():
-        try:
-            provider = create_provider(name)
-            caps = provider.get_capabilities()
-            result.append(
-                ProviderInfo(
-                    name=name,
-                    supports_streaming=caps.supports_streaming,
-                    supports_tool_use=caps.supports_tool_use,
-                    context_window=caps.context_window,
-                    model=caps.model,
-                )
-            )
-        except Exception:
-            logger.warning("Failed to instantiate provider %s for capabilities", name)
-            result.append(
-                ProviderInfo(
-                    name=name,
-                    supports_streaming=False,
-                    supports_tool_use=False,
-                    context_window=0,
-                    model="",
-                )
-            )
-    return result
+    return [
+        ProviderInfo(
+            name=info.name,
+            supports_streaming=info.supports_streaming,
+            supports_tool_use=info.supports_tool_use,
+            context_window=info.context_window,
+            model=info.model,
+        )
+        for info in list_provider_runtime_infos()
+    ]
 
 
 # ---------------------------------------------------------------------------

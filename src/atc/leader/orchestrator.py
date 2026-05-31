@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
-from atc.agents.factory import get_launch_command
 from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.session.ace import create_ace, destroy_ace, start_ace
@@ -180,7 +179,6 @@ class LeaderOrchestrator:
                 if project and project.agent_provider
                 else self._current_provider_default()
             )
-            launch_cmd = get_launch_command(provider_name)
 
             session_id = await create_ace(
                 self.conn,
@@ -189,7 +187,6 @@ class LeaderOrchestrator:
                 task_id=task_graph_id,
                 event_bus=self.event_bus,
                 working_dir=repo_path,
-                launch_command=launch_cmd,
                 deploy_spec_kwargs={
                     "project_name": project_name,
                     "task_title": title,

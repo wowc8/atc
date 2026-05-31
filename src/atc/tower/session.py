@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from atc.agents.deploy import _DEFAULT_STAGING_ROOT, TowerDeploySpec, deploy_tower_files
-from atc.agents.factory import get_launch_command
 from atc.config import AgentProviderConfig
 from atc.session.ace import (
     _accept_trust_dialog,
@@ -171,7 +170,6 @@ async def start_tower_session(
         )
 
     try:
-        launch_cmd = get_launch_command(provider)
         working_dir = project.repo_path if project and project.repo_path else None
 
         # Deploy config files (CLAUDE.md, hooks, settings.json) before launch
@@ -195,9 +193,8 @@ async def start_tower_session(
         _log_working_dir_contents(working_dir, session.id, "start_tower_session")
 
         logger.warning(
-            "TOWER SPAWN provider=%s launch_command=%s project_id=%s session_id=%s",
+            "TOWER SPAWN provider=%s project_id=%s session_id=%s",
             provider,
-            launch_cmd,
             project_id,
             session.id,
         )
@@ -208,7 +205,6 @@ async def start_tower_session(
             session_type="tower",
             working_dir=working_dir,
             context_file=deployed.claude_md_path if deployed.claude_md_path.exists() else None,
-            launch_command=launch_cmd,
         )
         await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 

@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
-from atc.agents.factory import get_launch_command
 from atc.config import AgentProviderConfig
 from atc.session.ace import (
     _accept_trust_dialog,
@@ -94,21 +93,38 @@ async def start_leader(
     if leader is None:
         leader = await db_ops.create_leader(conn, project_id, goal=goal)
 
-    # If leader already has an active session, just return it
+    project = await db_ops.get_project(conn, project_id)
+    name = f"leader-{project.name}" if project else f"leader-{project_id[:8]}"
+
+    provider_cfg = _current_provider_config(conn)
+    provider = provider_cfg.default
+
+    # If leader already has an active session, only reuse it when the stamped
+    # provider still matches the current desired provider.
     if leader.session_id:
         existing = await db_ops.get_session(conn, leader.session_id)
         if existing and existing.status not in (
             SessionStatus.ERROR.value,
             SessionStatus.DISCONNECTED.value,
         ):
-            return leader.session_id
+            if existing.provider == provider:
+                return leader.session_id
+            logger.warning(
+                "Leader session %s provider mismatch on reuse (session=%s current=%s) — refusing reuse",
+                leader.session_id,
+                existing.provider,
+                provider,
+            )
+            await db_ops.update_session_status(
+                conn, leader.session_id, SessionStatus.DISCONNECTED.value
+            )
+            await conn.execute(
+                "UPDATE leaders SET session_id = NULL, status = 'idle', updated_at = datetime('now') WHERE id = ?",
+                (leader.id,),
+            )
+            await conn.commit()
 
     # Create manager session (DB-first)
-    project = await db_ops.get_project(conn, project_id)
-    name = f"leader-{project.name}" if project else f"leader-{project_id[:8]}"
-
-    provider_cfg = _current_provider_config(conn)
-    provider = provider_cfg.default
 
     session = await db_ops.create_session(
         conn,
@@ -188,26 +204,26 @@ async def start_leader(
             logger.info("Ensured repo_path exists: %s", spec.repo_path)
         working_dir = spec.repo_path or str(deployed.root)
 
-        launch_cmd = get_launch_command(provider)
-
-        # Provider workspace prep (alongside existing tmux logic — fallback safe)
+        # Provider workspace prep via the new runtime service boundary.
         try:
-            from atc.agents.factory import create_provider
+            from atc.runtime.models import RoleKind, StartRoleRequest
+            from atc.runtime.service import RuntimeService
 
-            provider_kwargs: dict[str, str] = {"tmux_session": provider_cfg.tmux_session}
-            if provider == "claude_code":
-                provider_kwargs["claude_command"] = provider_cfg.claude_command
-            elif provider == "codex":
-                provider_kwargs["codex_command"] = provider_cfg.codex_command
-            _provider = create_provider(provider, **provider_kwargs)
             _cmp = deployed.claude_md_path
-            _ctx = _cmp if _cmp.exists() else None
-            await _provider.prepare_workspace(
-                session.id, working_dir=working_dir, context_file=_ctx
+            _ctx = str(_cmp) if _cmp.exists() else None
+            await RuntimeService().prepare_workspace(
+                StartRoleRequest(
+                    session_id=session.id,
+                    provider_name=provider,
+                    role=RoleKind.LEADER,
+                    project_id=project_id,
+                    working_dir=working_dir,
+                    context_ref=_ctx,
+                )
             )
         except Exception as _prep_exc:
             logger.debug(
-                "provider.prepare_workspace skipped for leader %s: %s",
+                "runtime.prepare_workspace skipped for leader %s: %s",
                 session.id,
                 _prep_exc,
             )
@@ -219,7 +235,6 @@ async def start_leader(
             session_type="manager",
             working_dir=working_dir,
             context_file=deployed.claude_md_path if deployed.claude_md_path.exists() else None,
-            launch_command=launch_cmd,
         )
         await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 

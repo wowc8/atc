@@ -25,7 +25,6 @@ from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
-from atc.agents.base import ProviderSpawnRequest
 from atc.agents.claude_runtime import accept_startup_dialogs
 from atc.session.state_machine import (
     SessionStatus,
@@ -277,46 +276,39 @@ async def _spawn_provider_session(
     context_file: _Path | None = None,
     launch_command: str | None = None,
 ) -> tuple[str, str]:
-    from atc.agents.factory import create_provider
+    from atc.runtime.models import RoleKind, StartRoleRequest
+    from atc.runtime.service import RuntimeService
 
     project = await db_ops.get_project(conn, project_id) if project_id else None
     session = await db_ops.get_session(conn, session_id)
     provider_name = session.provider if session and session.provider else (
         project.agent_provider if project and project.agent_provider else "claude_code"
     )
-    provider_cfg = getattr(getattr(conn, "_connection", None), "app_state", None)
-    provider_kwargs: dict[str, str] = {}
-    if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
-        live_cfg = provider_cfg.settings.agent_provider
-        provider_kwargs["tmux_session"] = live_cfg.tmux_session
-        if provider_name == "claude_code":
-            provider_kwargs["claude_command"] = live_cfg.claude_command
-        elif provider_name == "codex":
-            provider_kwargs["codex_command"] = live_cfg.codex_command
-    provider = create_provider(provider_name, **provider_kwargs)
 
     session = await db_ops.get_session(conn, session_id)
     if session is None:
         raise ValueError(f"Session {session_id} not found")
 
     role = {
-        "ace": "ace",
-        "manager": "leader",
-        "tower": "tower",
-    }.get(session_type, "ace")
+        "ace": RoleKind.ACE,
+        "manager": RoleKind.LEADER,
+        "tower": RoleKind.TOWER,
+    }.get(session_type, RoleKind.ACE)
 
-    info = await provider.spawn_for_session(
-        ProviderSpawnRequest(
-            session=session,
-            project=project,
-            working_dir=working_dir,
-            launch_command=launch_command,
-            context_file=context_file,
+    service = RuntimeService()
+    handle = await service.spawn_existing_session(
+        StartRoleRequest(
+            session_id=session.id,
+            provider_name=provider_name,
             role=role,
+            project_id=project_id,
+            working_dir=working_dir,
+            context_ref=str(context_file) if context_file else None,
+            metadata={"launch_command": launch_command} if launch_command else {},
         )
     )
-    pane_id = str(info.metadata.get("pane_id") or "")
-    tmux_session = str(info.metadata.get("tmux_session") or ATC_TMUX_SESSION)
+    pane_id = str(handle.tmux_pane or "")
+    tmux_session = str(handle.tmux_session or ATC_TMUX_SESSION)
     if not pane_id:
         raise RuntimeError(f"Provider {provider_name} did not return a pane_id for {session_id}")
     return tmux_session, pane_id
@@ -395,19 +387,25 @@ async def create_ace(
 
     # Step 3: spawn tmux pane
     try:
-        # Provider workspace prep (alongside existing tmux logic — fallback safe)
+        # Provider workspace prep via the new runtime service boundary.
         if effective_working_dir:
             try:
-                from atc.agents.factory import create_provider
+                from atc.runtime.models import RoleKind, StartRoleRequest
+                from atc.runtime.service import RuntimeService
 
-                provider_name = provider
-                _provider = create_provider(provider_name)
-                await _provider.prepare_workspace(
-                    session.id, working_dir=effective_working_dir
+                await RuntimeService().prepare_workspace(
+                    StartRoleRequest(
+                        session_id=session.id,
+                        provider_name=provider,
+                        role=RoleKind.ACE,
+                        project_id=project_id,
+                        working_dir=effective_working_dir,
+                        context_ref=str(deployed.claude_md_path) if deployed and deployed.claude_md_path.exists() else None,
+                    )
                 )
             except Exception as _prep_exc:
                 logger.debug(
-                    "provider.prepare_workspace skipped for %s: %s",
+                    "runtime.prepare_workspace skipped for %s: %s",
                     session.id,
                     _prep_exc,
                 )
@@ -449,31 +447,37 @@ async def _send_session_instruction(
     session_id: str,
     instruction: str,
 ) -> bool:
-    """Send an instruction through the configured provider for a session."""
-    from atc.agents.factory import create_provider
+    """Send an instruction through the new runtime service/provider contract."""
+    from atc.runtime.models import InstructionRequest, RoleKind, RuntimeSessionHandle, RuntimeTransport
+    from atc.runtime.service import RuntimeService
 
     session = await db_ops.get_session(conn, session_id)
     if session is None:
         raise ValueError(f"Session {session_id} not found")
-    if not session.project_id:
-        raise ValueError(f"Session {session_id} has no project")
 
-    project = await db_ops.get_project(conn, session.project_id)
-    provider_name = session.provider if session.provider else (
-        project.agent_provider if project and project.agent_provider else "claude_code"
+    role = RoleKind.ACE
+    if session.session_type == "tower":
+        role = RoleKind.TOWER
+    elif session.session_type in ("leader", "manager"):
+        role = RoleKind.LEADER
+
+    handle = RuntimeSessionHandle(
+        session_id=session.id,
+        provider_name=session.provider or "claude_code",
+        role=role,
+        transport=RuntimeTransport.TMUX,
+        project_id=session.project_id,
+        tmux_session=session.tmux_session,
+        tmux_pane=session.tmux_pane,
     )
-    provider_cfg = getattr(getattr(conn, "_connection", None), "app_state", None)
-    provider_kwargs: dict[str, str] = {}
-    if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
-        live_cfg = provider_cfg.settings.agent_provider
-        provider_kwargs["tmux_session"] = live_cfg.tmux_session
-        if provider_name == "claude_code":
-            provider_kwargs["claude_command"] = live_cfg.claude_command
-        elif provider_name == "codex":
-            provider_kwargs["codex_command"] = live_cfg.codex_command
-    provider = create_provider(provider_name, **provider_kwargs)
-    result = await provider.send_prompt(session_id, instruction)
-    return result.accepted
+
+    service = RuntimeService()
+    request = InstructionRequest(
+        session_id=session.id,
+        message=instruction,
+    )
+    await service.send_instruction(handle, request)
+    return True
 
 
 async def start_ace(
