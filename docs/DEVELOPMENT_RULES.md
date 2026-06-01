@@ -42,3 +42,5 @@ Leave behind structure and docs that reduce the need for future deep rediscovery
 
 
 - `make cleardb` is a local reset command only. It should stop dev processes and clear DB/state/cache, but it must not pull code, rebuild the venv, or auto-start the app. Use `make setup` and `make dev` explicitly after reset.
+
+- Avoid import-time cycles between legacy providers and session lifecycle modules. If a provider only needs a session helper for spawn-time behavior, prefer a narrow local import at call time instead of a module-level cross-import.

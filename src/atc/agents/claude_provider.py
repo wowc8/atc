@@ -31,7 +31,6 @@ from atc.agents.claude_runtime import (
     wait_for_prompt as claude_wait_for_prompt,
 )
 from atc.terminal.control import send_instruction_async
-from atc.session.ace import _ensure_tmux_session
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +109,8 @@ class ClaudeCodeProvider:
 
         shell_cmd = f"{env_prefix}{' '.join(cmd_parts)}"
         logger.debug("spawn_session role=%s session=%s", role, session_id)
+
+        from atc.session.ace import _ensure_tmux_session
 
         await _ensure_tmux_session(self._tmux_session)
 
