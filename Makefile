@@ -33,7 +33,7 @@ clean: ## Remove build artifacts and venv
 	rm -rf $(VENV) frontend/node_modules dist/ build/ *.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-cleardb: ## Full reset: kill ALL dev processes, nuke venv + DB, rebuild from scratch, restart
+cleardb: ## Reset local runtime state only: stop dev processes, remove DB/state/cache so setup/dev start fresh
 	@echo "→ Killing all ATC dev processes (uvicorn, vite, node)..."
 	@pkill -f "uvicorn" 2>/dev/null || true
 	@pkill -f "vite" 2>/dev/null || true
@@ -41,10 +41,6 @@ cleardb: ## Full reset: kill ALL dev processes, nuke venv + DB, rebuild from scr
 	@lsof -ti:8420 | xargs kill -9 2>/dev/null || true
 	@lsof -ti:5173,5174,5175,5176,5177 | xargs kill -9 2>/dev/null || true
 	@sleep 1
-	@echo "→ Ensuring git remote uses HTTPS (not SSH)..."
-	@git remote set-url origin https://github.com/wowc8/atc.git
-	@echo "→ Pulling latest code..."
-	@git fetch origin && git reset --hard origin/main || echo "⚠ git pull failed. Continuing with local code."
 	@if [ -f atc.db ]; then \
 		rm atc.db && echo "✓ atc.db deleted"; \
 	else \
@@ -52,15 +48,12 @@ cleardb: ## Full reset: kill ALL dev processes, nuke venv + DB, rebuild from scr
 	fi
 	@echo "→ Cleaning up stale agent staging dirs and tmux sessions..."
 	@rm -rf /tmp/atc-agents && echo "✓ /tmp/atc-agents cleared" || true
-	@/usr/local/bin/tmux kill-session -t atc 2>/dev/null && echo "✓ tmux atc session killed" || true
-	@echo "→ Nuking .venv to ensure a clean Python environment..."
-	@rm -rf $(VENV)
-	@echo "→ Rebuilding venv and installing all deps..."
-	@python3 -m venv $(VENV)
-	@$(VENV)/bin/pip install -e ".[dev]" --quiet
-	@echo "✓ venv rebuilt and package installed fresh"
-	@echo "→ Starting dev servers..."
-	@$(MAKE) dev
+	@tmux kill-session -t atc 2>/dev/null && echo "✓ tmux atc session killed" || true
+	@echo "→ Clearing caches..."
+	@rm -rf .pytest_cache frontend/.vite frontend/node_modules/.vite
+	@find . -type d -name __pycache__ -not -path "./.venv/*" -exec rm -rf {} + 2>/dev/null || true
+	@echo "✓ Local runtime state cleared. Next run make setup and/or make dev for a fresh start."
+
 
 clearcache: ## Remove Python __pycache__, .pytest_cache, and frontend .vite cache
 	find . -type d -name __pycache__ -not -path "./.venv/*" -exec rm -rf {} + 2>/dev/null || true
