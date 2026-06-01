@@ -39,3 +39,6 @@ When introducing a new architectural boundary, create or update the durable doc 
 
 ## 8. Make changes readable for future agents
 Leave behind structure and docs that reduce the need for future deep rediscovery.
+
+
+- `make cleardb` is a local reset command only. It should stop dev processes and clear DB/state/cache, but it must not pull code, rebuild the venv, or auto-start the app. Use `make setup` and `make dev` explicitly after reset.
