@@ -45,3 +45,4 @@ Leave behind structure and docs that reduce the need for future deep rediscovery
 
 - Avoid import-time cycles between legacy providers and session lifecycle modules. If a provider only needs a session helper for spawn-time behavior, prefer a narrow local import at call time instead of a module-level cross-import.
 - The same import-cycle guard applies to OpenCode and other legacy providers too, not just Claude. Provider modules must not import `session.ace` helpers at module import time when a local call-site import will do.
+- Codex legacy provider imports follow the same rule: no module-level import from `session.ace` when a local spawn-path import avoids the cycle.
