@@ -59,3 +59,16 @@ def test_list_provider_runtime_infos_contains_builtins() -> None:
     names = {info.name for info in infos}
     assert "claude_code" in names
     assert "codex" in names
+
+
+
+def test_list_provider_runtime_infos_exposes_builtin_metadata() -> None:
+    infos = {info.name: info for info in list_provider_runtime_infos()}
+    assert infos["claude_code"].supports_streaming is True
+    assert infos["claude_code"].supports_tool_use is True
+    assert infos["claude_code"].context_window == 200_000
+    assert infos["claude_code"].model == "claude"
+    assert infos["codex"].supports_streaming is True
+    assert infos["codex"].supports_tool_use is True
+    assert infos["codex"].context_window == 200_000
+    assert infos["codex"].model == "codex"
