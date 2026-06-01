@@ -341,7 +341,7 @@ async def create_ace(
     """
     # Step 1: DB row first — guarantees the UI always sees every entity
     project = await db_ops.get_project(conn, project_id)
-    provider_cfg = getattr(getattr(conn, "_connection", None), "app_state", None)
+    provider_cfg = getattr(getattr(conn, "_app_state_carrier", None), "app_state", None)
     if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
         provider = provider_cfg.settings.agent_provider.default
     else:
