@@ -172,3 +172,21 @@ def test_service_refreshes_cached_provider_when_live_settings_change() -> None:
 
     assert first is not second
     assert getattr(second, "codex_command") == "codex --profile prod"
+
+
+
+def test_service_refreshes_cached_provider_when_live_settings_change_via_sqlite_connection() -> None:
+    service = RuntimeService()
+    first_settings = SimpleNamespace(agent_provider=SimpleNamespace(tmux_session="atc", claude_command="claude", codex_command="codex"))
+    second_settings = SimpleNamespace(agent_provider=SimpleNamespace(tmux_session="atc", claude_command="claude", codex_command="codex --profile prod"))
+    sqlite_conn = SimpleNamespace()
+    first_conn = SimpleNamespace(_connection=sqlite_conn)
+    sqlite_conn.app_state = SimpleNamespace(settings=first_settings)
+
+    first = service._get_provider_runtime("codex", first_conn)
+
+    sqlite_conn.app_state = SimpleNamespace(settings=second_settings)
+    second = service._get_provider_runtime("codex", first_conn)
+
+    assert first is not second
+    assert getattr(second, "codex_command") == "codex --profile prod"
