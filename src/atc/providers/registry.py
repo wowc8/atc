@@ -89,10 +89,33 @@ def list_provider_runtimes() -> list[str]:
 def list_provider_runtime_infos() -> list[ProviderRuntimeInfo]:
     """List registry-owned provider metadata for settings and discovery surfaces."""
 
-    return [
-        ProviderRuntimeInfo(name=name)
-        for name in list_provider_runtimes()
-    ]
+    infos: list[ProviderRuntimeInfo] = []
+    for name in list_provider_runtimes():
+        model = ""
+        supports_streaming = False
+        supports_tool_use = False
+        context_window = 0
+        factory = get_provider_runtime_factory(name)
+        if factory is ClaudeCodeRuntime:
+            model = "claude"
+            supports_streaming = True
+            supports_tool_use = True
+            context_window = 200_000
+        elif factory is CodexRuntime:
+            model = "codex"
+            supports_streaming = True
+            supports_tool_use = True
+            context_window = 200_000
+        infos.append(
+            ProviderRuntimeInfo(
+                name=name,
+                model=model,
+                supports_streaming=supports_streaming,
+                supports_tool_use=supports_tool_use,
+                context_window=context_window,
+            )
+        )
+    return infos
 
 def _register_builtin_provider_runtimes() -> None:
     global _BUILTINS_REGISTERED
