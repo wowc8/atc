@@ -28,6 +28,7 @@ from atc.session.ace import (
 )
 from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
+from atc.state.db import get_connection_app_state
 
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _current_provider_config(conn: aiosqlite.Connection) -> AgentProviderConfig:
-    settings = getattr(getattr(conn, "_app_state_carrier", None), "app_state", None)
+    settings = get_connection_app_state(conn)
     if settings is not None and getattr(settings, "settings", None) is not None:
         return settings.settings.agent_provider
     from atc.config import load_settings

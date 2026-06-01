@@ -31,6 +31,7 @@ from atc.session.state_machine import (
     transition,
 )
 from atc.state import db as db_ops
+from atc.state.db import get_connection_app_state
 
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
@@ -341,7 +342,7 @@ async def create_ace(
     """
     # Step 1: DB row first — guarantees the UI always sees every entity
     project = await db_ops.get_project(conn, project_id)
-    provider_cfg = getattr(getattr(conn, "_app_state_carrier", None), "app_state", None)
+    provider_cfg = get_connection_app_state(conn)
     if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
         provider = provider_cfg.settings.agent_provider.default
     else:

@@ -42,6 +42,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CONNECTION_APP_STATE: dict[int, Any] = {}
+
+
+def set_connection_app_state(conn: Any, app_state: Any) -> None:
+    """Bind FastAPI app state to an aiosqlite connection without monkeypatching internals."""
+
+    _CONNECTION_APP_STATE[id(conn)] = app_state
+
+
+def get_connection_app_state(conn: Any) -> Any | None:
+    """Resolve previously bound app state for an aiosqlite connection."""
+
+    return _CONNECTION_APP_STATE.get(id(conn))
+
+
+def clear_connection_app_state(conn: Any) -> None:
+    """Forget app state bound to an aiosqlite connection."""
+
+    _CONNECTION_APP_STATE.pop(id(conn), None)
+
 
 class AppStateCarrier:
     """Attachable holder for live app state alongside sqlite connections."""
@@ -209,9 +229,9 @@ async def get_connection(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute("PRAGMA busy_timeout=30000")
         db.row_factory = aiosqlite.Row
-        db._app_state_carrier = AppStateCarrier()
         yield db
     finally:
+        clear_connection_app_state(db)
         await db.close()
 
 
