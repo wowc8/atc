@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from atc.providers.registry import register_provider_runtime
 from atc.runtime.models import (
@@ -156,3 +157,18 @@ def test_runtime_service_assign_task_to_ace_uses_provider() -> None:
 
     provider = service.get_provider("dummy_runtime_ace")
     assert provider.assignments[-1].task_id == "task-1"
+
+
+
+def test_service_refreshes_cached_provider_when_live_settings_change() -> None:
+    service = RuntimeService()
+    first_settings = SimpleNamespace(agent_provider=SimpleNamespace(tmux_session="atc", claude_command="claude", codex_command="codex"))
+    second_settings = SimpleNamespace(agent_provider=SimpleNamespace(tmux_session="atc", claude_command="claude", codex_command="codex --profile prod"))
+    first_conn = SimpleNamespace(_connection=SimpleNamespace(app_state=SimpleNamespace(settings=first_settings)))
+    second_conn = SimpleNamespace(_connection=SimpleNamespace(app_state=SimpleNamespace(settings=second_settings)))
+
+    first = service._get_provider_runtime("codex", first_conn)
+    second = service._get_provider_runtime("codex", second_conn)
+
+    assert first is not second
+    assert getattr(second, "codex_command") == "codex --profile prod"

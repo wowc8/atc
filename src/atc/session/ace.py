@@ -302,6 +302,7 @@ async def _spawn_provider_session(
             provider_name=provider_name,
             role=role,
             project_id=project_id,
+            connection=conn,
             working_dir=working_dir,
             context_ref=str(context_file) if context_file else None,
             metadata={"launch_command": launch_command} if launch_command else {},

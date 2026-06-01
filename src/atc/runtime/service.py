@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from atc.providers.base import ProviderRuntime
-from atc.providers.registry import create_provider_runtime
+from atc.providers.registry import create_provider_runtime, runtime_kwargs_for_provider
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
@@ -27,14 +27,23 @@ class RuntimeService:
         self._handles: dict[str, RuntimeSessionHandle] = {}
         self._providers: dict[str, ProviderRuntime] = {}
 
+    def _get_provider_runtime(self, provider_name: str, conn: object | None = None) -> ProviderRuntime:
+        """Resolve a provider runtime, refreshing cached instances when live settings differ."""
+
+        app_state = getattr(getattr(conn, "_connection", None), "app_state", None)
+        settings = getattr(app_state, "settings", None) if app_state is not None else None
+        desired_kwargs = runtime_kwargs_for_provider(provider_name, settings) if settings is not None else runtime_kwargs_for_provider(provider_name)
+
+        provider = self._providers.get(provider_name)
+        if provider is None or any(getattr(provider, key, None) != value for key, value in desired_kwargs.items()):
+            provider = create_provider_runtime(provider_name, **desired_kwargs)
+            self._providers[provider_name] = provider
+        return provider
+
     def get_provider(self, provider_name: str) -> ProviderRuntime:
         """Resolve a provider runtime implementation by name."""
 
-        provider = self._providers.get(provider_name)
-        if provider is None:
-            provider = create_provider_runtime(provider_name)
-            self._providers[provider_name] = provider
-        return provider
+        return self._get_provider_runtime(provider_name)
 
     def remember_handle(self, handle: RuntimeSessionHandle) -> RuntimeSessionHandle:
         """Store a runtime handle for later session-targeted operations."""
@@ -101,7 +110,7 @@ class RuntimeService:
     async def spawn_existing_session(self, request: StartRoleRequest) -> RuntimeSessionHandle:
         """Materialize an already-created DB session row into a live runtime session."""
 
-        provider = self.get_provider(request.provider_name)
+        provider = self._get_provider_runtime(request.provider_name, getattr(request, "connection", None))
         handle = await provider.spawn_existing_session(request)
         return self.remember_handle(handle)
 
