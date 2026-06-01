@@ -274,6 +274,8 @@ async def update_agent_provider(
         if tower_was_running:
             try:
                 restart_project_id = handoff["tower"]["project_id"]
+                tower._current_goal = handoff["tower"]["goal"]
+                tower._state = TowerState.IDLE
                 if restart_project_id is not None:
                     await tower.start_session(restart_project_id)
                 else:
