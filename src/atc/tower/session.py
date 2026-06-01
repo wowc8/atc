@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 def _current_provider_config(conn: "aiosqlite.Connection") -> AgentProviderConfig:
-    settings = getattr(getattr(conn, "_connection", None), "app_state", None)
+    settings = getattr(getattr(conn, "_app_state_carrier", None), "app_state", None)
     if settings is not None and getattr(settings, "settings", None) is not None:
         return settings.settings.agent_provider
     from atc.config import load_settings

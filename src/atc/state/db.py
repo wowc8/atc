@@ -42,6 +42,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class AppStateCarrier:
+    """Attachable holder for live app state alongside sqlite connections."""
+
+    __slots__ = ("app_state",)
+
+    def __init__(self, app_state: Any | None = None) -> None:
+        self.app_state = app_state
+
+
 _memory_counter = itertools.count()
 
 # Default retry settings for SQLITE_BUSY
@@ -199,6 +209,7 @@ async def get_connection(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
         await db.execute("PRAGMA foreign_keys=ON")
         await db.execute("PRAGMA busy_timeout=30000")
         db.row_factory = aiosqlite.Row
+        db._app_state_carrier = AppStateCarrier()
         yield db
     finally:
         await db.close()
