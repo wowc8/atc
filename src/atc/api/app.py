@@ -18,7 +18,7 @@ from atc.config import Settings, load_settings
 from atc.core.errors import ATCError
 from atc.core.events import EventBus
 from atc.core.sentry import init_sentry
-from atc.state.db import run_migrations
+from atc.state.db import run_migrations, set_connection_app_state, clear_connection_app_state
 from atc.terminal.pty_stream import PtyStreamPool
 
 if TYPE_CHECKING:
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await db.execute("PRAGMA foreign_keys=ON")
     await db.execute("PRAGMA busy_timeout=30000")
     db.row_factory = aiosqlite.Row
-    db._app_state_carrier.app_state = app.state
+    set_connection_app_state(db, app.state)
     app.state.db = db
 
     # 4. Start WebSocket hub
