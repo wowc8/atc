@@ -571,6 +571,16 @@ async def _apply_file_migrations(db: aiosqlite.Connection) -> None:
             )
             await db.commit()
             continue
+        if path.name == "015_session_provider_scope.sql":
+            if await _has_column(db, "sessions", "provider"):
+                logger.info("Migration skip: %s already applied structurally", path.name)
+                await db.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (path.name, _now()),
+                )
+                await db.commit()
+                continue
+
         sql = path.read_text()
         if sql.strip():
             logger.info("Applying migration file %s", path.name)

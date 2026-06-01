@@ -649,3 +649,5 @@ This keeps shared layers normalized while giving downstream generic callers rich
 
 Settings and project provider validation now list provider names from the runtime registry rather than the older agent factory, reducing one more mixed old/new seam on the live API surface.
 The runtime registry now also exposes non-empty built-in provider metadata for the live `/settings/providers` surface, so frontend provider lists do not depend on placeholder-zero metadata rows.
+
+File migration replay is now guarded so `015_session_provider_scope.sql` is recorded and skipped when fresh-schema databases already contain the `sessions.provider` column, preventing startup failure from duplicate-column reapplication on new installs.
