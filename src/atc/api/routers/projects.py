@@ -375,12 +375,18 @@ async def start_leader(
                 lines += ["## Repository", f"Local path: {repo_path}", ""]
             lines += [
                 "## Your Instructions",
-                "1. Decompose the goal into well-scoped tasks using the API.",
-                "2. Spawn Aces for each ready task.",
-                "3. Monitor progress and drive to completion.",
-                "4. Report back when done.",
+                "You are the project Leader, not the implementer.",
+                "Do NOT write product files yourself.",
+                "Operate through the ATC orchestration API only.",
                 "",
-                "Begin NOW. Do not ask for clarification — start decomposing.",
+                "1. First decompose the goal into well-scoped tasks via POST /api/projects/{project_id}/leader/decompose.",
+                "2. Then spawn Aces for ready tasks via POST /api/projects/{project_id}/leader/spawn-aces.",
+                "3. Then instruct spawned Aces via POST /api/projects/{project_id}/leader/instruct.",
+                "4. Monitor progress via GET /api/projects/{project_id}/leader/progress.",
+                "5. Drive the project to completion by delegating, not by coding directly.",
+                "",
+                f"Project ID: {project_id}",
+                "Begin NOW by decomposing, not by exploring the workspace.",
             ]
             kickoff_msg = "\n".join(lines)
 
