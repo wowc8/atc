@@ -84,6 +84,7 @@ class StartRoleRequest:
     provider_name: str
     role: RoleKind
     project_id: str | None = None
+    connection: Any | None = None
     working_dir: str | None = None
     context_ref: str | None = None
     display_name: str | None = None

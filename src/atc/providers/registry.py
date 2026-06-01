@@ -40,6 +40,25 @@ def register_provider_runtime(name: str, factory: ProviderFactory) -> None:
     _REGISTRY[name] = factory
 
 
+def runtime_kwargs_for_provider(name: str, settings: Any | None = None) -> dict[str, Any]:
+    """Resolve live runtime kwargs for a provider from app settings when available."""
+
+    if settings is None:
+        settings = load_settings()
+
+    if name == "claude_code":
+        return {
+            "tmux_session": settings.agent_provider.tmux_session,
+            "claude_command": settings.agent_provider.claude_command,
+        }
+    if name == "codex":
+        return {
+            "tmux_session": settings.agent_provider.tmux_session,
+            "codex_command": settings.agent_provider.codex_command,
+        }
+    return {}
+
+
 def create_provider_runtime(name: str, **kwargs: Any) -> ProviderRuntime:
     """Instantiate a provider runtime by provider name."""
 
@@ -53,17 +72,7 @@ def create_provider_runtime(name: str, **kwargs: Any) -> ProviderRuntime:
 
     if not kwargs:
         try:
-            settings = load_settings()
-            if name == "claude_code":
-                kwargs = {
-                    "tmux_session": settings.agent_provider.tmux_session,
-                    "claude_command": settings.agent_provider.claude_command,
-                }
-            elif name == "codex":
-                kwargs = {
-                    "tmux_session": settings.agent_provider.tmux_session,
-                    "codex_command": settings.agent_provider.codex_command,
-                }
+            kwargs = runtime_kwargs_for_provider(name)
         except Exception:
             kwargs = {}
 

@@ -653,3 +653,5 @@ The runtime registry now also exposes non-empty built-in provider metadata for t
 File migration replay is now guarded so `015_session_provider_scope.sql` is recorded and skipped when fresh-schema databases already contain the `sessions.provider` column, preventing startup failure from duplicate-column reapplication on new installs.
 
 Tower provider-switch restart now explicitly rehydrates the requested goal and resets controller state before relaunch, so switching from Claude to Codex does not bounce the stopped Tower back into the prior provider-owned session state.
+
+RuntimeService now refreshes cached provider runtime instances when live app settings change their effective command/tmux configuration, so a global provider switch does not keep relaunching Tower from stale cached runtime command state.
