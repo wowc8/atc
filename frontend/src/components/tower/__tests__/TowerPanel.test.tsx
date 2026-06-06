@@ -68,10 +68,38 @@ describe("TowerPanel", () => {
     expect(screen.getByText("Idle")).toBeInTheDocument();
   });
 
-  it("disables Start button when no project is active", () => {
+  it("keeps Start button enabled when no project is active", () => {
     renderWithProviders(<TowerPanel />);
     const startBtn = screen.getByTestId("tower-panel-start");
-    expect(startBtn).toBeDisabled();
+    expect(startBtn).toBeEnabled();
+  });
+
+  it("posts to tower start without a project id when no project is active", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/tower/start") {
+        return new Response(JSON.stringify({ status: "started", session_id: "tower-1" }), { status: 200 });
+      }
+      if (url === "/api/projects" || url === "/api/heartbeat") {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+
+    renderWithProviders(<TowerPanel />);
+    await user.click(screen.getByTestId("tower-panel-start"));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tower/start",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({}),
+        }),
+      );
+    });
   });
 
   it("collapses when toggle is clicked again", async () => {
