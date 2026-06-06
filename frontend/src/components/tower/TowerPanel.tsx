@@ -242,8 +242,8 @@ export default function TowerPanel({ orientation = "bottom" }: TowerPanelProps) 
           {!showTerminal && (
             <button
               className="btn btn-primary btn-sm"
-              onClick={handleStart}
-              disabled={starting || !resolvedProjectId}
+              onClick={() => void handleStart()}
+              disabled={starting}
               data-testid="tower-panel-start"
             >
               {starting ? "Starting..." : "Start"}
