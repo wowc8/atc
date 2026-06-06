@@ -35,29 +35,20 @@
   color: var(--color-text-secondary);
 }
 
-/* Outer layout: column — top row stacked above full-width context */
+/* Left-side project stack, with Tower living in the app shell on the right */
 .project-view__layout {
   display: flex;
-  flex-direction: column;
   flex: 1;
   min-height: 0;
 }
 
-/* Top row: left + right columns side by side */
-.project-view__top {
-  display: flex;
-  flex-direction: row;
-  flex: 1;
-  min-height: 0;
-}
-
-/* Left column: stacked panels separated by row resize handle */
 .project-view__left {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   min-height: 0;
   overflow: hidden;
+  gap: 0;
 }
 
 .project-view__tasks {
@@ -86,24 +77,16 @@
   min-height: 0;
 }
 
-/* Right column: leader always full height of top row */
-.project-view__right {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-
 .project-view__leader {
-  flex: 1;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  margin-bottom: var(--space-3);
 }
 
-/* Context panel: full width, fixed height controlled by JS state */
 .project-view__context {
-  flex-shrink: 0;
+  min-height: 180px;
   overflow-y: auto;
+  margin-top: var(--space-3);
 }

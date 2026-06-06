@@ -11,10 +11,7 @@ import ResizeHandle from "../components/common/ResizeHandle";
 import "./ProjectView.css";
 
 const MIN_LEFT = 280;
-const MIN_RIGHT = 400;
 const MIN_TASKS = 120;
-const MIN_CTX = 80;
-const MAX_CTX = 400;
 
 function readStorage(key: string, fallback: number): number {
   const v = localStorage.getItem(key);
@@ -47,9 +44,7 @@ export default function ProjectView() {
   const [tasksHeight, setTasksHeight] = useState(() =>
     readStorage("atc:pv:tasks-h", 240)
   );
-  const [ctxHeight, setCtxHeight] = useState(() =>
-    readStorage("atc:pv:ctx-h", 180)
-  );
+  const [leaderHeight] = useState(() => readStorage("atc:pv:leader-h", 240));
 
   const layoutRef = useRef<HTMLDivElement>(null);
 
@@ -60,8 +55,8 @@ export default function ProjectView() {
     localStorage.setItem("atc:pv:tasks-h", String(tasksHeight));
   }, [tasksHeight]);
   useEffect(() => {
-    localStorage.setItem("atc:pv:ctx-h", String(ctxHeight));
-  }, [ctxHeight]);
+    localStorage.setItem("atc:pv:leader-h", String(leaderHeight));
+  }, [leaderHeight]);
 
   const handleSplitDrag = useCallback(
     (e: React.MouseEvent) => {
@@ -76,7 +71,7 @@ export default function ProjectView() {
           MIN_LEFT,
           Math.min(
             startWidth + ev.clientX - startX,
-            containerWidth - MIN_RIGHT - 4
+            containerWidth - 360 - 4
           )
         );
         setLeftWidth(next);
@@ -115,31 +110,6 @@ export default function ProjectView() {
     [tasksHeight]
   );
 
-  const handleCtxDrag = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startY = e.clientY;
-      const startHeight = ctxHeight;
-
-      const onMove = (ev: MouseEvent) => {
-        // Drag up (negative delta) → context grows; drag down → context shrinks
-        const next = Math.max(
-          MIN_CTX,
-          Math.min(MAX_CTX, startHeight - (ev.clientY - startY))
-        );
-        setCtxHeight(next);
-      };
-
-      const onUp = () => {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-      };
-
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [ctxHeight]
-  );
 
   if (!project) {
     return (
@@ -162,79 +132,63 @@ export default function ProjectView() {
         )}
       </div>
 
-      {/* Main layout: top row (left+right) stacked above full-width context */}
       <div className="project-view__layout" ref={layoutRef}>
-        {/* Top row: left column + vertical handle + right column */}
-        <div className="project-view__top">
-          {/* Left column: tasks + aces */}
-          <aside className="project-view__left" style={{ width: leftWidth }}>
-            <div
-              className="panel project-view__tasks"
-              style={{ height: tasksHeight }}
-            >
-              <TaskBoard
+        <aside className="project-view__left" style={{ width: leftWidth }}>
+          <div className="panel project-view__leader" style={{ minHeight: leaderHeight }}>
+            <LeaderConsole
+              projectId={project.id}
+              leader={leader}
+              project={project}
+              onRefresh={fetchAll}
+            />
+          </div>
+
+          <div
+            className="panel project-view__tasks"
+            style={{ height: tasksHeight }}
+          >
+            <TaskBoard
+              projectId={project.id}
+              taskGraphs={projectTaskGraphs}
+              onRefresh={fetchAll}
+            />
+          </div>
+
+          <ResizeHandle direction="row" onMouseDown={handleTasksDrag} />
+
+          <div
+            className={`panel project-view__aces${activeAceId ? " project-view__aces--expanded" : ""}`}
+          >
+            {activeAceId ? (
+              <AceConsole
                 projectId={project.id}
-                taskGraphs={projectTaskGraphs}
+                sessions={projectSessions}
+                activeAceId={activeAceId}
                 onRefresh={fetchAll}
+                onSelectAce={(sid) => setExpandedAceId(sid)}
+                onCollapse={() => setExpandedAceId(null)}
               />
-            </div>
-
-            <ResizeHandle direction="row" onMouseDown={handleTasksDrag} />
-
-            {/* Aces panel: collapses to list or expands to tabbed console IN-PLACE */}
-            <div
-              className={`panel project-view__aces${activeAceId ? " project-view__aces--expanded" : ""}`}
-            >
-              {activeAceId ? (
-                <AceConsole
-                  projectId={project.id}
-                  sessions={projectSessions}
-                  activeAceId={activeAceId}
-                  onRefresh={fetchAll}
-                  onSelectAce={(sid) => setExpandedAceId(sid)}
-                  onCollapse={() => setExpandedAceId(null)}
-                />
-              ) : (
-                <AceList
-                  projectId={project.id}
-                  sessions={projectSessions}
-                  onRefresh={fetchAll}
-                  onExpand={(sid) => setExpandedAceId(sid)}
-                  compact
-                />
-              )}
-            </div>
-          </aside>
-
-          <ResizeHandle direction="col" onMouseDown={handleSplitDrag} />
-
-          {/* Right column — Leader always here, fills full height of top row */}
-          <main className="project-view__right">
-            <div className="panel project-view__leader">
-              <LeaderConsole
+            ) : (
+              <AceList
                 projectId={project.id}
-                leader={leader}
-                project={project}
+                sessions={projectSessions}
                 onRefresh={fetchAll}
+                onExpand={(sid) => setExpandedAceId(sid)}
+                compact
               />
-            </div>
-          </main>
-        </div>
+            )}
+          </div>
 
-        {/* Context resize handle — sits at top edge of context panel */}
-        <ResizeHandle direction="row" onMouseDown={handleCtxDrag} />
+          <div className="panel project-view__context">
+            <ContextHub
+              scope="project"
+              projectId={project.id}
+              showScopeTabs={false}
+            />
+          </div>
+        </aside>
 
-        {/* Context panel — full width, resizable height */}
-        <div
-          className="panel project-view__context"
-          style={{ height: ctxHeight }}
-        >
-          <ContextHub
-            scope="project"
-            projectId={project.id}
-            showScopeTabs={false}
-          />
-        </div>
+        <ResizeHandle direction="col" onMouseDown={handleSplitDrag} />
       </div>
     </div>
   );

@@ -17,7 +17,11 @@ import "./TowerPanel.css";
  * Minimized: single-line ticker showing latest Tower activity.
  * Expanded + running: full PTY terminal + message input bar.
  */
-export default function TowerPanel() {
+interface TowerPanelProps {
+  orientation?: "bottom" | "side";
+}
+
+export default function TowerPanel({ orientation = "bottom" }: TowerPanelProps) {
   const { state, dispatch } = useAppContext();
   const { towerDetail, towerProgress, brainStatus, projects } = state;
 
@@ -92,6 +96,7 @@ export default function TowerPanel() {
 
   useEffect(() => {
     if (
+      resolvedProjectId &&
       isIdle &&
       !starting &&
       !providerSwitchPending &&
@@ -101,7 +106,7 @@ export default function TowerPanel() {
       autoStarted.current = true;
       void handleStart();
     }
-  }, [isIdle, starting, providerSwitchPending]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isIdle, starting, providerSwitchPending, resolvedProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-fit terminal when panel expands; also request a fresh snapshot so the
   // terminal isn't blank when the panel was collapsed during initial load.
@@ -189,7 +194,7 @@ export default function TowerPanel() {
 
   return (
     <div
-      className={`tower-panel ${expanded ? "tower-panel--expanded" : ""}`}
+      className={`tower-panel tower-panel--${orientation} ${expanded ? "tower-panel--expanded" : ""}`}
       data-testid="tower-panel"
     >
       {/* Minimized bar -- always visible */}
@@ -238,7 +243,7 @@ export default function TowerPanel() {
             <button
               className="btn btn-primary btn-sm"
               onClick={handleStart}
-              disabled={starting}
+              disabled={starting || !resolvedProjectId}
               data-testid="tower-panel-start"
             >
               {starting ? "Starting..." : "Start"}

@@ -3,7 +3,15 @@
   flex-direction: column;
   flex-shrink: 0;
   background: var(--color-bg-surface);
+  min-height: 0;
+}
+
+.tower-panel--bottom {
   border-top: 1px solid var(--color-border);
+}
+
+.tower-panel--side {
+  height: 100%;
 }
 
 /* Minimized: just the bar */
@@ -92,8 +100,12 @@
   border-top: 1px solid var(--color-border-subtle);
 }
 
-.tower-panel--expanded {
+.tower-panel--bottom.tower-panel--expanded {
   height: 280px;
+}
+
+.tower-panel--side.tower-panel--expanded {
+  height: 100%;
 }
 
 /* Terminal area */
@@ -101,6 +113,15 @@
   flex: 1;
   min-height: 0;
   padding: var(--space-1) var(--space-2);
+}
+
+.tower-panel--side .tower-panel__bar {
+  height: 40px;
+  padding: 0 var(--space-3);
+}
+
+.tower-panel--side .tower-panel__content {
+  min-height: 0;
 }
 
 /* Unified input bar at bottom -- terminal-style */

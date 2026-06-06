@@ -1,0 +1,77 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.app-shell__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.app-shell__body--side-tower {
+  --tower-width: 520px;
+  display: flex;
+  overflow: hidden;
+}
+
+.app-shell__body--side-tower > .resize-handle--col {
+  position: relative;
+  z-index: 2;
+}
+
+.app-shell__body--side-tower > .resize-handle--col::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.app-shell__body--side-tower > .app-shell__main {
+  min-width: 280px;
+}
+
+.app-shell__body--side-tower > .app-shell__tower {
+  width: var(--tower-width);
+}
+
+.app-shell__body--side-tower > .app-shell__tower .tower-panel--side {
+  min-width: 0;
+}
+
+.app-shell__main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.app-shell__tower {
+  width: min(46vw, 720px);
+  min-width: 320px;
+  max-width: 50%;
+  min-height: 0;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+}
+
+@media (max-width: 1100px) {
+  .app-shell__body--side-tower {
+    flex-direction: column;
+  }
+
+  .app-shell__body--side-tower > .resize-handle--col {
+    display: none;
+  }
+
+  .app-shell__tower {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    min-height: 280px;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+  }
+}
