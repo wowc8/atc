@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import TowerPanel from "../TowerPanel";
 import { renderWithProviders } from "../../../test/helpers";
@@ -40,7 +40,9 @@ describe("TowerPanel", () => {
     renderWithProviders(<TowerPanel />);
 
     await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.getByTestId("tower-panel-content")).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByTestId("tower-panel-content")).toBeVisible();
+    });
   });
 
   it("shows Start button in the bar when idle", () => {
@@ -78,10 +80,14 @@ describe("TowerPanel", () => {
 
     // Expand
     await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.getByTestId("tower-panel-content")).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByTestId("tower-panel-content")).toBeVisible();
+    });
 
     // Collapse — content stays in DOM but is hidden
     await user.click(screen.getByTestId("tower-panel-toggle"));
-    expect(screen.getByTestId("tower-panel-content")).not.toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByTestId("tower-panel-content")).not.toBeVisible();
+    });
   });
 });

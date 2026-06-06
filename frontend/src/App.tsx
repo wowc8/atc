@@ -1,13 +1,17 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { AppProvider, useAppContext } from "./context/AppContext";
+import ResizeHandle from "./components/common/ResizeHandle";
 import TowerBar from "./components/tower/TowerBar";
 import TowerPanel from "./components/tower/TowerPanel";
 import UpdateBanner from "./components/common/UpdateBanner";
 import { useUpdater } from "./hooks/useUpdater";
+import { clampTowerWidth, isSideTowerRoute, readStoredTowerWidth, SIDE_TOWER_WIDTH_KEY } from "./layout/towerSplit";
 import Dashboard from "./pages/Dashboard";
 import ProjectView from "./pages/ProjectView";
 import UsagePage from "./pages/UsagePage";
 import ContextPage from "./pages/ContextPage";
+import "./App.css";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -37,9 +41,55 @@ function StartupGate({ children }: { children: React.ReactNode }) {
 
 function Layout() {
   const updater = useUpdater();
+  const location = useLocation();
+  const showSideTower = isSideTowerRoute(location.pathname);
+  const shellBodyRef = useRef<HTMLDivElement>(null);
+  const [towerWidth, setTowerWidth] = useState(readStoredTowerWidth);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDE_TOWER_WIDTH_KEY, String(towerWidth));
+  }, [towerWidth]);
+
+  useEffect(() => {
+    if (!showSideTower) {
+      return;
+    }
+
+    const syncWidth = () => {
+      const containerWidth = shellBodyRef.current?.offsetWidth ?? window.innerWidth;
+      setTowerWidth((current) => clampTowerWidth(current, containerWidth));
+    };
+
+    syncWidth();
+    window.addEventListener("resize", syncWidth);
+    return () => window.removeEventListener("resize", syncWidth);
+  }, [showSideTower]);
+
+  const handleTowerResize = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = towerWidth;
+
+      const onMove = (ev: MouseEvent) => {
+        const containerWidth = shellBodyRef.current?.offsetWidth ?? window.innerWidth;
+        const delta = startX - ev.clientX;
+        setTowerWidth(clampTowerWidth(startWidth + delta, containerWidth));
+      };
+
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [towerWidth],
+  );
 
   return (
-    <>
+    <div className="app-shell">
       {(updater.status === "available" || updater.status === "downloading") &&
         updater.updateInfo && (
           <UpdateBanner
@@ -51,11 +101,20 @@ function Layout() {
           />
         )}
       <TowerBar />
-      <main style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        <Outlet context={updater} />
-      </main>
-      <TowerPanel />
-    </>
+      <div
+        ref={shellBodyRef}
+        className={`app-shell__body${showSideTower ? " app-shell__body--side-tower" : ""}`}
+        style={showSideTower ? { ["--tower-width" as string]: `${towerWidth}px` } : undefined}
+      >
+        <main className="app-shell__main">
+          <Outlet context={updater} />
+        </main>
+        {showSideTower && <ResizeHandle direction="col" onMouseDown={handleTowerResize} />}
+        <div className="app-shell__tower">
+          <TowerPanel orientation={showSideTower ? "side" : "bottom"} />
+        </div>
+      </div>
+    </div>
   );
 }
 
