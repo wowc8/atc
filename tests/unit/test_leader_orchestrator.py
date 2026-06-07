@@ -15,6 +15,7 @@ from atc.state.db import (
     create_project,
     create_task_graph,
     get_connection,
+    get_project,
     get_task_graph,
     run_migrations,
 )
@@ -114,22 +115,22 @@ class TestSpawnAces:
         assert call_kwargs is not None
         assert call_kwargs.kwargs.get("launch_command") == "opencode"
 
-    async def test_default_provider_uses_claude(
+    async def test_default_project_provider_uses_configured_launch_command(
         self,
         mock_create: AsyncMock,
         db,
         orchestrator: LeaderOrchestrator,
     ) -> None:
-        """Default agent_provider (claude_code) uses the Claude launch command."""
+        """Project default agent_provider uses its configured launch command."""
         await create_task_graph(db, orchestrator.project_id, "Task B")
         await orchestrator.spawn_aces_for_ready_tasks()
 
         call_kwargs = mock_create.call_args
         assert call_kwargs is not None
-        # get_launch_command returns the atc-agent wrapper script if it exists,
-        # otherwise falls back to the bare claude command.
         from atc.agents.factory import get_launch_command
-        assert call_kwargs.kwargs.get("launch_command") == get_launch_command("claude_code")
+        project = await get_project(db, orchestrator.project_id)
+        assert project is not None
+        assert call_kwargs.kwargs.get("launch_command") == get_launch_command(project.agent_provider)
 
     async def test_skips_tasks_with_unmet_deps(
         self,

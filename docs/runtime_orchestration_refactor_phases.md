@@ -134,6 +134,12 @@ Playwright evidence should be stored under a timestamped project-local `screensh
 - Retry paths use explicit allowed transitions.
 - Tower/Leader status surfaces blocked transition reasons.
 
+**Implementation contract:**
+- Durable task graph and task assignment status changes are validated by `src/atc/state/transitions.py` before persistence.
+- Rejected transitions use `LifecycleTransitionError` with stable API-visible fields: `code`, `entity_type`, `entity_id`, `current`, `target`, `allowed`, and `message`.
+- Retry/recovery paths must bridge through explicitly allowed states. For example, a finished or failed task reopens through `todo` before it can be assigned again; task failure handling bridges `assigned → in_progress → error → todo` rather than jumping directly back to `todo`.
+- Leader progress includes recent `blocked_transition_errors` so Tower/Leader surfaces can report lifecycle blockers instead of silently stalling.
+
 ## Phase 4 — Dialog/interruption pipeline
 
 **Goal:** Centralize startup/trust/permission/welcome handling as runtime interrupts instead of scattered prompt hacks.

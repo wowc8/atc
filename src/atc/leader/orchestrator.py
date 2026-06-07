@@ -13,6 +13,7 @@ decomposer creates task graph entries, the orchestrator:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
@@ -20,10 +21,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
+from atc.agents.factory import get_launch_command
 from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
+from atc.state.transitions import LifecycleTransitionError
 from atc.tracking.resources import ResourceGovernor
 
 # Global active Ace counter — shared across ALL orchestrator instances so
@@ -33,8 +36,7 @@ _GLOBAL_ACTIVE_ACES: int = 0
 _GLOBAL_LOCK = None  # asyncio.Lock, initialized lazily
 
 
-async def _get_global_lock() -> "asyncio.Lock":
-    import asyncio
+async def _get_global_lock() -> asyncio.Lock:
     global _GLOBAL_LOCK
     if _GLOBAL_LOCK is None:
         _GLOBAL_LOCK = asyncio.Lock()
@@ -75,6 +77,7 @@ class LeaderOrchestrator:
     conn: aiosqlite.Connection
     event_bus: EventBus | None = None
     assignments: dict[str, AceAssignment] = field(default_factory=dict)
+    blocked_transition_errors: list[dict[str, Any]] = field(default_factory=list)
     _max_concurrent_aces: int = 3
     _governor: ResourceGovernor = field(default_factory=ResourceGovernor)
 
@@ -85,6 +88,13 @@ class LeaderOrchestrator:
         from atc.config import load_settings
 
         return load_settings().agent_provider.default
+
+    def _record_transition_block(self, exc: LifecycleTransitionError) -> None:
+        """Keep the most recent structured transition blockers visible to callers."""
+        detail = exc.to_detail()
+        self.blocked_transition_errors.append(detail)
+        self.blocked_transition_errors = self.blocked_transition_errors[-10:]
+        logger.warning("Blocked lifecycle transition: %s", detail)
 
     async def spawn_aces_for_ready_tasks(self) -> list[AceAssignment]:
         """Find ready tasks and spawn Ace sessions for them.
@@ -114,7 +124,10 @@ class LeaderOrchestrator:
                 )
                 return []
             # Reserve slots atomically before spawning
-            slots_to_use = min(available_slots, len([tg for tg in get_ready_tasks(task_graphs) if tg.id not in self.assignments]))
+            spawnable_count = len(
+                [tg for tg in get_ready_tasks(task_graphs) if tg.id not in self.assignments]
+            )
+            slots_to_use = min(available_slots, spawnable_count)
             _GLOBAL_ACTIVE_ACES += slots_to_use
 
         new_assignments: list[AceAssignment] = []
@@ -187,6 +200,7 @@ class LeaderOrchestrator:
                 task_id=task_graph_id,
                 event_bus=self.event_bus,
                 working_dir=repo_path,
+                launch_command=get_launch_command(provider_name),
                 deploy_spec_kwargs={
                     "project_name": project_name,
                     "task_title": title,
@@ -317,11 +331,30 @@ class LeaderOrchestrator:
 
         # Update the assignment record status
         if assignment and assignment.assignment_id:
-            with contextlib.suppress(ValueError):
+            try:
+                db_assignment = await db_ops.get_task_assignment(
+                    self.conn,
+                    assignment.assignment_id,
+                )
+                if db_assignment is not None and db_assignment.status == "assigned":
+                    await db_ops.update_task_assignment_status(
+                        self.conn,
+                        assignment.assignment_id,
+                        "working",
+                    )
                 await db_ops.update_task_assignment_status(
                     self.conn,
                     assignment.assignment_id,
                     "done",
+                )
+            except LifecycleTransitionError as exc:
+                self._record_transition_block(exc)
+                raise
+            except ValueError:
+                logger.debug(
+                    "Assignment %s disappeared while marking task %s done",
+                    assignment.assignment_id,
+                    task_graph_id,
                 )
 
         # Update task graph status — advance through intermediate states as needed.
@@ -329,13 +362,20 @@ class LeaderOrchestrator:
         # gap if the task is still in an earlier state.
         tg = await db_ops.get_task_graph(self.conn, task_graph_id)
         if tg is not None and tg.status == "assigned":
-            with contextlib.suppress(ValueError):
+            try:
                 await db_ops.update_task_graph_status(self.conn, task_graph_id, "in_progress")
-        await db_ops.update_task_graph_status(
-            self.conn,
-            task_graph_id,
-            "done",
-        )
+            except LifecycleTransitionError as exc:
+                self._record_transition_block(exc)
+                raise
+        try:
+            await db_ops.update_task_graph_status(
+                self.conn,
+                task_graph_id,
+                "done",
+            )
+        except LifecycleTransitionError as exc:
+            self._record_transition_block(exc)
+            raise
 
         # Bug #163: decrement the global counter unconditionally when a task is
         # marked done, regardless of whether this orchestrator instance has the
@@ -406,26 +446,49 @@ class LeaderOrchestrator:
 
         # Update the assignment record status
         if assignment and assignment.assignment_id:
-            with contextlib.suppress(ValueError):
+            try:
                 await db_ops.update_task_assignment_status(
                     self.conn,
                     assignment.assignment_id,
                     "failed",
                 )
+            except LifecycleTransitionError as exc:
+                self._record_transition_block(exc)
+                raise
+            except ValueError:
+                logger.debug(
+                    "Assignment %s disappeared while marking task %s failed",
+                    assignment.assignment_id,
+                    task_graph_id,
+                )
 
-        # Transition to error, then back to todo so it can be retried
-        with contextlib.suppress(ValueError):
-            await db_ops.update_task_graph_status(
-                self.conn,
-                task_graph_id,
-                "error",
-            )
-        with contextlib.suppress(ValueError):
-            await db_ops.update_task_graph_status(
-                self.conn,
-                task_graph_id,
-                "todo",
-            )
+        # Transition to error, then back to todo so it can be retried.
+        # If the task is still assigned, bridge through in_progress first: the
+        # state machine intentionally disallows assigned→todo and requires
+        # explicit recovery transitions.
+        tg = await db_ops.get_task_graph(self.conn, task_graph_id)
+        try:
+            if tg is not None and tg.status == "assigned":
+                tg = await db_ops.update_task_graph_status(
+                    self.conn,
+                    task_graph_id,
+                    "in_progress",
+                )
+            if tg is not None and tg.status == "in_progress":
+                tg = await db_ops.update_task_graph_status(
+                    self.conn,
+                    task_graph_id,
+                    "error",
+                )
+            if tg is not None and tg.status in {"error", "done"}:
+                await db_ops.update_task_graph_status(
+                    self.conn,
+                    task_graph_id,
+                    "todo",
+                )
+        except LifecycleTransitionError as exc:
+            self._record_transition_block(exc)
+            raise
 
         if assignment is not None:
             assignment.status = "failed"
@@ -480,6 +543,7 @@ class LeaderOrchestrator:
         ]
         status["leader_id"] = self.leader_id
         status["project_id"] = self.project_id
+        status["blocked_transition_errors"] = list(self.blocked_transition_errors)
 
         return status
 

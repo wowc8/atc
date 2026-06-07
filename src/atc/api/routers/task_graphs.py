@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from atc.state import db as db_ops
+from atc.state.transitions import LifecycleTransitionError
 
 router = APIRouter()
 
@@ -65,6 +66,11 @@ class TaskGraphResponse(BaseModel):
 
 async def _get_db(request: Request) -> Any:
     return request.app.state.db
+
+
+def _transition_error_detail(exc: LifecycleTransitionError) -> dict[str, object]:
+    """Return normalized lifecycle-transition error detail for API callers."""
+    return exc.to_detail()
 
 
 def _to_response(tg: Any) -> TaskGraphResponse:
@@ -192,6 +198,8 @@ async def transition_task_graph_status(
     db = await _get_db(request)
     try:
         tg = await db_ops.update_task_graph_status(db, task_graph_id, body.status)
+    except LifecycleTransitionError as e:
+        raise HTTPException(status_code=409, detail=_transition_error_detail(e)) from None
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
     if tg is None:
@@ -308,6 +316,8 @@ async def transition_assignment_status(
             assignment_id,
             body.status,
         )
+    except LifecycleTransitionError as e:
+        raise HTTPException(status_code=409, detail=_transition_error_detail(e)) from None
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
     if assignment is None:
