@@ -227,3 +227,13 @@ def test_codex_inspect_session_exposes_runtime_hint() -> None:
 
     assert inspection.details["provider_runtime_hint"] == "auth_prompt"
     assert inspection.details["provider_runtime_action"] == "resolve_auth"
+
+
+def test_codex_ready_prompt_takes_precedence_over_error_text() -> None:
+    runtime = CodexRuntime()
+
+    readiness, block_reason = runtime._classify_readiness("previous error: harmless log\n>\n")
+
+    assert readiness is ReadinessState.READY
+    assert block_reason is None
+    assert runtime._prompt_state_for_excerpt("previous error: harmless log\n>\n") == "ready"

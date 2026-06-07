@@ -65,8 +65,9 @@ _AUTH_TRIGGERS = (
     "api key",
 )
 _PROVIDER_ERROR_TRIGGERS = (
-    "error:",
-    "failed to start",
+    "failed to start provider",
+    "failed to start codex",
+    "failed to start claude",
 )
 _INTERRUPT_SPEC = RuntimeInterruptSpec(
     trust_triggers=_TRUST_TRIGGERS,
@@ -176,6 +177,20 @@ class ClaudeCodeRuntime(ProviderRuntime):
 
         before = await capture_pane_text(handle.tmux_pane, lines=40)
         before_state = self._prompt_state_for_excerpt(before)
+        before_block_reason = self._block_reason_for_prompt_state(before_state)
+        if before_block_reason is not None:
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.BLOCKED,
+                DeliveryVerdict.BLOCKED,
+                before_block_reason,
+                prompt_state_before=before_state,
+                prompt_state_after=before_state,
+                first_output_excerpt=before,
+            )
+            return
         self._append_instruction_trace(
             request,
             handle,
@@ -356,9 +371,7 @@ class ClaudeCodeRuntime(ProviderRuntime):
         interrupt = self._detect_interrupt(excerpt)
         readiness, block_reason = self._classify_readiness(excerpt)
         summary = (
-            interrupt.summary
-            if interrupt
-            else self._summary_for_state(readiness, block_reason)
+            interrupt.summary if interrupt else self._summary_for_state(readiness, block_reason)
         )
         inspection = RuntimeInspection(
             session_id=handle.session_id,
@@ -518,14 +531,16 @@ class ClaudeCodeRuntime(ProviderRuntime):
         return "inspect"
 
     def _classify_readiness(self, excerpt: str) -> tuple[ReadinessState, RuntimeBlockReason | None]:
+        if _BARE_PROMPT_RE.search(excerpt):
+            return ReadinessState.READY, None
         interrupt = self._detect_interrupt(excerpt)
         if interrupt is not None:
             return interrupt.readiness, interrupt.block_reason
-        if _BARE_PROMPT_RE.search(excerpt):
-            return ReadinessState.READY, None
         return ReadinessState.BUSY, None
 
     def _prompt_state_for_excerpt(self, excerpt: str) -> str:
+        if _BARE_PROMPT_RE.search(excerpt):
+            return ReadinessState.READY.value
         readiness, block_reason = self._classify_readiness(excerpt)
         interrupt = self._detect_interrupt(excerpt)
         fallback = f"{readiness.value}:{block_reason.value}" if block_reason else readiness.value
@@ -534,6 +549,16 @@ class ClaudeCodeRuntime(ProviderRuntime):
     @staticmethod
     def _detect_interrupt(excerpt: str):
         return detect_runtime_interrupt(excerpt, _INTERRUPT_SPEC)
+
+    @staticmethod
+    def _block_reason_for_prompt_state(prompt_state: str) -> DeliveryReasonCode | None:
+        if prompt_state == "blocked:trust":
+            return DeliveryReasonCode.TRUST_REQUIRED
+        if prompt_state == "blocked:auth":
+            return DeliveryReasonCode.AUTH_REQUIRED
+        if prompt_state == "blocked:permission":
+            return DeliveryReasonCode.PERMISSION_REQUIRED
+        return None
 
     @staticmethod
     def _append_instruction_trace(

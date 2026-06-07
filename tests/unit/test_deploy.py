@@ -349,6 +349,16 @@ class TestDeployManagerFiles:
         assert "deploy-target" in content
         assert "us-east-1" in content
 
+    def test_leader_instruct_curl_payload_is_well_formed(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "leader/instruct" in content
+        assert '"task_graph_id": "<id from decompose>"' in content
+        assert '"instruction": "Detailed work instructions for the Ace"' in content
+        assert "'\n     '\"instruction" not in content
+
     def test_claude_md_includes_constraints(
         self, manager_spec: ManagerDeploySpec, staging_root: Path
     ) -> None:

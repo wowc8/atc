@@ -236,3 +236,46 @@ def test_claude_inspect_session_exposes_runtime_hint() -> None:
 
     assert inspection.details["provider_runtime_hint"] == "startup_banner"
     assert inspection.details["provider_runtime_action"] == "wait"
+
+
+def test_claude_send_instruction_does_not_write_when_already_blocked_on_permission() -> None:
+    from atc.runtime.models import InstructionRequest
+
+    runtime = ClaudeCodeRuntime()
+    handle = RuntimeSessionHandle(
+        session_id="sess-blocked-send",
+        provider_name="claude_code",
+        role=RoleKind.LEADER,
+        transport=RuntimeTransport.TMUX,
+        tmux_pane="%blocked",
+    )
+    request = InstructionRequest(
+        session_id="sess-blocked-send",
+        message="do work",
+        metadata={"delivery_trace_id": "trace-blocked"},
+    )
+
+    with (
+        patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Allow this command to continue?"),
+        ),
+        patch("atc.providers.claude_code.runtime.send_bracketed_instruction", AsyncMock()) as send,
+    ):
+        asyncio.run(runtime.send_instruction(handle, request))
+
+    send.assert_not_awaited()
+    trace = request.metadata["delivery_trace_events"][-1]
+    assert trace["stage"] == "blocked"
+    assert trace["reason_code"] == "permission_required"
+
+
+def test_claude_ready_prompt_takes_precedence_over_error_text() -> None:
+    runtime = ClaudeCodeRuntime()
+
+    readiness, block_reason = runtime._classify_readiness("previous error: harmless log\n❯\n")
+
+    assert readiness is ReadinessState.READY
+    assert block_reason is None
+    assert runtime._prompt_state_for_excerpt("previous error: harmless log\n❯\n") == "ready"

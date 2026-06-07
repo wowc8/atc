@@ -387,6 +387,8 @@ class RuntimeService:
             return DeliveryReasonCode.AUTH_REQUIRED
         if "trust" in message:
             return DeliveryReasonCode.TRUST_REQUIRED
+        if "permission" in message:
+            return DeliveryReasonCode.PERMISSION_REQUIRED
         if "verif" in message:
             return DeliveryReasonCode.DELIVERY_UNVERIFIED
         return DeliveryReasonCode.UNKNOWN_ERROR

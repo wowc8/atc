@@ -57,8 +57,9 @@ _PERMISSION_TRIGGERS = (
     "permission",
 )
 _PROVIDER_ERROR_TRIGGERS = (
-    "error:",
-    "failed to start",
+    "failed to start provider",
+    "failed to start codex",
+    "failed to start claude",
 )
 _INTERRUPT_SPEC = RuntimeInterruptSpec(
     trust_triggers=_TRUST_TRIGGERS,
@@ -193,9 +194,7 @@ class CodexRuntime(ProviderRuntime):
         interrupt = self._detect_interrupt(excerpt)
         readiness, block_reason = self._classify_readiness(excerpt)
         summary = (
-            interrupt.summary
-            if interrupt
-            else self._summary_for_state(readiness, block_reason)
+            interrupt.summary if interrupt else self._summary_for_state(readiness, block_reason)
         )
         inspection = RuntimeInspection(
             session_id=handle.session_id,
@@ -321,14 +320,16 @@ class CodexRuntime(ProviderRuntime):
         return "inspect"
 
     def _classify_readiness(self, excerpt: str) -> tuple[ReadinessState, RuntimeBlockReason | None]:
+        if _CODEX_PROMPT_RE.search(excerpt):
+            return ReadinessState.READY, None
         interrupt = self._detect_interrupt(excerpt)
         if interrupt is not None:
             return interrupt.readiness, interrupt.block_reason
-        if _CODEX_PROMPT_RE.search(excerpt):
-            return ReadinessState.READY, None
         return ReadinessState.BUSY, None
 
     def _prompt_state_for_excerpt(self, excerpt: str) -> str:
+        if _CODEX_PROMPT_RE.search(excerpt):
+            return ReadinessState.READY.value
         readiness, block_reason = self._classify_readiness(excerpt)
         interrupt = self._detect_interrupt(excerpt)
         fallback = f"{readiness.value}:{block_reason.value}" if block_reason else readiness.value
@@ -394,6 +395,7 @@ class CodexRuntime(ProviderRuntime):
             verdict=DeliveryVerdict.CONFIRMED,
             reason_code=DeliveryReasonCode.SESSION_RUNNING,
         )
+
     @staticmethod
     def _summary_for_state(
         readiness: ReadinessState,
