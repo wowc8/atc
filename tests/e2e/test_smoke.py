@@ -26,7 +26,6 @@ def client(tmp_path: Path) -> TestClient:
     app = create_app(settings)
     with (
         patch("atc.leader.leader._accept_trust_dialog", new_callable=AsyncMock, return_value=False),
-        patch("atc.tower.session._accept_trust_dialog", new_callable=AsyncMock, return_value=False),
         patch("atc.tower.controller.TowerController.start_session", new_callable=AsyncMock),
         TestClient(app) as c,
     ):
@@ -105,7 +104,9 @@ class TestProjectCRUD:
 
 
 @patch("atc.session.ace._tmux_run", new_callable=AsyncMock)
-@patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+@patch(
+    "atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1")
+)
 @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
 class TestLeaderLifecycle:
     def test_start_leader(
@@ -235,7 +236,11 @@ class TestTowerStatus:
         assert data["total_sessions"] >= 1
 
     @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
-    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+    @patch(
+        "atc.leader.leader._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%1"),
+    )
     def test_submit_goal(
         self,
         mock_spawn_provider: AsyncMock,
@@ -259,7 +264,11 @@ class TestTowerStatus:
         assert resp.status_code == 404
 
     @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
-    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+    @patch(
+        "atc.leader.leader._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%1"),
+    )
     def test_submit_goal_twice_while_managing_succeeds(
         self,
         mock_spawn_provider: AsyncMock,
@@ -272,13 +281,19 @@ class TestTowerStatus:
         resp = client.post("/api/tower/goal", json={"project_id": project_id, "goal": "First goal"})
         assert resp.status_code == 200
 
-        resp = client.post("/api/tower/goal", json={"project_id": project_id, "goal": "Second goal"})
+        resp = client.post(
+            "/api/tower/goal", json={"project_id": project_id, "goal": "Second goal"}
+        )
         assert resp.status_code == 200
 
     @patch("atc.tower.session.stop_tower_session", new_callable=AsyncMock)
     @patch("atc.leader.leader._kill_pane", new_callable=AsyncMock)
     @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
-    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+    @patch(
+        "atc.leader.leader._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%1"),
+    )
     def test_stop_tower(
         self,
         mock_spawn_provider: AsyncMock,

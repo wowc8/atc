@@ -95,6 +95,15 @@ class TestDeployAceFiles:
         assert "expert developer" in content
         assert "Create a PR" in content
         assert "Run tests" in content
+        assert "If Asked 'What Is Your Role?'" in content
+        assert "must not manage" in content
+
+    def test_writes_agents_md_for_codex_role_identity(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        assert result.agents_md_path.exists()
+        assert result.agents_md_path.read_text() == result.claude_md_path.read_text()
 
     def test_claude_md_includes_constraints(
         self, ace_spec: AceDeploySpec, staging_root: Path
@@ -223,9 +232,13 @@ class TestDeployAceFiles:
         assert settings["enableAllProjectMcpServers"] is True
 
     def test_writes_user_level_trust_settings(
-        self, ace_spec: AceDeploySpec, staging_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        ace_spec: AceDeploySpec,
+        staging_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Deploy should write trust settings to ~/.claude/projects/<encoded>/settings.local.json."""
+        """Deploy should write trust settings to user-level project settings."""
         fake_home = tmp_path / "fakehome"
         fake_home.mkdir()
         monkeypatch.setenv("HOME", str(fake_home))
@@ -306,6 +319,9 @@ class TestDeployManagerFiles:
         assert "project manager" in content
         assert "MUST NOT write code" in content
         assert "Spawn Aces" in content
+        assert "If Asked 'What Is Your Role?'" in content
+        assert "must not write code" in content
+        assert (result.root / "AGENTS.md").read_text() == content
 
     def test_claude_md_includes_budget(
         self, manager_spec: ManagerDeploySpec, staging_root: Path
@@ -385,9 +401,13 @@ class TestDeployManagerFiles:
         assert settings["hasTrustDialogAccepted"] is True
 
     def test_writes_user_level_trust_settings(
-        self, manager_spec: ManagerDeploySpec, staging_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        manager_spec: ManagerDeploySpec,
+        staging_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Deploy should write trust settings to ~/.claude/projects/<encoded>/settings.local.json."""
+        """Deploy should write trust settings to user-level project settings."""
         fake_home = tmp_path / "fakehome"
         fake_home.mkdir()
         monkeypatch.setenv("HOME", str(fake_home))
@@ -481,18 +501,14 @@ class TestDeployTowerFiles:
         content = result.claude_md_path.read_text()
         assert "Repository" not in content
 
-    def test_creates_settings_json(
-        self, tower_spec: TowerDeploySpec, staging_root: Path
-    ) -> None:
+    def test_creates_settings_json(self, tower_spec: TowerDeploySpec, staging_root: Path) -> None:
         result = deploy_tower_files(tower_spec, staging_root=staging_root)
         assert result.settings_path.exists()
         settings = json.loads(result.settings_path.read_text())
         assert settings["model"] == "opus"
         assert "Bash(atc tower *)" in settings["permissions"]["allow"]
 
-    def test_creates_hook_scripts(
-        self, tower_spec: TowerDeploySpec, staging_root: Path
-    ) -> None:
+    def test_creates_hook_scripts(self, tower_spec: TowerDeploySpec, staging_root: Path) -> None:
         result = deploy_tower_files(tower_spec, staging_root=staging_root)
         hooks_dir = result.root / ".claude" / "hooks"
         assert (hooks_dir / "PostToolUse.sh").exists()
@@ -516,9 +532,13 @@ class TestDeployTowerFiles:
         assert settings["hasTrustDialogAccepted"] is True
 
     def test_writes_user_level_trust_settings(
-        self, tower_spec: TowerDeploySpec, staging_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tower_spec: TowerDeploySpec,
+        staging_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Deploy should write trust settings to ~/.claude/projects/<encoded>/settings.local.json."""
+        """Deploy should write trust settings to user-level project settings."""
         fake_home = tmp_path / "fakehome"
         fake_home.mkdir()
         monkeypatch.setenv("HOME", str(fake_home))
@@ -532,9 +552,7 @@ class TestDeployTowerFiles:
         assert settings["hasTrustDialogAccepted"] is True
         assert settings["enableAllProjectMcpServers"] is True
 
-    def test_initializes_git_repo(
-        self, tower_spec: TowerDeploySpec, staging_root: Path
-    ) -> None:
+    def test_initializes_git_repo(self, tower_spec: TowerDeploySpec, staging_root: Path) -> None:
         result = deploy_tower_files(tower_spec, staging_root=staging_root)
         assert (result.root / ".git").exists()
 
@@ -544,6 +562,9 @@ class TestDeployTowerFiles:
         result = deploy_tower_files(tower_spec, staging_root=staging_root)
         content = result.claude_md_path.read_text()
         assert "atc leader message" in content
+        assert "If Asked 'What Is Your Role?'" in content
+        assert "top-level user-facing orchestration agent" in content
+        assert (result.root / "AGENTS.md").read_text() == content
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +600,7 @@ class TestDeployedFiles:
     def test_paths(self, tmp_path: Path) -> None:
         df = DeployedFiles(root=tmp_path / "test", files=[])
         assert df.claude_md_path == tmp_path / "test" / "CLAUDE.md"
+        assert df.agents_md_path == tmp_path / "test" / "AGENTS.md"
         assert df.settings_path == tmp_path / "test" / ".claude" / "settings.json"
         assert df.manifest_path == tmp_path / "test" / ".manifest.json"
 
@@ -666,9 +688,7 @@ class TestContextHookScripts:
         assert 'SCOPE="tower"' in write_content
         assert "tower-ctx-001" in write_content
 
-    def test_context_scripts_in_manifest(
-        self, ace_spec: AceDeploySpec, staging_root: Path
-    ) -> None:
+    def test_context_scripts_in_manifest(self, ace_spec: AceDeploySpec, staging_root: Path) -> None:
         result = deploy_ace_files(ace_spec, staging_root=staging_root)
         manifest = json.loads(result.manifest_path.read_text())
         paths = manifest["files"]

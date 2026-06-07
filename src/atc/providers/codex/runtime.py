@@ -5,6 +5,11 @@ from __future__ import annotations
 import re
 
 from atc.providers.base import ProviderRuntime
+from atc.runtime.interrupts import (
+    RuntimeInterruptSpec,
+    detect_runtime_interrupt,
+    interrupt_prompt_state,
+)
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
@@ -44,6 +49,22 @@ _TRUST_TRIGGERS = (
     "trust this folder",
     "do you trust",
     "trust the contents",
+)
+_PERMISSION_TRIGGERS = (
+    "allow command",
+    "allow this command",
+    "approve command",
+    "permission",
+)
+_PROVIDER_ERROR_TRIGGERS = (
+    "error:",
+    "failed to start",
+)
+_INTERRUPT_SPEC = RuntimeInterruptSpec(
+    trust_triggers=_TRUST_TRIGGERS,
+    permission_triggers=_PERMISSION_TRIGGERS,
+    login_triggers=_AUTH_TRIGGERS,
+    provider_error_triggers=_PROVIDER_ERROR_TRIGGERS,
 )
 
 
@@ -111,6 +132,7 @@ class CodexRuntime(ProviderRuntime):
             provider_name=self.provider_name,
             prompt_state_for_excerpt=self._prompt_state_for_excerpt,
             terminal_verdict_for_observation=self._terminal_verdict_for_observation,
+            interrupt_detector=self._detect_interrupt,
         )
         await runner.deliver_instruction(
             handle=handle,
@@ -168,16 +190,24 @@ class CodexRuntime(ProviderRuntime):
             )
 
         excerpt = await capture_pane_text(handle.tmux_pane, lines=40)
+        interrupt = self._detect_interrupt(excerpt)
         readiness, block_reason = self._classify_readiness(excerpt)
+        summary = (
+            interrupt.summary
+            if interrupt
+            else self._summary_for_state(readiness, block_reason)
+        )
         inspection = RuntimeInspection(
             session_id=handle.session_id,
             provider_name=self.provider_name,
             alive=True,
             readiness=readiness,
             block_reason=block_reason,
-            summary=self._summary_for_state(readiness, block_reason),
+            summary=summary,
             last_output_excerpt=excerpt,
         )
+        if interrupt is not None:
+            inspection.details.update(interrupt.to_trace_details())
         inspection.details["provider_runtime_hint"] = self._runtime_hint_for_inspection(inspection)
         inspection.details["provider_runtime_action"] = self._runtime_action_for_inspection(
             inspection
@@ -189,11 +219,14 @@ class CodexRuntime(ProviderRuntime):
             return "prompt_visible"
         if inspection.readiness is ReadinessState.BUSY:
             return "processing"
-        if (
-            inspection.readiness is ReadinessState.BLOCKED
-            and inspection.block_reason is RuntimeBlockReason.AUTH
-        ):
-            return "auth_prompt"
+        if inspection.readiness is ReadinessState.BLOCKED:
+            if inspection.block_reason is RuntimeBlockReason.AUTH:
+                return "auth_prompt"
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                return "trust_prompt"
+            if inspection.block_reason is RuntimeBlockReason.PERMISSION:
+                return "permission_prompt"
+            return "blocked_prompt"
         if inspection.readiness is ReadinessState.STOPPED:
             return "pane_missing"
         return inspection.readiness.value
@@ -203,11 +236,14 @@ class CodexRuntime(ProviderRuntime):
             return "send_or_resume"
         if inspection.readiness is ReadinessState.BUSY:
             return "wait"
-        if (
-            inspection.readiness is ReadinessState.BLOCKED
-            and inspection.block_reason is RuntimeBlockReason.AUTH
-        ):
-            return "resolve_auth"
+        if inspection.readiness is ReadinessState.BLOCKED:
+            if inspection.block_reason is RuntimeBlockReason.AUTH:
+                return "resolve_auth"
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                return "resolve_trust"
+            if inspection.block_reason is RuntimeBlockReason.PERMISSION:
+                return "resolve_permission"
+            return "inspect_prompt"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
         return "inspect"
@@ -255,11 +291,14 @@ class CodexRuntime(ProviderRuntime):
             return "ready"
         if inspection.readiness is ReadinessState.BUSY:
             return "active"
-        if (
-            inspection.readiness is ReadinessState.BLOCKED
-            and inspection.block_reason is RuntimeBlockReason.AUTH
-        ):
-            return "auth_gate"
+        if inspection.readiness is ReadinessState.BLOCKED:
+            if inspection.block_reason is RuntimeBlockReason.AUTH:
+                return "auth_gate"
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                return "trust_gate"
+            if inspection.block_reason is RuntimeBlockReason.PERMISSION:
+                return "permission_gate"
+            return "blocked_prompt"
         if inspection.readiness is ReadinessState.STOPPED:
             return "missing"
         return inspection.readiness.value
@@ -269,31 +308,35 @@ class CodexRuntime(ProviderRuntime):
             return "resume"
         if inspection.readiness is ReadinessState.BUSY:
             return "wait"
-        if (
-            inspection.readiness is ReadinessState.BLOCKED
-            and inspection.block_reason is RuntimeBlockReason.AUTH
-        ):
-            return "resolve_auth"
+        if inspection.readiness is ReadinessState.BLOCKED:
+            if inspection.block_reason is RuntimeBlockReason.AUTH:
+                return "resolve_auth"
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                return "resolve_trust"
+            if inspection.block_reason is RuntimeBlockReason.PERMISSION:
+                return "resolve_permission"
+            return "inspect_prompt"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
         return "inspect"
 
     def _classify_readiness(self, excerpt: str) -> tuple[ReadinessState, RuntimeBlockReason | None]:
-        lowered = excerpt.lower()
-        if any(trigger in lowered for trigger in _TRUST_TRIGGERS):
-            return ReadinessState.BLOCKED, RuntimeBlockReason.TRUST
-        if any(trigger in lowered for trigger in _AUTH_TRIGGERS):
-            return ReadinessState.BLOCKED, RuntimeBlockReason.AUTH
+        interrupt = self._detect_interrupt(excerpt)
+        if interrupt is not None:
+            return interrupt.readiness, interrupt.block_reason
         if _CODEX_PROMPT_RE.search(excerpt):
             return ReadinessState.READY, None
         return ReadinessState.BUSY, None
 
     def _prompt_state_for_excerpt(self, excerpt: str) -> str:
         readiness, block_reason = self._classify_readiness(excerpt)
-        if block_reason is not None:
-            return f"{readiness.value}:{block_reason.value}"
-        return readiness.value
+        interrupt = self._detect_interrupt(excerpt)
+        fallback = f"{readiness.value}:{block_reason.value}" if block_reason else readiness.value
+        return interrupt_prompt_state(interrupt, fallback)
 
+    @staticmethod
+    def _detect_interrupt(excerpt: str):
+        return detect_runtime_interrupt(excerpt, _INTERRUPT_SPEC)
 
     @staticmethod
     def _delivery_action_from_metadata(metadata: dict[str, object]) -> DeliveryAction:
@@ -328,6 +371,12 @@ class CodexRuntime(ProviderRuntime):
                 verdict=DeliveryVerdict.BLOCKED,
                 reason_code=DeliveryReasonCode.AUTH_REQUIRED,
             )
+        if after_state == "blocked:permission":
+            return RunnerTerminalVerdict(
+                stage=DeliveryStage.BLOCKED,
+                verdict=DeliveryVerdict.BLOCKED,
+                reason_code=DeliveryReasonCode.PERMISSION_REQUIRED,
+            )
         if _CODEX_PROMPT_RE.search(output):
             return RunnerTerminalVerdict(
                 stage=DeliveryStage.PROMPT_CLEARED,
@@ -354,6 +403,12 @@ class CodexRuntime(ProviderRuntime):
             return "Prompt ready"
         if readiness is ReadinessState.BLOCKED and block_reason is RuntimeBlockReason.AUTH:
             return "Blocked on authentication"
+        if readiness is ReadinessState.BLOCKED and block_reason is RuntimeBlockReason.TRUST:
+            return "Blocked on trust prompt"
+        if readiness is ReadinessState.BLOCKED and block_reason is RuntimeBlockReason.PERMISSION:
+            return "Blocked on permission prompt"
+        if readiness is ReadinessState.ERROR:
+            return "Provider error"
         if readiness is ReadinessState.BUSY:
             return "Session active but not at prompt"
         if readiness is ReadinessState.STOPPED:

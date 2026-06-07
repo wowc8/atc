@@ -56,6 +56,32 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   const pendingWritesRef = useRef<string[]>([]);
   const termOpenRef = useRef(false);
 
+  const writeToTerminal = useCallback((term: Terminal, data: string) => {
+    try {
+      term.write(data, () => {
+        try {
+          term.scrollToBottom();
+        } catch {
+          // Terminal renderer may already be detached during route changes.
+        }
+      });
+    } catch {
+      // If xterm is between open/renderer states, retry after attach settles.
+      pendingWritesRef.current.push(data);
+    }
+  }, []);
+
+  const flushPendingWrites = useCallback(() => {
+    const term = termRef.current;
+    if (!termOpenRef.current || !term) return;
+    const pending = pendingWritesRef.current;
+    if (pending.length === 0) return;
+    pendingWritesRef.current = [];
+    for (const data of pending) {
+      writeToTerminal(term, data);
+    }
+  }, [writeToTerminal]);
+
   // Keep channel ref in sync for use in non-reactive callbacks
   channelRef.current = channel;
 
@@ -92,15 +118,21 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     termRef.current = term;
     fitRef.current = fit;
 
-    // If container already mounted, open immediately
+    // If container already mounted, open immediately. Mark the terminal as
+    // writable only after xterm has had a chance to initialize dimensions.
     if (containerRef.current) {
       term.open(containerRef.current);
-      termOpenRef.current = true;
-      try {
-        fit.fit();
-      } catch {
-        /* not ready */
-      }
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          try {
+            fit.fit();
+          } catch {
+            /* not ready */
+          }
+          termOpenRef.current = true;
+          flushPendingWrites();
+        });
+      });
     }
 
     return () => {
@@ -110,7 +142,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       termOpenRef.current = false;
       pendingWritesRef.current = [];
     };
-  }, [enabled]);
+  }, [enabled, flushPendingWrites]);
 
   // Fit on resize
   useEffect(() => {
@@ -175,10 +207,9 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
             const transformed = transformSeparators(raw);
             // Buffer writes if terminal isn't opened yet to avoid xterm.js
             // "dimensions" error from syncScrollArea on unopened terminals.
-            if (termOpenRef.current && termRef.current) {
-              termRef.current.write(transformed, () => {
-                termRef.current?.scrollToBottom();
-              });
+            const term = termRef.current;
+            if (termOpenRef.current && term) {
+              writeToTerminal(term, transformed);
             } else {
               pendingWritesRef.current.push(transformed);
             }
@@ -205,7 +236,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [channel, enabled]);
+  }, [channel, enabled, writeToTerminal]);
 
   // Handle user input → send to backend via WebSocket
   useEffect(() => {
@@ -251,7 +282,6 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       if (!term.element || !el.contains(term.element)) {
         term.open(el);
       }
-      termOpenRef.current = true;
       // Delay fit to ensure container has dimensions.
       // Double-RAF avoids the xterm.js "Cannot read properties of undefined
       // (reading 'dimensions')" error that occurs when fit() runs before
@@ -263,6 +293,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
           } catch {
             // Terminal may not be fully initialized yet — safe to ignore
           }
+          termOpenRef.current = true;
           // Send initial dimensions to backend so tmux pane matches
           const t = termRef.current;
           const ws = wsRef.current;
@@ -276,18 +307,11 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
             );
           }
           // Flush any data that arrived before the terminal was opened
-          const pending = pendingWritesRef.current;
-          if (pending.length > 0 && termRef.current) {
-            for (const data of pending) {
-              termRef.current.write(data);
-            }
-            pendingWritesRef.current = [];
-            termRef.current?.scrollToBottom();
-          }
+          flushPendingWrites();
         });
       });
     }
-  }, []);
+  }, [flushPendingWrites]);
 
   const writeLine = useCallback((text: string) => {
     termRef.current?.writeln(text);

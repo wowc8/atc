@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from atc.runtime.errors import RuntimeDeliveryError, RuntimeSessionMissingError
+from atc.runtime.interrupts import RuntimeInterrupt, RuntimeInterruptDisposition
 from atc.runtime.tmux.control import send_bracketed_instruction
 from atc.runtime.tmux.substrate import capture_pane_text, pane_exists
 from atc.runtime.tracing import (
@@ -28,6 +29,7 @@ from atc.runtime.tracing import (
 PromptClassifier = Callable[[str], str]
 TerminalClassifier = Callable[[str, str | None, str], "RunnerTerminalVerdict"]
 PayloadLoader = Callable[[], Awaitable[str]]
+InterruptDetector = Callable[[str], RuntimeInterrupt | None]
 
 if TYPE_CHECKING:
     from atc.runtime.models import RuntimeSessionHandle
@@ -63,6 +65,7 @@ class TmuxSessionRunner:
     provider_name: str
     prompt_state_for_excerpt: PromptClassifier
     terminal_verdict_for_observation: TerminalClassifier
+    interrupt_detector: InterruptDetector | None = None
     observe_delay_seconds: float = 0.0
     before_capture_lines: int = 40
     after_capture_lines: int = 80
@@ -117,7 +120,29 @@ class TmuxSessionRunner:
             raise RuntimeDeliveryError("Instruction payload was empty")
 
         before = await capture_pane_text(handle.tmux_pane, lines=self.before_capture_lines)
-        before_state = self.prompt_state_for_excerpt(before)
+        before_interrupt = self._detect_interrupt(before)
+        before_state = self._prompt_state(before, before_interrupt)
+        if (
+            before_interrupt is not None
+            and before_interrupt.disposition is RuntimeInterruptDisposition.BLOCKING
+        ):
+            self._append_trace(
+                handle=handle,
+                metadata=metadata,
+                trace_id=trace_id,
+                action=action,
+                stage=DeliveryStage.BLOCKED,
+                verdict=DeliveryVerdict.BLOCKED,
+                reason_code=before_interrupt.reason_code,
+                prompt_state_before=before_state,
+                prompt_state_after=before_state,
+                first_output_excerpt=before,
+                details=before_interrupt.to_trace_details(),
+            )
+            raise RuntimeDeliveryError(
+                "Instruction blocked by runtime interrupt: "
+                f"{before_interrupt.interrupt_type.value}"
+            )
         self._append_trace(
             handle=handle,
             metadata=metadata,
@@ -135,7 +160,8 @@ class TmuxSessionRunner:
             await asyncio.sleep(self.observe_delay_seconds)
 
         after = await capture_pane_text(handle.tmux_pane, lines=self.after_capture_lines)
-        after_state = self.prompt_state_for_excerpt(after)
+        after_interrupt = self._detect_interrupt(after)
+        after_state = self._prompt_state(after, after_interrupt)
         self._append_trace(
             handle=handle,
             metadata=metadata,
@@ -147,6 +173,7 @@ class TmuxSessionRunner:
             prompt_state_before=before_state,
             prompt_state_after=after_state,
             first_output_excerpt=after,
+            details=after_interrupt.to_trace_details() if after_interrupt else None,
         )
         self._append_trace(
             handle=handle,
@@ -198,6 +225,7 @@ class TmuxSessionRunner:
         prompt_state_before: str | None = None,
         prompt_state_after: str | None = None,
         first_output_excerpt: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         if not trace_id:
             return
@@ -216,5 +244,18 @@ class TmuxSessionRunner:
                 prompt_state_before=prompt_state_before,
                 prompt_state_after=prompt_state_after,
                 first_output_excerpt=first_output_excerpt,
+                details=details,
             ),
         )
+
+    def _detect_interrupt(self, excerpt: str) -> RuntimeInterrupt | None:
+        if self.interrupt_detector is None:
+            return None
+        return self.interrupt_detector(excerpt)
+
+    def _prompt_state(self, excerpt: str, interrupt: RuntimeInterrupt | None) -> str:
+        if interrupt is None:
+            return self.prompt_state_for_excerpt(excerpt)
+        if interrupt.block_reason is not None:
+            return f"{interrupt.readiness.value}:{interrupt.block_reason.value}"
+        return f"{interrupt.readiness.value}:{interrupt.interrupt_type.value}"

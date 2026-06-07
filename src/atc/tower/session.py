@@ -15,14 +15,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from atc.agents.deploy import _DEFAULT_STAGING_ROOT, TowerDeploySpec, deploy_tower_files
-from atc.config import AgentProviderConfig
 from atc.session.ace import (
-    _accept_trust_dialog,
-    _ensure_tmux_session,
     _kill_pane,
     _pane_is_alive,
     _send_keys,
-    _spawn_pane,
     _spawn_provider_session,
 )
 from atc.session.state_machine import SessionStatus, transition
@@ -32,12 +28,13 @@ from atc.state.db import get_connection_app_state
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
 
+    from atc.config import AgentProviderConfig
     from atc.core.events import EventBus
 
 logger = logging.getLogger(__name__)
 
 
-def _current_provider_config(conn: "aiosqlite.Connection") -> AgentProviderConfig:
+def _current_provider_config(conn: aiosqlite.Connection) -> AgentProviderConfig:
     settings = get_connection_app_state(conn)
     if settings is not None and getattr(settings, "settings", None) is not None:
         return settings.settings.agent_provider
@@ -46,7 +43,7 @@ def _current_provider_config(conn: "aiosqlite.Connection") -> AgentProviderConfi
     return load_settings().agent_provider
 
 
-async def _resolve_tower_project_id(conn: "aiosqlite.Connection") -> str:
+async def _resolve_tower_project_id(conn: aiosqlite.Connection) -> str:
     """Return a project_id suitable for anchoring a Tower session.
 
     Tower sessions require a project_id due to the DB FK constraint, but
@@ -55,7 +52,8 @@ async def _resolve_tower_project_id(conn: "aiosqlite.Connection") -> str:
     'Tower Workspace' project so Tower can start on a clean DB.
     """
     cursor = await conn.execute(
-        "SELECT id FROM projects WHERE status = 'active' ORDER BY position ASC, created_at ASC LIMIT 1"
+        "SELECT id FROM projects WHERE status = 'active' "
+        "ORDER BY position ASC, created_at ASC LIMIT 1"
     )
     row = await cursor.fetchone()
     if row:
@@ -65,7 +63,10 @@ async def _resolve_tower_project_id(conn: "aiosqlite.Connection") -> str:
     project = await db_ops.create_project(
         conn,
         "Tower Workspace",
-        description="Auto-created by Tower on first start. Safe to delete once you add real projects.",
+        description=(
+            "Auto-created by Tower on first start. "
+            "Safe to delete once you add real projects."
+        ),
     )
     await conn.commit()
     logger.info("Created sentinel Tower Workspace project %s", project.id)
@@ -73,10 +74,10 @@ async def _resolve_tower_project_id(conn: "aiosqlite.Connection") -> str:
 
 
 async def start_tower_session(
-    conn: "aiosqlite.Connection",
+    conn: aiosqlite.Connection,
     project_id: str | None = None,
     *,
-    event_bus: "EventBus | None" = None,
+    event_bus: EventBus | None = None,
 ) -> str:
     """Start Tower's own Claude Code session.
 
@@ -112,20 +113,23 @@ async def start_tower_session(
         # Verify the tmux pane is still alive; stale sessions from a previous
         # app run may have a non-terminal DB status but a dead pane.
         if sess.tmux_pane and await _pane_is_alive(sess.tmux_pane):
-            # Verify CLAUDE.md is deployed — a stale pane from a prior app run
-            # may have been launched without Tower identity files.
+            # Verify role files are deployed — a stale pane from a prior app run
+            # may have been launched without Tower identity files for all providers.
             staging_dir = Path(_DEFAULT_STAGING_ROOT) / sess.id
-            if (staging_dir / "CLAUDE.md").is_file() and sess.provider == current_provider:
+            has_role_files = (staging_dir / "CLAUDE.md").is_file() and (
+                staging_dir / "AGENTS.md"
+            ).is_file()
+            if has_role_files and sess.provider == current_provider:
                 logger.info(
-                    "Reusing existing tower session %s (provider=%s, CLAUDE.md present at %s)",
+                    "Reusing existing tower session %s (provider=%s, role files present at %s)",
                     sess.id,
                     sess.provider,
                     staging_dir,
                 )
                 return sess.id
-            # CLAUDE.md missing — kill stale pane and create fresh session
+            # Role files missing — kill stale pane and create fresh session.
             logger.warning(
-                "Tower session %s has live pane but CLAUDE.md missing at %s — killing stale pane",
+                "Tower session %s has live pane but role files missing at %s — killing stale pane",
                 sess.id,
                 staging_dir,
             )

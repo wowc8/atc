@@ -4,7 +4,13 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from atc.providers.codex.runtime import CodexRuntime
-from atc.runtime.models import ReadinessState, RoleKind, RuntimeSessionHandle, RuntimeTransport, StartRoleRequest
+from atc.runtime.models import (
+    ReadinessState,
+    RoleKind,
+    RuntimeSessionHandle,
+    RuntimeTransport,
+    StartRoleRequest,
+)
 
 
 def test_codex_runtime_metadata() -> None:
@@ -57,7 +63,9 @@ def test_codex_inspect_session_reports_ready_at_prompt() -> None:
 
     with (
         patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.codex.runtime.capture_pane_text", AsyncMock(return_value="all good\n>\n")),
+        patch(
+            "atc.providers.codex.runtime.capture_pane_text", AsyncMock(return_value="all good\n>\n")
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
@@ -78,13 +86,15 @@ def test_codex_inspect_session_reports_busy_when_not_at_prompt() -> None:
 
     with (
         patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.codex.runtime.capture_pane_text", AsyncMock(return_value="Processing request...")),
+        patch(
+            "atc.providers.codex.runtime.capture_pane_text",
+            AsyncMock(return_value="Processing request..."),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
     assert inspection.alive is True
     assert inspection.readiness is ReadinessState.BUSY
-
 
 
 def test_codex_inspect_session_reports_blocked_on_auth() -> None:
@@ -99,13 +109,40 @@ def test_codex_inspect_session_reports_blocked_on_auth() -> None:
 
     with (
         patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.codex.runtime.capture_pane_text", AsyncMock(return_value="Sign in to continue")),
+        patch(
+            "atc.providers.codex.runtime.capture_pane_text",
+            AsyncMock(return_value="Sign in to continue"),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
     assert inspection.readiness is ReadinessState.BLOCKED
     assert inspection.summary == "Blocked on authentication"
 
+
+def test_codex_inspect_session_reports_blocked_on_permission_prompt() -> None:
+    runtime = CodexRuntime()
+    handle = RuntimeSessionHandle(
+        session_id="sess-permission",
+        provider_name="codex",
+        role=RoleKind.ACE,
+        transport=RuntimeTransport.TMUX,
+        tmux_pane="%permission",
+    )
+
+    with (
+        patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=True)),
+        patch(
+            "atc.providers.codex.runtime.capture_pane_text",
+            AsyncMock(return_value="Allow this command to continue?"),
+        ),
+    ):
+        inspection = asyncio.run(runtime.inspect_session(handle))
+
+    assert inspection.readiness is ReadinessState.BLOCKED
+    assert inspection.summary == "Blocked on permission prompt"
+    assert inspection.details["runtime_interrupt"] == "permission_prompt"
+    assert inspection.details["provider_runtime_action"] == "resolve_permission"
 
 
 def test_codex_restore_session_marks_ready_restore() -> None:
@@ -146,7 +183,6 @@ def test_codex_restore_session_marks_stopped_restore() -> None:
     assert inspection.details["restore_needs_attention"] is True
 
 
-
 def test_codex_restore_session_marks_auth_gate_action() -> None:
     runtime = CodexRuntime()
     handle = RuntimeSessionHandle(
@@ -159,13 +195,15 @@ def test_codex_restore_session_marks_auth_gate_action() -> None:
 
     with (
         patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.codex.runtime.capture_pane_text", AsyncMock(return_value="Sign in to continue")),
+        patch(
+            "atc.providers.codex.runtime.capture_pane_text",
+            AsyncMock(return_value="Sign in to continue"),
+        ),
     ):
         inspection = asyncio.run(runtime.restore_session(handle))
 
     assert inspection.details["provider_restore_stage"] == "auth_gate"
     assert inspection.details["provider_restore_action"] == "resolve_auth"
-
 
 
 def test_codex_inspect_session_exposes_runtime_hint() -> None:
@@ -180,7 +218,10 @@ def test_codex_inspect_session_exposes_runtime_hint() -> None:
 
     with (
         patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.codex.runtime.capture_pane_text", AsyncMock(return_value="Sign in to continue")),
+        patch(
+            "atc.providers.codex.runtime.capture_pane_text",
+            AsyncMock(return_value="Sign in to continue"),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 

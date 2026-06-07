@@ -42,6 +42,7 @@ class RuntimeBlockReason(StrEnum):
     LOGIN = "login"
     TRUST = "trust"
     AUTH = "auth"
+    PERMISSION = "permission"
     RATE_LIMIT = "rate_limit"
     PROVIDER_PROMPT = "provider_prompt"
     UNKNOWN = "unknown"
