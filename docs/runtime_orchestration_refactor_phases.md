@@ -64,6 +64,8 @@ Playwright evidence should be stored under a timestamped project-local `screensh
 - Docs explicitly preserve Operator → Tower → Leader → Ace boundaries.
 - No behavior-changing refactor has started before baseline is clear.
 
+**Phase artifact:** `docs/runtime_orchestration_phase0_baseline.md`
+
 ## Phase 1 — Delivery trace events and result vocabulary
 
 **Goal:** Make instruction delivery observable without changing semantics much.
