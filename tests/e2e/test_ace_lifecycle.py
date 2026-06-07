@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from atc.api.app import create_app
 from atc.config import Settings
+from atc.runtime.models import RoleKind, RuntimeDeliveryResult
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,9 +78,21 @@ class TestAceLifecycle:
         names = {a["name"] for a in aces}
         assert names == {"ace-a", "ace-b"}
 
-    def test_full_lifecycle(self, mock_tmux: AsyncMock, client: TestClient) -> None:
+    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
+    def test_full_lifecycle(
+        self, mock_send: AsyncMock, mock_tmux: AsyncMock, client: TestClient
+    ) -> None:
         """Create → start → message → stop → destroy."""
         mock_tmux.return_value = "%1"
+        mock_send.return_value = RuntimeDeliveryResult(
+            session_id="session-test",
+            provider_name="claude_code",
+            role=RoleKind.ACE,
+            status="delivered",
+            stage="confirmed_running",
+            verdict="accepted",
+            reason_code="delivery_unverified",
+        )
 
         resp = client.post("/api/projects", json={"name": "lifecycle-proj"})
         project_id = resp.json()["id"]

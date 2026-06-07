@@ -26,8 +26,9 @@ from typing import TYPE_CHECKING, Any
 from atc.config import load_settings
 from atc.leader.context_package import build_context_package
 from atc.leader.leader import send_leader_message, start_leader, stop_leader
-from atc.state import db as db_ops
+from atc.runtime.models import RuntimeDeliveryResult
 from atc.session.state_machine import SessionStatus
+from atc.state import db as db_ops
 from atc.tower.session import send_tower_message, start_tower_session, stop_tower_session
 
 if TYPE_CHECKING:
@@ -37,6 +38,12 @@ if TYPE_CHECKING:
     from atc.core.events import EventBus
 
 logger = logging.getLogger(__name__)
+
+
+def _delivery_failed(result: object) -> bool:
+    """Return true when a runtime delivery result is explicitly not ok."""
+
+    return isinstance(result, RuntimeDeliveryResult) and not result.ok
 
 
 class TowerState(enum.StrEnum):
@@ -249,9 +256,7 @@ class TowerController:
             raise TowerBusyError(self._state, project_id)
 
         if self._budget_constrained:
-            logger.warning(
-                "Skipping new Ace spawn — budget constrained (project %s)", project_id
-            )
+            logger.warning("Skipping new Ace spawn — budget constrained (project %s)", project_id)
             raise BudgetConstrainedError(project_id)
 
         if self._active_ace_count >= self._max_concurrent_aces:
@@ -376,9 +381,7 @@ class TowerController:
 
             # Send kickoff and start background verification loop
             await self._send_leader_kickoff(leader_session_id, goal)
-            asyncio.create_task(
-                self._verify_leader_started(project_id, leader_session_id, goal)
-            )
+            asyncio.create_task(self._verify_leader_started(project_id, leader_session_id, goal))
 
             # Notify Tower's own Claude session so it knows a Leader is running
             # and can begin monitoring.  Best-effort — don't fail the whole goal
@@ -511,8 +514,7 @@ class TowerController:
             }
 
         cursor = await self._db.execute(
-            "SELECT status, COUNT(*) as cnt FROM task_graphs "
-            "WHERE project_id = ? GROUP BY status",
+            "SELECT status, COUNT(*) as cnt FROM task_graphs WHERE project_id = ? GROUP BY status",
             (self._current_project_id,),
         )
         rows = await cursor.fetchall()
@@ -631,12 +633,17 @@ class TowerController:
             kickoff_msg = "\n".join(lines)
 
             try:
-                await send_leader_message(
+                delivery = await send_leader_message(
                     self._db,
                     self._current_project_id,
                     kickoff_msg,
                     event_bus=self._event_bus,
                 )
+                if _delivery_failed(delivery):
+                    raise ValueError(
+                        delivery.message
+                        or f"Leader instruction {delivery.status}: {delivery.reason_code}"
+                    )
             except ValueError as exc:
                 # Pane died between spawn and kickoff — respawn once and retry
                 err_msg = str(exc).lower()
@@ -648,12 +655,16 @@ class TowerController:
                     new_id = await self._respawn_leader(self._current_project_id, goal)
                     if new_id:
                         # Retry kickoff with fresh session
-                        await send_leader_message(
+                        retry_delivery = await send_leader_message(
                             self._db,
                             self._current_project_id,
                             kickoff_msg,
                             event_bus=self._event_bus,
                         )
+                        if _delivery_failed(retry_delivery):
+                            raise ValueError(
+                                retry_delivery.message or "Leader kickoff retry delivery failed"
+                            ) from exc
                         session_id = new_id
                     else:
                         raise
@@ -665,13 +676,9 @@ class TowerController:
                 self._current_project_id,
             )
         except Exception:
-            logger.exception(
-                "Failed to send kickoff to leader session %s", session_id
-            )
+            logger.exception("Failed to send kickoff to leader session %s", session_id)
 
-    async def _verify_leader_started(
-        self, project_id: str, session_id: str, goal: str
-    ) -> None:
+    async def _verify_leader_started(self, project_id: str, session_id: str, goal: str) -> None:
         """Background loop: verify the Leader acknowledged and started working.
 
         Waits ~10s after kickoff, checks for output, and retries the kickoff
@@ -703,12 +710,17 @@ class TowerController:
                 max_retries,
             )
             try:
-                await send_leader_message(
+                delivery = await send_leader_message(
                     self._db,
                     project_id,
                     "Please continue with your goal.",
                     event_bus=self._event_bus,
                 )
+                if _delivery_failed(delivery):
+                    raise ValueError(
+                        delivery.message
+                        or f"Leader nudge {delivery.status}: {delivery.reason_code}"
+                    )
             except ValueError as exc:
                 # Pane is dead — respawn the leader and resend the kickoff
                 err_msg = str(exc).lower()
@@ -731,9 +743,7 @@ class TowerController:
                         break
                 logger.exception("Failed to send nudge to leader session %s", session_id)
             except Exception:
-                logger.exception(
-                    "Failed to send nudge to leader session %s", session_id
-                )
+                logger.exception("Failed to send nudge to leader session %s", session_id)
             await asyncio.sleep(retry_wait)
 
         # Final check after last retry
@@ -988,7 +998,9 @@ class TowerController:
                         self._max_concurrent_aces,
                     )
             except Exception:
-                logger.debug("Could not look up session type for %s during status change", session_id)
+                logger.debug(
+                    "Could not look up session type for %s during status change", session_id
+                )
 
         if session_id != self._leader_session_id:
             return
@@ -1040,6 +1052,4 @@ class BudgetConstrainedError(Exception):
 
     def __init__(self, project_id: str) -> None:
         self.project_id = project_id
-        super().__init__(
-            f"Budget constrained — new Ace spawns paused for project {project_id}"
-        )
+        super().__init__(f"Budget constrained — new Ace spawns paused for project {project_id}")
