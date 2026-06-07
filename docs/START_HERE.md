@@ -16,12 +16,18 @@ Minimum reading order for any non-trivial change:
 
 Examples:
 - provider/runtime work:
+  - `docs/runtime_orchestration_refactor_phases.md`
   - `docs/provider_runtime_refactor_plan.md`
   - `docs/provider_cli_wrapper_spec.md`
   - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`
 - API or architecture work:
   - `docs/ARCHITECTURE.md`
   - `docs/API.md`
+- agent role/boundary work:
+  - `docs/agents/README.md`
+  - `docs/agents/TOWER.md`
+  - `docs/agents/LEADER.md`
+  - `docs/agents/ACE.md`
 - historical design intent:
   - `docs/design_logs/`
 
@@ -64,6 +70,10 @@ These docs exist to:
   - `atc-provider` wrapper contract
 - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`
   - runtime/provider boundary rules
+- `docs/runtime_orchestration_refactor_phases.md`
+  - phased implementation plan for the runtime/orchestration hardening refactor
+- `docs/agents/README.md`
+  - role contracts and behavior boundaries for Tower, Leader, and Ace
 - `docs/ARCHITECTURE.md`
   - older and broader architecture overview
 - `docs/API.md`
