@@ -86,7 +86,7 @@ class QALoopConfig(BaseModel):
 class AgentProviderConfig(BaseModel):
     """Configuration for the agent provider abstraction layer."""
 
-    default: str = "claude_code"
+    default: str = "codex"
     opencode_url: str = "http://localhost:4096"
     opencode_username: str | None = None
     opencode_password: str | None = None

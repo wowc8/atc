@@ -15,7 +15,7 @@ class Project:
     description: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
-    agent_provider: str = "claude_code"
+    agent_provider: str = "codex"
     position: int = 0
     created_at: str = ""
     updated_at: str = ""
@@ -49,7 +49,7 @@ class Session:
     session_type: str  # ace|manager|tower
     name: str
     status: str  # idle|connecting|working|paused|waiting|disconnected|error
-    provider: str = "claude_code"
+    provider: str = "codex"
     scope_type: str = "project"  # global|project
     scope_id: str | None = None
     task_id: str | None = None
