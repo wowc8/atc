@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 
 from atc.providers.base import ProviderRuntime
-from atc.runtime.errors import RuntimeDeliveryError, RuntimeSessionMissingError
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
@@ -18,7 +17,7 @@ from atc.runtime.models import (
     StopRoleRequest,
     TaskAssignmentRequest,
 )
-from atc.runtime.tmux.control import send_bracketed_instruction
+from atc.runtime.tmux.runner import RunnerTerminalVerdict, TmuxSessionRunner
 from atc.runtime.tmux.substrate import (
     build_path_env_prefix,
     capture_pane_text,
@@ -32,8 +31,6 @@ from atc.runtime.tracing import (
     DeliveryReasonCode,
     DeliveryStage,
     DeliveryVerdict,
-    append_trace_event,
-    trace_event,
 )
 
 _CODEX_PROMPT_RE = re.compile(r"(^|\n)\s*(❯|>)\s*$", re.MULTILINE)
@@ -108,105 +105,19 @@ class CodexRuntime(ProviderRuntime):
         request: InstructionRequest,
     ) -> None:
         trace_id = str(request.metadata.get("delivery_trace_id") or "")
-        if not handle.tmux_pane:
-            self._append_instruction_trace(
-                request,
-                handle,
-                trace_id,
-                DeliveryStage.FAILED,
-                DeliveryVerdict.FAILED,
-                DeliveryReasonCode.PANE_MISSING,
-            )
-            raise RuntimeSessionMissingError("Codex session has no tmux pane recorded")
-        if not await pane_exists(handle.tmux_pane):
-            self._append_instruction_trace(
-                request,
-                handle,
-                trace_id,
-                DeliveryStage.FAILED,
-                DeliveryVerdict.FAILED,
-                DeliveryReasonCode.PANE_MISSING,
-            )
-            raise RuntimeSessionMissingError("Codex session pane is missing")
-        text = request.message or ""
-        if not text and request.message_file:
-            with open(request.message_file, encoding="utf-8") as f:
-                text = f.read()
-        if not text:
-            self._append_instruction_trace(
-                request,
-                handle,
-                trace_id,
-                DeliveryStage.FAILED,
-                DeliveryVerdict.FAILED,
-                DeliveryReasonCode.EMPTY_PAYLOAD,
-            )
-            raise RuntimeDeliveryError("Instruction payload was empty")
-
-        before = await capture_pane_text(handle.tmux_pane, lines=40)
-        before_state = self._prompt_state_for_excerpt(before)
-        self._append_instruction_trace(
-            request,
-            handle,
-            trace_id,
-            DeliveryStage.WRITE_STARTED,
-            DeliveryVerdict.PENDING,
-            DeliveryReasonCode.PTY_WRITE_STARTED,
-            prompt_state_before=before_state,
-            first_output_excerpt=before,
+        action = self._delivery_action_from_metadata(request.metadata)
+        runner = TmuxSessionRunner(
+            tmux_session=self.tmux_session,
+            provider_name=self.provider_name,
+            prompt_state_for_excerpt=self._prompt_state_for_excerpt,
+            terminal_verdict_for_observation=self._terminal_verdict_for_observation,
         )
-        await send_bracketed_instruction(self.tmux_session, handle.tmux_pane, text)
-        after = await capture_pane_text(handle.tmux_pane, lines=80)
-        after_state = self._prompt_state_for_excerpt(after)
-        self._append_instruction_trace(
-            request,
-            handle,
-            trace_id,
-            DeliveryStage.WRITTEN_TO_PTY,
-            DeliveryVerdict.ACCEPTED,
-            DeliveryReasonCode.PTY_WRITE_ACCEPTED,
-            prompt_state_before=before_state,
-            prompt_state_after=after_state,
-            first_output_excerpt=after,
-        )
-        self._append_instruction_trace(
-            request,
-            handle,
-            trace_id,
-            DeliveryStage.SUBMIT_ATTEMPTED,
-            DeliveryVerdict.ACCEPTED,
-            DeliveryReasonCode.SUBMIT_SENT,
-            prompt_state_before=before_state,
-            prompt_state_after=after_state,
-        )
-        terminal_stage = DeliveryStage.CONFIRMED_RUNNING
-        terminal_reason = DeliveryReasonCode.SESSION_RUNNING
-        terminal_verdict = DeliveryVerdict.CONFIRMED
-        if after_state == "blocked:trust":
-            terminal_stage = DeliveryStage.BLOCKED
-            terminal_reason = DeliveryReasonCode.TRUST_REQUIRED
-            terminal_verdict = DeliveryVerdict.BLOCKED
-        elif after_state == "blocked:auth":
-            terminal_stage = DeliveryStage.BLOCKED
-            terminal_reason = DeliveryReasonCode.AUTH_REQUIRED
-            terminal_verdict = DeliveryVerdict.BLOCKED
-        elif _CODEX_PROMPT_RE.search(after):
-            terminal_stage = DeliveryStage.PROMPT_CLEARED
-            terminal_reason = DeliveryReasonCode.PROMPT_STILL_VISIBLE
-            terminal_verdict = DeliveryVerdict.ACCEPTED
-        elif after.strip():
-            terminal_stage = DeliveryStage.AGENT_OUTPUT_OBSERVED
-            terminal_reason = DeliveryReasonCode.AGENT_OUTPUT
-        self._append_instruction_trace(
-            request,
-            handle,
-            trace_id,
-            terminal_stage,
-            terminal_verdict,
-            terminal_reason,
-            prompt_state_before=before_state,
-            prompt_state_after=after_state,
-            first_output_excerpt=after,
+        await runner.deliver_instruction(
+            handle=handle,
+            metadata=request.metadata,
+            trace_id=trace_id,
+            action=action,
+            payload_loader=lambda: self._instruction_text(request),
         )
 
     async def assign_task(
@@ -383,45 +294,57 @@ class CodexRuntime(ProviderRuntime):
             return f"{readiness.value}:{block_reason.value}"
         return readiness.value
 
-    @staticmethod
-    def _append_instruction_trace(
-        request: InstructionRequest,
-        handle: RuntimeSessionHandle,
-        trace_id: str,
-        stage: DeliveryStage,
-        verdict: DeliveryVerdict,
-        reason_code: DeliveryReasonCode,
-        *,
-        prompt_state_before: str | None = None,
-        prompt_state_after: str | None = None,
-        first_output_excerpt: str | None = None,
-    ) -> None:
-        if not trace_id:
-            return
-        raw_action = request.metadata.get("delivery_action")
-        action = (
-            DeliveryAction.TASK_ASSIGNMENT
-            if raw_action == DeliveryAction.TASK_ASSIGNMENT.value
-            else DeliveryAction.INSTRUCTION
-        )
-        append_trace_event(
-            request.metadata,
-            trace_event(
-                trace_id=trace_id,
-                session_id=handle.session_id,
-                role=handle.role.value,
-                provider=handle.provider_name,
-                pane_id=handle.tmux_pane,
-                action=action,
-                stage=stage,
-                verdict=verdict,
-                reason_code=reason_code,
-                prompt_state_before=prompt_state_before,
-                prompt_state_after=prompt_state_after,
-                first_output_excerpt=first_output_excerpt,
-            ),
-        )
 
+    @staticmethod
+    def _delivery_action_from_metadata(metadata: dict[str, object]) -> DeliveryAction:
+        raw_action = metadata.get("delivery_action")
+        if raw_action == DeliveryAction.TASK_ASSIGNMENT.value:
+            return DeliveryAction.TASK_ASSIGNMENT
+        return DeliveryAction.INSTRUCTION
+
+    @staticmethod
+    async def _instruction_text(request: InstructionRequest) -> str:
+        text = request.message or ""
+        if not text and request.message_file:
+            with open(request.message_file, encoding="utf-8") as f:
+                text = f.read()
+        return text
+
+    @staticmethod
+    def _terminal_verdict_for_observation(
+        _text: str,
+        after_state: str | None,
+        output: str,
+    ) -> RunnerTerminalVerdict:
+        if after_state == "blocked:trust":
+            return RunnerTerminalVerdict(
+                stage=DeliveryStage.BLOCKED,
+                verdict=DeliveryVerdict.BLOCKED,
+                reason_code=DeliveryReasonCode.TRUST_REQUIRED,
+            )
+        if after_state == "blocked:auth":
+            return RunnerTerminalVerdict(
+                stage=DeliveryStage.BLOCKED,
+                verdict=DeliveryVerdict.BLOCKED,
+                reason_code=DeliveryReasonCode.AUTH_REQUIRED,
+            )
+        if _CODEX_PROMPT_RE.search(output):
+            return RunnerTerminalVerdict(
+                stage=DeliveryStage.PROMPT_CLEARED,
+                verdict=DeliveryVerdict.ACCEPTED,
+                reason_code=DeliveryReasonCode.PROMPT_STILL_VISIBLE,
+            )
+        if output.strip():
+            return RunnerTerminalVerdict(
+                stage=DeliveryStage.AGENT_OUTPUT_OBSERVED,
+                verdict=DeliveryVerdict.CONFIRMED,
+                reason_code=DeliveryReasonCode.AGENT_OUTPUT,
+            )
+        return RunnerTerminalVerdict(
+            stage=DeliveryStage.CONFIRMED_RUNNING,
+            verdict=DeliveryVerdict.CONFIRMED,
+            reason_code=DeliveryReasonCode.SESSION_RUNNING,
+        )
     @staticmethod
     def _summary_for_state(
         readiness: ReadinessState,

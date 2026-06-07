@@ -112,6 +112,9 @@ class ClaudeCodeRuntime(ProviderRuntime):
         handle: RuntimeSessionHandle,
         request: InstructionRequest,
     ) -> None:
+        # Phase 2 routes Codex through TmuxSessionRunner first. Claude keeps this
+        # compatibility implementation until its provider-specific verification
+        # semantics are migrated in a later phase.
         trace_id = str(request.metadata.get("delivery_trace_id") or "")
         if not handle.tmux_pane:
             self._append_instruction_trace(
