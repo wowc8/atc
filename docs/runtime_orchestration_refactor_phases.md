@@ -1,7 +1,7 @@
 # ATC Runtime/Orchestration Hardening Refactor Phases
 
 **Status:** In progress / planning-to-implementation handoff
-**Last updated:** 2026-06-07 03:36 UTC
+**Last updated:** 2026-06-07 03:47 UTC
 **Source:** `projects/atc.md` refactor plan plus Matthew's Tower → Leader → Ace hierarchy clarification
 
 ## Purpose
@@ -24,6 +24,26 @@ Operator / assistant → Tower → Leader → Ace
 - **Aces** execute scoped tasks and report evidence/blockers upward.
 
 Debugging, recovery, and implementation tests may inspect lower levels directly, but the product workflow must not flatten the hierarchy.
+
+## Required phase execution and QA loop
+
+Each implementation phase is not complete until it has gone through the full coding loop:
+
+1. plan the phase slice and acceptance criteria;
+2. code the slice on a branch;
+3. run targeted unit/integration checks;
+4. open the PR;
+5. review the PR;
+6. merge the PR;
+7. validate the merged result locally; and
+8. ask whether anything else remains for the phase before moving to the next phase.
+
+Phase validation must include Playwright verification on the Mac Studio for both:
+
+- **Changed behavior:** every UI-visible or workflow-visible behavior touched by the phase, with screenshots and a written pass/fail report.
+- **Baseline regression coverage:** a stable smoke path that proves core ATC functionality has not drifted, including app boot, dashboard/project navigation, Tower as the operator-facing surface, Codex/default-provider expectations, Tower Start without an active project, and a Tower-driven Leader/Ace orchestration path when safe to run.
+
+Playwright evidence should be stored under a timestamped project-local `screenshots/` or `test-results/` directory and reported with absolute paths. Console errors, failed network requests, blocked provider/runtime prompts, and any skipped destructive workflow steps must be recorded explicitly. If Playwright cannot complete because of environment/auth/provider state, that blocker must be treated as unfinished phase work, not ignored.
 
 ## Phase 0 — Baseline validation and docs alignment
 
