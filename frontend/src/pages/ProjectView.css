@@ -47,7 +47,10 @@
   flex-direction: column;
   flex-shrink: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   gap: 0;
 }
 

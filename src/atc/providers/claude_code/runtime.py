@@ -7,6 +7,11 @@ import re
 
 from atc.providers.base import ProviderRuntime
 from atc.runtime.errors import RuntimeDeliveryError, RuntimeSessionMissingError
+from atc.runtime.interrupts import (
+    RuntimeInterruptSpec,
+    detect_runtime_interrupt,
+    interrupt_prompt_state,
+)
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
@@ -47,11 +52,29 @@ _TRUST_TRIGGERS = (
     "do you trust",
     "bypass permissions",
 )
+_PERMISSION_TRIGGERS = (
+    "permission",
+    "allow command",
+    "allow this command",
+    "approve command",
+)
 _AUTH_TRIGGERS = (
     "login",
     "sign in",
     "authentication",
     "api key",
+)
+_PROVIDER_ERROR_TRIGGERS = (
+    "failed to start provider",
+    "failed to start codex",
+    "failed to start claude",
+)
+_INTERRUPT_SPEC = RuntimeInterruptSpec(
+    trust_triggers=_TRUST_TRIGGERS,
+    permission_triggers=_PERMISSION_TRIGGERS,
+    login_triggers=_AUTH_TRIGGERS,
+    welcome_triggers=_WELCOME_TRIGGERS,
+    provider_error_triggers=_PROVIDER_ERROR_TRIGGERS,
 )
 
 
@@ -154,6 +177,20 @@ class ClaudeCodeRuntime(ProviderRuntime):
 
         before = await capture_pane_text(handle.tmux_pane, lines=40)
         before_state = self._prompt_state_for_excerpt(before)
+        before_block_reason = self._block_reason_for_prompt_state(before_state)
+        if before_block_reason is not None:
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.BLOCKED,
+                DeliveryVerdict.BLOCKED,
+                before_block_reason,
+                prompt_state_before=before_state,
+                prompt_state_after=before_state,
+                first_output_excerpt=before,
+            )
+            return
         self._append_instruction_trace(
             request,
             handle,
@@ -212,6 +249,19 @@ class ClaudeCodeRuntime(ProviderRuntime):
                 DeliveryStage.BLOCKED,
                 DeliveryVerdict.BLOCKED,
                 DeliveryReasonCode.AUTH_REQUIRED,
+                prompt_state_before=before_state,
+                prompt_state_after=after_state,
+                first_output_excerpt=output,
+            )
+            return
+        if after_state == "blocked:permission":
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.BLOCKED,
+                DeliveryVerdict.BLOCKED,
+                DeliveryReasonCode.PERMISSION_REQUIRED,
                 prompt_state_before=before_state,
                 prompt_state_after=after_state,
                 first_output_excerpt=output,
@@ -318,16 +368,22 @@ class ClaudeCodeRuntime(ProviderRuntime):
             )
 
         excerpt = await capture_pane_text(handle.tmux_pane, lines=40)
+        interrupt = self._detect_interrupt(excerpt)
         readiness, block_reason = self._classify_readiness(excerpt)
+        summary = (
+            interrupt.summary if interrupt else self._summary_for_state(readiness, block_reason)
+        )
         inspection = RuntimeInspection(
             session_id=handle.session_id,
             provider_name=self.provider_name,
             alive=True,
             readiness=readiness,
             block_reason=block_reason,
-            summary=self._summary_for_state(readiness, block_reason),
+            summary=summary,
             last_output_excerpt=excerpt,
         )
+        if interrupt is not None:
+            inspection.details.update(interrupt.to_trace_details())
         inspection.details["provider_runtime_hint"] = self._runtime_hint_for_inspection(inspection)
         inspection.details["provider_runtime_action"] = self._runtime_action_for_inspection(
             inspection
@@ -352,6 +408,11 @@ class ClaudeCodeRuntime(ProviderRuntime):
             and inspection.block_reason is RuntimeBlockReason.AUTH
         ):
             return "auth_prompt"
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.PERMISSION
+        ):
+            return "permission_prompt"
         if inspection.readiness is ReadinessState.STOPPED:
             return "pane_missing"
         return inspection.readiness.value
@@ -371,6 +432,11 @@ class ClaudeCodeRuntime(ProviderRuntime):
             and inspection.block_reason is RuntimeBlockReason.AUTH
         ):
             return "resolve_auth"
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.PERMISSION
+        ):
+            return "resolve_permission"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
         return "inspect"
@@ -431,6 +497,11 @@ class ClaudeCodeRuntime(ProviderRuntime):
             and inspection.block_reason is RuntimeBlockReason.AUTH
         ):
             return "auth_gate"
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.PERMISSION
+        ):
+            return "permission_gate"
         if inspection.readiness is ReadinessState.STOPPED:
             return "missing"
         return inspection.readiness.value
@@ -450,27 +521,44 @@ class ClaudeCodeRuntime(ProviderRuntime):
             and inspection.block_reason is RuntimeBlockReason.AUTH
         ):
             return "resolve_auth"
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.PERMISSION
+        ):
+            return "resolve_permission"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
         return "inspect"
 
     def _classify_readiness(self, excerpt: str) -> tuple[ReadinessState, RuntimeBlockReason | None]:
-        lowered = excerpt.lower()
-        if any(trigger in lowered for trigger in _TRUST_TRIGGERS):
-            return ReadinessState.BLOCKED, RuntimeBlockReason.TRUST
-        if any(trigger in lowered for trigger in _AUTH_TRIGGERS):
-            return ReadinessState.BLOCKED, RuntimeBlockReason.AUTH
-        if any(trigger in lowered for trigger in _WELCOME_TRIGGERS):
-            return ReadinessState.BUSY, None
         if _BARE_PROMPT_RE.search(excerpt):
             return ReadinessState.READY, None
+        interrupt = self._detect_interrupt(excerpt)
+        if interrupt is not None:
+            return interrupt.readiness, interrupt.block_reason
         return ReadinessState.BUSY, None
 
     def _prompt_state_for_excerpt(self, excerpt: str) -> str:
+        if _BARE_PROMPT_RE.search(excerpt):
+            return ReadinessState.READY.value
         readiness, block_reason = self._classify_readiness(excerpt)
-        if block_reason is not None:
-            return f"{readiness.value}:{block_reason.value}"
-        return readiness.value
+        interrupt = self._detect_interrupt(excerpt)
+        fallback = f"{readiness.value}:{block_reason.value}" if block_reason else readiness.value
+        return interrupt_prompt_state(interrupt, fallback)
+
+    @staticmethod
+    def _detect_interrupt(excerpt: str):
+        return detect_runtime_interrupt(excerpt, _INTERRUPT_SPEC)
+
+    @staticmethod
+    def _block_reason_for_prompt_state(prompt_state: str) -> DeliveryReasonCode | None:
+        if prompt_state == "blocked:trust":
+            return DeliveryReasonCode.TRUST_REQUIRED
+        if prompt_state == "blocked:auth":
+            return DeliveryReasonCode.AUTH_REQUIRED
+        if prompt_state == "blocked:permission":
+            return DeliveryReasonCode.PERMISSION_REQUIRED
+        return None
 
     @staticmethod
     def _append_instruction_trace(
@@ -522,6 +610,8 @@ class ClaudeCodeRuntime(ProviderRuntime):
             return "Blocked on trust prompt"
         if readiness is ReadinessState.BLOCKED and block_reason is RuntimeBlockReason.AUTH:
             return "Blocked on authentication"
+        if readiness is ReadinessState.BLOCKED and block_reason is RuntimeBlockReason.PERMISSION:
+            return "Blocked on permission prompt"
         if readiness is ReadinessState.BUSY:
             return "Session active but not at bare prompt"
         if readiness is ReadinessState.STOPPED:

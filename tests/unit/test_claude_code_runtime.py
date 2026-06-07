@@ -4,7 +4,13 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from atc.providers.claude_code.runtime import ClaudeCodeRuntime
-from atc.runtime.models import ReadinessState, RoleKind, RuntimeSessionHandle, RuntimeTransport, StartRoleRequest
+from atc.runtime.models import (
+    ReadinessState,
+    RoleKind,
+    RuntimeSessionHandle,
+    RuntimeTransport,
+    StartRoleRequest,
+)
 
 
 def test_claude_code_runtime_metadata() -> None:
@@ -57,7 +63,10 @@ def test_claude_inspect_session_reports_ready_at_prompt() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="some output\n❯\n")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="some output\n❯\n"),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
@@ -78,13 +87,15 @@ def test_claude_inspect_session_reports_busy_when_not_at_prompt() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="Thinking hard...")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Thinking hard..."),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
     assert inspection.alive is True
     assert inspection.readiness is ReadinessState.BUSY
-
 
 
 def test_claude_inspect_session_reports_blocked_on_trust() -> None:
@@ -99,7 +110,10 @@ def test_claude_inspect_session_reports_blocked_on_trust() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="Do you trust this folder?")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Do you trust this folder?"),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
@@ -120,13 +134,15 @@ def test_claude_inspect_session_reports_blocked_on_auth() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="Please login with your API key")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Please login with your API key"),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
     assert inspection.readiness is ReadinessState.BLOCKED
     assert inspection.summary == "Blocked on authentication"
-
 
 
 def test_claude_restore_session_marks_ready_restore() -> None:
@@ -141,7 +157,10 @@ def test_claude_restore_session_marks_ready_restore() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="output\n❯\n")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="output\n❯\n"),
+        ),
     ):
         inspection = asyncio.run(runtime.restore_session(handle))
 
@@ -162,13 +181,15 @@ def test_claude_restore_session_marks_blocked_restore() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="Please login with your API key")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Please login with your API key"),
+        ),
     ):
         inspection = asyncio.run(runtime.restore_session(handle))
 
     assert inspection.summary == "Restore blocked: Blocked on authentication"
     assert inspection.details["restore_needs_attention"] is True
-
 
 
 def test_claude_restore_session_marks_warming_up_stage() -> None:
@@ -183,13 +204,15 @@ def test_claude_restore_session_marks_warming_up_stage() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="Welcome to Claude Code")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Welcome to Claude Code"),
+        ),
     ):
         inspection = asyncio.run(runtime.restore_session(handle))
 
     assert inspection.details["provider_restore_stage"] == "warming_up"
     assert inspection.details["provider_restore_action"] == "wait"
-
 
 
 def test_claude_inspect_session_exposes_runtime_hint() -> None:
@@ -204,9 +227,55 @@ def test_claude_inspect_session_exposes_runtime_hint() -> None:
 
     with (
         patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
-        patch("atc.providers.claude_code.runtime.capture_pane_text", AsyncMock(return_value="Welcome to Claude Code")),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Welcome to Claude Code"),
+        ),
     ):
         inspection = asyncio.run(runtime.inspect_session(handle))
 
     assert inspection.details["provider_runtime_hint"] == "startup_banner"
     assert inspection.details["provider_runtime_action"] == "wait"
+
+
+def test_claude_send_instruction_does_not_write_when_already_blocked_on_permission() -> None:
+    from atc.runtime.models import InstructionRequest
+
+    runtime = ClaudeCodeRuntime()
+    handle = RuntimeSessionHandle(
+        session_id="sess-blocked-send",
+        provider_name="claude_code",
+        role=RoleKind.LEADER,
+        transport=RuntimeTransport.TMUX,
+        tmux_pane="%blocked",
+    )
+    request = InstructionRequest(
+        session_id="sess-blocked-send",
+        message="do work",
+        metadata={"delivery_trace_id": "trace-blocked"},
+    )
+
+    with (
+        patch("atc.providers.claude_code.runtime.pane_exists", AsyncMock(return_value=True)),
+        patch(
+            "atc.providers.claude_code.runtime.capture_pane_text",
+            AsyncMock(return_value="Allow this command to continue?"),
+        ),
+        patch("atc.providers.claude_code.runtime.send_bracketed_instruction", AsyncMock()) as send,
+    ):
+        asyncio.run(runtime.send_instruction(handle, request))
+
+    send.assert_not_awaited()
+    trace = request.metadata["delivery_trace_events"][-1]
+    assert trace["stage"] == "blocked"
+    assert trace["reason_code"] == "permission_required"
+
+
+def test_claude_ready_prompt_takes_precedence_over_error_text() -> None:
+    runtime = ClaudeCodeRuntime()
+
+    readiness, block_reason = runtime._classify_readiness("previous error: harmless log\n❯\n")
+
+    assert readiness is ReadinessState.READY
+    assert block_reason is None
+    assert runtime._prompt_state_for_excerpt("previous error: harmless log\n❯\n") == "ready"

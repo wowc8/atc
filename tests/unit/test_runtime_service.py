@@ -316,3 +316,15 @@ def test_runtime_service_provider_settings_use_connection_app_state_side_map() -
     assert first is not second
     assert first.codex_command == "codex-custom"
     assert second.codex_command == "codex-updated"
+
+
+def test_delivery_exception_permission_maps_to_permission_required() -> None:
+    from atc.runtime.service import RuntimeService
+    from atc.runtime.tracing import DeliveryReasonCode
+
+    assert (
+        RuntimeService._reason_code_for_delivery_exception(
+            Exception("Instruction blocked by runtime interrupt: permission_prompt")
+        )
+        is DeliveryReasonCode.PERMISSION_REQUIRED
+    )

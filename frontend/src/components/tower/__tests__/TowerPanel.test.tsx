@@ -77,7 +77,7 @@ describe("TowerPanel", () => {
   it("posts to tower start without a project id when no project is active", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    fetchMock.mockImplementation(async (input, init) => {
+    fetchMock.mockImplementation(async (input) => {
       const url = String(input);
       if (url === "/api/tower/start") {
         return new Response(JSON.stringify({ status: "started", session_id: "tower-1" }), { status: 200 });

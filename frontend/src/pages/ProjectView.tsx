@@ -14,8 +14,20 @@ const MIN_LEFT = 280;
 const MIN_TASKS = 120;
 
 function readStorage(key: string, fallback: number): number {
-  const v = localStorage.getItem(key);
-  return v !== null ? Number(v) : fallback;
+  try {
+    const v = globalThis.localStorage?.getItem(key);
+    return v !== null && v !== undefined ? Number(v) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStorage(key: string, value: number): void {
+  try {
+    globalThis.localStorage?.setItem(key, String(value));
+  } catch {
+    // Storage can be unavailable in tests or hardened browser contexts.
+  }
 }
 
 export default function ProjectView() {
@@ -49,13 +61,13 @@ export default function ProjectView() {
   const layoutRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    localStorage.setItem("atc:pv:split", String(leftWidth));
+    writeStorage("atc:pv:split", leftWidth);
   }, [leftWidth]);
   useEffect(() => {
-    localStorage.setItem("atc:pv:tasks-h", String(tasksHeight));
+    writeStorage("atc:pv:tasks-h", tasksHeight);
   }, [tasksHeight]);
   useEffect(() => {
-    localStorage.setItem("atc:pv:leader-h", String(leaderHeight));
+    writeStorage("atc:pv:leader-h", leaderHeight);
   }, [leaderHeight]);
 
   const handleSplitDrag = useCallback(

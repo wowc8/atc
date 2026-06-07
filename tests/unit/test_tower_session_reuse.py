@@ -30,7 +30,7 @@ async def test_reuses_live_same_provider_tower_session_with_valid_staging_dir(
         project_id=project.id,
         session_type="tower",
         name="tower-test",
-        provider="claude_code",
+        provider="codex",
         status=SessionStatus.IDLE.value,
     )
     await db.execute("UPDATE sessions SET tmux_pane = ? WHERE id = ?", ("%existing-pane", sess.id))
@@ -39,6 +39,7 @@ async def test_reuses_live_same_provider_tower_session_with_valid_staging_dir(
     staging_dir = Path(tmp_path) / sess.id
     staging_dir.mkdir(parents=True)
     (staging_dir / "CLAUDE.md").write_text("# Tower\n")
+    (staging_dir / "AGENTS.md").write_text("# Tower\n")
 
     with (
         patch("atc.tower.session._DEFAULT_STAGING_ROOT", str(tmp_path)),
@@ -67,10 +68,12 @@ async def test_does_not_reuse_live_tower_session_when_provider_mismatches(
     staging_dir = Path(tmp_path) / sess.id
     staging_dir.mkdir(parents=True)
     (staging_dir / "CLAUDE.md").write_text("# Tower\n")
+    (staging_dir / "AGENTS.md").write_text("# Tower\n")
 
     mock_root = tmp_path / "new-sess"
     mock_root.mkdir()
     (mock_root / "CLAUDE.md").write_text("# Tower\n")
+    (mock_root / "AGENTS.md").write_text("# Tower\n")
     mock_deployed = Mock()
     mock_deployed.root = mock_root
     mock_deployed.claude_md_path = mock_root / "CLAUDE.md"
@@ -111,6 +114,7 @@ async def test_creates_new_session_when_no_valid_staging_dir(db, tmp_path: Path)
     mock_root = tmp_path / "new-sess"
     mock_root.mkdir()
     (mock_root / "CLAUDE.md").write_text("# Tower\n")
+    (mock_root / "AGENTS.md").write_text("# Tower\n")
     mock_deployed = Mock()
     mock_deployed.root = mock_root
     mock_deployed.claude_md_path = mock_root / "CLAUDE.md"
@@ -144,7 +148,7 @@ async def test_mismatch_reuse_marks_old_tower_disconnected(db, tmp_path: Path) -
         project_id=project.id,
         session_type="tower",
         name="tower-test",
-        provider="codex",
+        provider="claude_code",
         status=SessionStatus.IDLE.value,
     )
     await db.execute("UPDATE sessions SET tmux_pane = ? WHERE id = ?", ("%existing-pane", sess.id))
@@ -153,10 +157,12 @@ async def test_mismatch_reuse_marks_old_tower_disconnected(db, tmp_path: Path) -
     staging_dir = Path(tmp_path) / sess.id
     staging_dir.mkdir(parents=True)
     (staging_dir / "CLAUDE.md").write_text("# Tower\n")
+    (staging_dir / "AGENTS.md").write_text("# Tower\n")
 
     mock_root = tmp_path / "new-sess"
     mock_root.mkdir()
     (mock_root / "CLAUDE.md").write_text("# Tower\n")
+    (mock_root / "AGENTS.md").write_text("# Tower\n")
     mock_deployed = Mock()
     mock_deployed.root = mock_root
     mock_deployed.claude_md_path = mock_root / "CLAUDE.md"

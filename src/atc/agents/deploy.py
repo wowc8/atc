@@ -40,6 +40,7 @@ def _resolve_api_base_url(api_base_url: str) -> str:
         return env_url.rstrip("/")
     try:
         from atc.config import load_settings as _load_settings
+
         _s = _load_settings()
         return f"http://{_s.server.host}:{_s.server.port}"
     except Exception:
@@ -56,6 +57,10 @@ class DeployedFiles:
     @property
     def claude_md_path(self) -> Path:
         return self.root / "CLAUDE.md"
+
+    @property
+    def agents_md_path(self) -> Path:
+        return self.root / "AGENTS.md"
 
     @property
     def settings_path(self) -> Path:
@@ -163,6 +168,7 @@ def deploy_ace_files(
     # CLAUDE.md
     claude_md = _build_ace_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
+    written.append(_write_file(root / "AGENTS.md", claude_md))
 
     # .claude/settings.json
     settings = _build_settings(
@@ -219,6 +225,7 @@ def deploy_manager_files(
     # CLAUDE.md
     claude_md = _build_manager_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
+    written.append(_write_file(root / "AGENTS.md", claude_md))
 
     # .claude/settings.json
     # Leaders must NOT create or edit files — that's the Ace's job.
@@ -282,6 +289,7 @@ def deploy_tower_files(
     # CLAUDE.md
     claude_md = _build_tower_claude_md(spec)
     written.append(_write_file(root / "CLAUDE.md", claude_md))
+    written.append(_write_file(root / "AGENTS.md", claude_md))
 
     # .claude/settings.json
     settings = _build_settings(
@@ -364,6 +372,14 @@ def _build_ace_claude_md(spec: AceDeploySpec) -> str:
         "Never ask the Leader for help you can figure out yourself.",
         "When blocked on something outside your control, report it immediately.",
         "",
+        "### If Asked 'What Is Your Role?'",
+        "",
+        "Answer that you are an ATC Ace: the project execution agent assigned one task",
+        "by a Leader.",
+        "State that your responsibilities are to design, implement, test, verify, self-review,",
+        "and report completion/blockers for that assigned task. State that you must not manage",
+        "projects, spawn other agents, redefine scope, or ignore the Leader's task boundaries.",
+        "",
         "## Task",
         "",
         f"**{spec.task_title}**",
@@ -445,6 +461,16 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
         "and monitor their progress. If you catch yourself about to create or modify a file,",
         "STOP — that is an Ace's job.",
         "",
+        "### If Asked 'What Is Your Role?'",
+        "",
+        "Answer that you are an ATC Leader: the project-level coordinator assigned",
+        "a goal by Tower.",
+        "State that your responsibilities are to decompose work, create/maintain the task graph,",
+        "spawn and instruct Aces, monitor progress, review outputs, and report",
+        "verified completion.",
+        "State that you must not write code, edit files, bypass Aces, talk directly to the user,",
+        "or take over Tower's cross-project planning role.",
+        "",
         "### Your Workflow",
         "",
         "Follow these steps **in order**. Use the exact curl commands shown.",
@@ -455,7 +481,7 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
         "```",
         f"curl -s -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/decompose \\",
         '  -H "Content-Type: application/json" \\',
-        "  -d '{\"task_specs\": [",
+        '  -d \'{"task_specs": [',
         '    {"title": "Task 1 title", "description": "What to build and acceptance criteria"},',
         '    {"title": "Task 2 title", "description": "..."}',
         "  ]}'",
@@ -475,7 +501,10 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
         "```",
         f"curl -s -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/instruct \\",
         '  -H "Content-Type: application/json" \\',
-        '  -d \'{"task_graph_id": "<id from decompose>", "instruction": "Detailed work instructions for the Ace"}\'',
+        (
+            '  -d \'{"task_graph_id": "<id from decompose>", '
+            '"instruction": "Detailed work instructions for the Ace"}\''
+        ),
         "```",
         "",
         "#### Step 4 — Monitor progress",
@@ -617,14 +646,16 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "",
         "**CRITICAL — NEVER paste context, goals, or project details into the Leader terminal.**",
         "Leader already has everything it needs in its CLAUDE.md. Only send short nudges.",
-        "Wrong: `atc leader message ... --message 'Build a web app that does X. Requirements: ...'`",
+        "Wrong: `atc leader message ... --message 'Build a web app that does X. '",
+        "       `'Requirements: ...'`",
         "Right: `atc leader message ... --message 'Please continue with your goal.'`",
         "",
         "**Do not wait for the user to tell you to check. Just check.**",
         "",
         "## Your Responsibilities",
         "",
-        "- **Listen** — understand the user's goal. Ask ONE clarifying question if truly ambiguous.",
+        "- **Listen** — understand the user's goal. Ask ONE clarifying question",
+        "  if truly ambiguous.",
         "- **Plan** — break the goal into projects and high-level milestones.",
         "- **Delegate** — spin up Leaders and provide them with goals and context.",
         "- **Monitor** — autonomously track Leader progress on a schedule. No asking.",
@@ -635,48 +666,63 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "You never manage individual tasks — that is the Leader's job.",
         "You are the always-on orchestration layer. Act like it.",
         "",
+        "### If Asked 'What Is Your Role?'",
+        "",
+        "Answer that you are ATC Tower: the top-level user-facing orchestration agent.",
+        "State that your responsibilities are to understand the user's goals, create projects,",
+        "start Leaders, monitor Leader progress, unblock or escalate when needed, and report",
+        "status back to the user. State that you must not write code, manage individual Ace tasks,",
+        "paste full project context into Leader terminals, or bypass the Leader/Ace hierarchy.",
+        "",
     ]
 
     # CLI commands documentation
-    lines.extend([
-        "## ATC CLI Commands",
-        "",
-        "Use these commands to manage projects, leaders, and aces.",
-        "",
-        "### Project Management",
-        "```bash",
-        "atc projects list                                    # List all projects",
-        "atc projects create --name 'Name' --description '...' # Create a new project",
-        "atc projects show <project-id>                       # Show project details",
-        "```",
-        "",
-        "### Leader Lifecycle",
-        "```bash",
-        "atc leader start --project-id <id>                   # Start leader for a project",
-        "atc leader start --project-id <id> --goal '...'      # Start leader with a goal",
-        "atc leader stop --project-id <id>                    # Stop leader for a project",
-        "atc leader message --project-id <id> --message '...' # Send a message to the leader's terminal",
-        "```",
-        "",
-        "### Ace Management",
-        "```bash",
-        "atc ace create --project-id <id> --name 'ace-name'   # Create an ace session",
-        "atc ace list --project-id <id>                       # List aces for a project",
-        "```",
-        "",
-        "### Workflow",
-        "",
-        "When the user asks to create a project:",
-        "1. `atc projects create --name '...' --description '...'` — note the project ID from the response",
-        "2. `atc leader start --project-id <id> --goal '...'` — start the leader with the goal",
-        "   The leader receives its full goal and context automatically. Do NOT message it again with the same info.",
-        "3. Monitor progress with: `curl -s http://127.0.0.1:8420/api/projects/<id>/leader/progress`",
-        "",
-        "All commands output JSON. Parse the `id` field from create responses to use in subsequent commands.",
-        "",
-        "Use `atc leader message` ONLY for short nudges when leader is stuck, never to repeat context.",
-        "",
-    ])
+    lines.extend(
+        [
+            "## ATC CLI Commands",
+            "",
+            "Use these commands to manage projects, leaders, and aces.",
+            "",
+            "### Project Management",
+            "```bash",
+            "atc projects list                                    # List all projects",
+            "atc projects create --name 'Name' --description '...' # Create a new project",
+            "atc projects show <project-id>                       # Show project details",
+            "```",
+            "",
+            "### Leader Lifecycle",
+            "```bash",
+            "atc leader start --project-id <id>                   # Start leader for a project",
+            "atc leader start --project-id <id> --goal '...'      # Start leader with a goal",
+            "atc leader stop --project-id <id>                    # Stop leader for a project",
+            "atc leader message --project-id <id> --message '...' # Send a message",
+            "                                                     # to the leader terminal",
+            "```",
+            "",
+            "### Ace Management",
+            "```bash",
+            "atc ace create --project-id <id> --name 'ace-name'   # Create an ace session",
+            "atc ace list --project-id <id>                       # List aces for a project",
+            "```",
+            "",
+            "### Workflow",
+            "",
+            "When the user asks to create a project:",
+            "1. `atc projects create --name '...' --description '...'` — note the",
+            "   project ID from the response",
+            "2. `atc leader start --project-id <id> --goal '...'` — start the leader with the goal",
+            "   The leader receives its full goal and context automatically. Do NOT",
+            "   message it again with the same info.",
+            "3. Monitor progress with: `curl -s http://127.0.0.1:8420/api/projects/<id>/leader/progress`",
+            "",
+            "All commands output JSON. Parse the `id` field from create responses",
+            "to use in subsequent commands.",
+            "",
+            "Use `atc leader message` ONLY for short nudges when leader is stuck,",
+            "never to repeat context.",
+            "",
+        ]
+    )
 
     # Context read/write CLI instructions
     hooks_dir = f"/tmp/atc-agents/{spec.session_id}/.claude/hooks"
@@ -725,6 +771,7 @@ def _build_settings(
 # Hook configuration
 # ---------------------------------------------------------------------------
 
+
 def _context_cli_instructions(hooks_dir: str) -> list[str]:
     """Return CLAUDE.md lines explaining the context read/write scripts."""
     return [
@@ -744,8 +791,7 @@ def _context_cli_instructions(hooks_dir: str) -> list[str]:
         f'bash {hooks_dir}/context_write.sh --key "my-key" --value "my value"',
         "",
         "# Write with explicit type (text, json, list, status, link)",
-        f'bash {hooks_dir}/context_write.sh --key "config"'
-        ' --value \'{"a":1}\' --type json',
+        f'bash {hooks_dir}/context_write.sh --key "config" --value \'{{"a":1}}\' --type json',
         "```",
         "",
         "Context entries are scoped to your session and visible to your scope's",
@@ -787,7 +833,8 @@ echo "$_COUNT" > "$TOOL_COUNT_FILE"
 # Every 5 tool calls, write a progress snapshot to Ace STM
 if (( _COUNT % 5 == 0 )); then
   if [[ -f "$LAST_OUTPUT_FILE" ]]; then
-    _CONTENT=$(head -c 500 "$LAST_OUTPUT_FILE" 2>/dev/null || echo "checkpoint at tool call $_COUNT")
+    _CONTENT=$(head -c 500 "$LAST_OUTPUT_FILE" 2>/dev/null || \
+      echo "checkpoint at tool call $_COUNT")
   else
     _CONTENT="Tool call checkpoint: $_COUNT calls completed"
   fi
@@ -912,13 +959,16 @@ def _ace_hook_scripts(spec: AceDeploySpec) -> list[HookConfig]:
         HookConfig(
             event="context_read",
             command=_CONTEXT_READ_TEMPLATE.format(
-                api_base_url=spec.api_base_url, session_id=spec.session_id,
+                api_base_url=spec.api_base_url,
+                session_id=spec.session_id,
             ),
         ),
         HookConfig(
             event="context_write",
             command=_CONTEXT_WRITE_TEMPLATE.format(
-                api_base_url=spec.api_base_url, session_id=spec.session_id, scope="ace",
+                api_base_url=spec.api_base_url,
+                session_id=spec.session_id,
+                scope="ace",
             ),
         ),
     ]
@@ -940,13 +990,16 @@ def _manager_hook_scripts(spec: ManagerDeploySpec) -> list[HookConfig]:
         HookConfig(
             event="context_read",
             command=_CONTEXT_READ_TEMPLATE.format(
-                api_base_url=spec.api_base_url, session_id=hook_session_id,
+                api_base_url=spec.api_base_url,
+                session_id=hook_session_id,
             ),
         ),
         HookConfig(
             event="context_write",
             command=_CONTEXT_WRITE_TEMPLATE.format(
-                api_base_url=spec.api_base_url, session_id=hook_session_id, scope="leader",
+                api_base_url=spec.api_base_url,
+                session_id=hook_session_id,
+                scope="leader",
             ),
         ),
     ]
@@ -978,13 +1031,16 @@ def _tower_hook_scripts(spec: TowerDeploySpec) -> list[HookConfig]:
         HookConfig(
             event="context_read",
             command=_CONTEXT_READ_TEMPLATE.format(
-                api_base_url=spec.api_base_url, session_id=spec.session_id,
+                api_base_url=spec.api_base_url,
+                session_id=spec.session_id,
             ),
         ),
         HookConfig(
             event="context_write",
             command=_CONTEXT_WRITE_TEMPLATE.format(
-                api_base_url=spec.api_base_url, session_id=spec.session_id, scope="tower",
+                api_base_url=spec.api_base_url,
+                session_id=spec.session_id,
+                scope="tower",
             ),
         ),
     ]
@@ -1157,9 +1213,7 @@ def _write_user_trust_settings(root: Path) -> None:
 
     user_project_dir.mkdir(parents=True, exist_ok=True)
     user_settings_path.write_text(json.dumps(trust_settings, indent=2))
-    logger.debug(
-        "Wrote user-level trust settings for %s → %s", resolved, user_settings_path
-    )
+    logger.debug("Wrote user-level trust settings for %s → %s", resolved, user_settings_path)
 
 
 def _write_file(path: Path, content: str) -> str:
