@@ -162,3 +162,37 @@ class RuntimeInspection:
     summary: str | None = None
     last_output_excerpt: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class RuntimeDeliveryResult:
+    """Provider-neutral result for a runtime delivery attempt."""
+
+    session_id: str
+    provider_name: str
+    role: RoleKind
+    status: str
+    stage: str | None = None
+    verdict: str | None = None
+    reason_code: str | None = None
+    trace_id: str | None = None
+    message: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status in {"delivered", "confirmed", "accepted"}
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "provider": self.provider_name,
+            "role": self.role.value,
+            "status": self.status,
+            "stage": self.stage,
+            "verdict": self.verdict,
+            "reason_code": self.reason_code,
+            "trace_id": self.trace_id,
+            "message": self.message,
+            "details": self.details,
+        }

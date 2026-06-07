@@ -5,12 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from atc.providers.registry import create_provider_runtime, runtime_kwargs_for_provider
+from atc.runtime.errors import RuntimeInvocationError
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
     RoleKind,
+    RuntimeDeliveryResult,
     RuntimeInspection,
     RuntimeSessionHandle,
+    RuntimeTransport,
     StartRoleRequest,
     StopRoleRequest,
     TaskAssignmentRequest,
@@ -82,6 +85,27 @@ class RuntimeService:
             return self._handles[session_id]
         except KeyError as exc:
             raise KeyError(f"Unknown runtime session handle: {session_id}") from exc
+
+    def handle_from_session_record(self, session: object) -> RuntimeSessionHandle:
+        """Build and remember a provider-neutral handle from a DB session row/model."""
+
+        session_type = str(getattr(session, "session_type", "ace") or "ace")
+        if session_type == "tower":
+            role = RoleKind.TOWER
+        elif session_type in {"leader", "manager"}:
+            role = RoleKind.LEADER
+        else:
+            role = RoleKind.ACE
+        handle = RuntimeSessionHandle(
+            session_id=str(session.id),
+            provider_name=str(getattr(session, "provider", None) or "claude_code"),
+            role=role,
+            transport=RuntimeTransport.TMUX,
+            project_id=getattr(session, "project_id", None),
+            tmux_session=getattr(session, "tmux_session", None),
+            tmux_pane=getattr(session, "tmux_pane", None),
+        )
+        return self.remember_handle(handle)
 
     async def prepare_workspace(self, request: StartRoleRequest) -> None:
         """Run provider-owned workspace/bootstrap preparation for a role request."""
@@ -171,7 +195,7 @@ class RuntimeService:
         self,
         handle: RuntimeSessionHandle,
         request: InstructionRequest,
-    ) -> None:
+    ) -> RuntimeDeliveryResult:
         trace_id = self._ensure_trace_id(request.metadata)
         append_trace_event(
             request.metadata,
@@ -207,22 +231,31 @@ class RuntimeService:
                     details={"error_type": type(exc).__name__, "error": str(exc)},
                 ),
             )
-            raise
+            return self._result_from_metadata(
+                handle, request.metadata, status="failed", message=str(exc)
+            )
+        self._append_provider_returned_event_if_needed(
+            handle,
+            request.metadata,
+            trace_id,
+            DeliveryAction.INSTRUCTION,
+        )
+        return self._result_from_metadata(handle, request.metadata)
 
     async def assign_project_to_leader(
         self,
         handle: RuntimeSessionHandle,
         request: InstructionRequest,
-    ) -> None:
+    ) -> RuntimeDeliveryResult:
         if handle.role is not RoleKind.LEADER:
             raise ValueError("assign_project_to_leader requires leader handle")
-        await self.send_instruction(handle, request)
+        return await self.send_instruction(handle, request)
 
     async def assign_task_to_ace(
         self,
         handle: RuntimeSessionHandle,
         request: TaskAssignmentRequest,
-    ) -> None:
+    ) -> RuntimeDeliveryResult:
         if handle.role is not RoleKind.ACE:
             raise ValueError("assign_task_to_ace requires ace handle")
         trace_id = self._ensure_trace_id(request.metadata)
@@ -264,7 +297,17 @@ class RuntimeService:
                     details={"error_type": type(exc).__name__, "error": str(exc)},
                 ),
             )
-            raise
+            return self._result_from_metadata(
+                handle, request.metadata, status="failed", message=str(exc)
+            )
+        else:
+            self._append_provider_returned_event_if_needed(
+                handle,
+                request.metadata,
+                trace_id,
+                DeliveryAction.TASK_ASSIGNMENT,
+            )
+            return self._result_from_metadata(handle, request.metadata)
         finally:
             request.metadata.pop("delivery_action", None)
 
@@ -279,6 +322,18 @@ class RuntimeService:
     async def restore_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
         provider = self.get_provider(handle.provider_name)
         return await provider.restore_session(handle)
+
+    async def stop_session_record(
+        self, session: object, request: StopRoleRequest | None = None
+    ) -> None:
+        """Stop a DB-backed session via the provider-neutral runtime boundary."""
+
+        await self._stop_role(self.handle_from_session_record(session), request)
+
+    async def inspect_session_record(self, session: object) -> RuntimeInspection:
+        """Inspect a DB-backed session via the provider-neutral runtime boundary."""
+
+        return await self.inspect_session(self.handle_from_session_record(session))
 
     async def _start_role(self, request: StartRoleRequest) -> RuntimeSessionHandle:
         provider = self.get_provider(request.provider_name)
@@ -319,7 +374,13 @@ class RuntimeService:
         request: StopRoleRequest | None = None,
     ) -> None:
         provider = self.get_provider(handle.provider_name)
-        await provider.stop_role(handle, request)
+        try:
+            await provider.stop_role(handle, request)
+        except RuntimeInvocationError as exc:
+            message = str(exc).lower()
+            if "can't find pane" in message or "no such pane" in message:
+                return
+            raise
 
     @staticmethod
     def _ensure_trace_id(metadata: dict[str, object]) -> str:
@@ -374,6 +435,75 @@ class RuntimeService:
                 reason_code=DeliveryReasonCode.PANE_SPAWNED,
                 details={"tmux_session": handle.tmux_session},
             ),
+        )
+
+    @staticmethod
+    def _append_provider_returned_event_if_needed(
+        handle: RuntimeSessionHandle,
+        metadata: dict[str, object],
+        trace_id: str,
+        action: DeliveryAction,
+    ) -> None:
+        events = metadata.get("delivery_trace_events")
+        if isinstance(events, list) and events:
+            latest = events[-1]
+            if isinstance(latest, dict) and latest.get("stage") != DeliveryStage.QUEUED.value:
+                return
+        append_trace_event(
+            metadata,
+            trace_event(
+                trace_id=trace_id,
+                session_id=handle.session_id,
+                role=handle.role.value,
+                provider=handle.provider_name,
+                pane_id=handle.tmux_pane,
+                action=action,
+                stage=DeliveryStage.CONFIRMED_RUNNING,
+                verdict=DeliveryVerdict.ACCEPTED,
+                reason_code=DeliveryReasonCode.DELIVERY_UNVERIFIED,
+                details={"source": "provider_returned_without_detailed_trace"},
+            ),
+        )
+
+    @staticmethod
+    def _result_from_metadata(
+        handle: RuntimeSessionHandle,
+        metadata: dict[str, object],
+        *,
+        status: str | None = None,
+        message: str | None = None,
+    ) -> RuntimeDeliveryResult:
+        events = metadata.get("delivery_trace_events")
+        latest = events[-1] if isinstance(events, list) and events else {}
+        verdict = str(latest.get("verdict", "")) if isinstance(latest, dict) else ""
+        stage = str(latest.get("stage", "")) if isinstance(latest, dict) else ""
+        if status is None:
+            if verdict == DeliveryVerdict.BLOCKED.value:
+                status = "blocked"
+            elif verdict == DeliveryVerdict.FAILED.value:
+                status = "failed"
+            elif verdict == DeliveryVerdict.CONFIRMED.value:
+                status = "confirmed"
+            elif verdict == DeliveryVerdict.ACCEPTED.value:
+                status = "delivered"
+            else:
+                status = "queued"
+        details = latest.get("details", {}) if isinstance(latest, dict) else {}
+        return RuntimeDeliveryResult(
+            session_id=handle.session_id,
+            provider_name=handle.provider_name,
+            role=handle.role,
+            status=status,
+            stage=stage or None,
+            verdict=verdict or None,
+            reason_code=str(latest.get("reason_code"))
+            if isinstance(latest, dict) and latest.get("reason_code")
+            else None,
+            trace_id=str(metadata.get("delivery_trace_id"))
+            if metadata.get("delivery_trace_id")
+            else None,
+            message=message,
+            details=details if isinstance(details, dict) else {},
         )
 
     @staticmethod
