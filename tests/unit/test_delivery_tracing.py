@@ -25,13 +25,13 @@ def test_codex_instruction_emits_structured_delivery_trace_events() -> None:
     )
 
     with (
-        patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=True)),
+        patch("atc.runtime.tmux.runner.pane_exists", AsyncMock(return_value=True)),
         patch(
-            "atc.providers.codex.runtime.capture_pane_text",
+            "atc.runtime.tmux.runner.capture_pane_text",
             AsyncMock(side_effect=["ready\n>\n", "Thinking about traced work..."]),
         ),
         patch(
-            "atc.providers.codex.runtime.send_bracketed_instruction", AsyncMock()
+            "atc.runtime.tmux.runner.send_bracketed_instruction", AsyncMock()
         ) as send_instruction,
     ):
         asyncio.run(runtime.send_instruction(handle, request))
@@ -71,7 +71,7 @@ def test_codex_instruction_failure_trace_has_stable_reason_code() -> None:
     )
 
     with (
-        patch("atc.providers.codex.runtime.pane_exists", AsyncMock(return_value=False)),
+        patch("atc.runtime.tmux.runner.pane_exists", AsyncMock(return_value=False)),
         suppress(Exception),
     ):
         asyncio.run(runtime.send_instruction(handle, request))
