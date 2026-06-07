@@ -20,7 +20,7 @@ from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
 from atc.runtime.models import InstructionRequest, StopRoleRequest
 from atc.runtime.service import RuntimeService
 from atc.session.ace import _accept_trust_dialog as _accept_trust_dialog  # noqa: F401
-from atc.session.ace import _spawn_provider_session
+from atc.session.ace import _persist_delivery_trace_events, _spawn_provider_session
 from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
 from atc.state.db import get_connection_app_state
@@ -336,12 +336,18 @@ async def send_leader_message(
 
     runtime = RuntimeService()
     handle = runtime.handle_from_session_record(session)
-    result = await runtime.assign_project_to_leader(
-        handle,
-        InstructionRequest(
-            session_id=session.id,
-            message=message,
-            metadata={"source": "leader_message"},
-        ),
+    request = InstructionRequest(
+        session_id=session.id,
+        message=message,
+        metadata={"source": "leader_message"},
     )
+    try:
+        result = await runtime.assign_project_to_leader(handle, request)
+    finally:
+        await _persist_delivery_trace_events(
+            conn,
+            session_id=session.id,
+            project_id=session.project_id,
+            trace_events=request.metadata.get("delivery_trace_events", []),
+        )
     return result

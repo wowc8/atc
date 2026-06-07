@@ -83,7 +83,6 @@ try {
       name: `Phase 5 Runtime Boundary ${stamp.slice(0, 19)}`,
       description: 'Temporary Phase 5 validation project.',
       agent_provider: 'codex',
-      auto_kickoff: false,
     }),
   });
   check('Temporary project created', projectResp.ok, JSON.stringify(projectResp.body));
@@ -91,7 +90,7 @@ try {
 
   const leaderStart = await api(`/api/projects/${project.id}/leader/start`, {
     method: 'POST',
-    body: JSON.stringify({ goal: 'Phase 5 validation: runtime delivery boundary.' }),
+    body: JSON.stringify({ goal: 'Phase 5 validation: runtime delivery boundary.', auto_kickoff: false }),
   });
   check('Leader start endpoint succeeds', leaderStart.ok, JSON.stringify(leaderStart.body));
   leaderSessionId = leaderStart.body?.session_id;

@@ -12,10 +12,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from atc.runtime.models import ReadinessState, RuntimeInspection
+from atc.runtime.models import ReadinessState, RoleKind, RuntimeDeliveryResult, RuntimeInspection
 from atc.session.ace import (
     VerificationResult,
     _get_alternate_on,
+    start_ace,
     verify_alive,
     verify_progressing,
     verify_working,
@@ -254,3 +255,31 @@ class TestVerificationResult:
         assert result.ok is True
         assert result.phase == "alive"
         assert result.detail == "all good"
+
+
+class TestStartAceDelivery:
+    @pytest.mark.asyncio
+    @patch("atc.session.ace.db_ops.update_session_status", new_callable=AsyncMock)
+    @patch("atc.session.ace.RuntimeService.send_instruction", new_callable=AsyncMock)
+    @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
+    async def test_failed_delivery_marks_session_error(
+        self, mock_get: AsyncMock, mock_send: AsyncMock, mock_update: AsyncMock
+    ) -> None:
+        session = _make_session(status="idle")
+        mock_get.return_value = session
+        mock_send.return_value = RuntimeDeliveryResult(
+            session_id=session.id,
+            provider_name="codex",
+            role=RoleKind.ACE,
+            status="failed",
+            stage="delivery_failed",
+            verdict="failed",
+            reason_code="delivery_failed",
+        )
+
+        conn = AsyncMock()
+        with pytest.raises(RuntimeError, match="Failed to deliver instruction"):
+            await start_ace(conn, session.id, instruction="Do work")
+
+        mock_update.assert_any_await(conn, session.id, "working")
+        mock_update.assert_any_await(conn, session.id, "error")

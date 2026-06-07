@@ -506,7 +506,7 @@ async def _send_session_instruction(
         message=instruction,
     )
     try:
-        await service.send_instruction(handle, request)
+        result = await service.send_instruction(handle, request)
     finally:
         await _persist_delivery_trace_events(
             conn,
@@ -514,7 +514,14 @@ async def _send_session_instruction(
             project_id=session.project_id,
             trace_events=request.metadata.get("delivery_trace_events", []),
         )
-    return True
+    if not result.ok:
+        logger.error(
+            "Session %s: runtime delivery %s (%s)",
+            session.id,
+            result.status,
+            result.reason_code,
+        )
+    return result.ok
 
 
 async def _persist_delivery_trace_events(
