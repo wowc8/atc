@@ -92,6 +92,7 @@ async def list_events(
     level: str | None = None,
     category: str | None = None,
     project_id: str | None = None,
+    session_id: str | None = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -108,6 +109,9 @@ async def list_events(
     if project_id:
         clauses.append("project_id = ?")
         params.append(project_id)
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
 
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
     params.extend([limit, offset])
@@ -133,6 +137,7 @@ async def count_events(
     level: str | None = None,
     category: str | None = None,
     project_id: str | None = None,
+    session_id: str | None = None,
 ) -> int:
     """Return count of matching events."""
     clauses: list[str] = []
@@ -147,6 +152,9 @@ async def count_events(
     if project_id:
         clauses.append("project_id = ?")
         params.append(project_id)
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
 
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
 
@@ -164,7 +172,15 @@ async def export_events_json(
     level: str | None = None,
     category: str | None = None,
     project_id: str | None = None,
+    session_id: str | None = None,
     limit: int = 10000,
 ) -> list[dict[str, Any]]:
     """Export events as a list of dicts (for zip packaging)."""
-    return await list_events(db, level=level, category=category, project_id=project_id, limit=limit)
+    return await list_events(
+        db,
+        level=level,
+        category=category,
+        project_id=project_id,
+        session_id=session_id,
+        limit=limit,
+    )

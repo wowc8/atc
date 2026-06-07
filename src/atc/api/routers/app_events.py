@@ -48,9 +48,12 @@ async def get_event_count(
     level: str | None = Query(None),
     category: str | None = Query(None),
     project_id: str | None = Query(None),
+    session_id: str | None = Query(None),
 ) -> EventCountResponse:
     db = await _get_db(request)
-    total = await count_events(db, level=level, category=category, project_id=project_id)
+    total = await count_events(
+        db, level=level, category=category, project_id=project_id, session_id=session_id
+    )
     return EventCountResponse(count=total)
 
 
@@ -60,6 +63,7 @@ async def get_app_events(
     level: str | None = Query(None),
     category: str | None = Query(None),
     project_id: str | None = Query(None),
+    session_id: str | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ) -> list[AppEventResponse]:
@@ -69,6 +73,7 @@ async def get_app_events(
         level=level,
         category=category,
         project_id=project_id,
+        session_id=session_id,
         limit=limit,
         offset=offset,
     )
@@ -81,9 +86,12 @@ async def export_app_events(
     level: str | None = Query(None),
     category: str | None = Query(None),
     project_id: str | None = Query(None),
+    session_id: str | None = Query(None),
 ) -> StreamingResponse:
     db = await _get_db(request)
-    events = await export_events_json(db, level=level, category=category, project_id=project_id)
+    events = await export_events_json(
+        db, level=level, category=category, project_id=project_id, session_id=session_id
+    )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         payload = json.dumps(events, indent=2, default=str)

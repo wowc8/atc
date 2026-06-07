@@ -26,6 +26,7 @@ from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.claude_runtime import accept_startup_dialogs
+from atc.core.app_events import log_event
 from atc.session.state_machine import (
     SessionStatus,
     transition,
@@ -90,6 +91,7 @@ def _build_env_prefix() -> str:
     launched.
     """
     import os as _os
+
     extra_paths: list[str] = []
     home = _os.path.expanduser("~")
     candidates = [
@@ -100,9 +102,11 @@ def _build_env_prefix() -> str:
         # nvm current symlink
         f"{home}/.nvm/current/bin",
         # nvm active version (resolve symlink)
-        *([str(_Path(f"{home}/.nvm/current/bin").resolve())]
-          if _Path(f"{home}/.nvm/current/bin").is_symlink()
-          else []),
+        *(
+            [str(_Path(f"{home}/.nvm/current/bin").resolve())]
+            if _Path(f"{home}/.nvm/current/bin").is_symlink()
+            else []
+        ),
         # nvm versioned installs.
         # IMPORTANT: newer Node versions may require a newer macOS (e.g. Node 24
         # needs Monterey 13.5+, Big Sur only has 11). We check each bin dir's
@@ -182,6 +186,7 @@ async def _spawn_pane(
         # Ensure the directory exists — tmux silently falls back to $HOME if the
         # working_dir does not exist, which causes Claude Code to start in the wrong place.
         import os as _os
+
         if not _os.path.isdir(working_dir):
             _os.makedirs(working_dir, exist_ok=True)
             logger.info("_spawn_pane: created missing working_dir %s", working_dir)
@@ -282,8 +287,10 @@ async def _spawn_provider_session(
 
     project = await db_ops.get_project(conn, project_id) if project_id else None
     session = await db_ops.get_session(conn, session_id)
-    provider_name = session.provider if session and session.provider else (
-        project.agent_provider if project and project.agent_provider else "claude_code"
+    provider_name = (
+        session.provider
+        if session and session.provider
+        else (project.agent_provider if project and project.agent_provider else "claude_code")
     )
 
     session = await db_ops.get_session(conn, session_id)
@@ -297,18 +304,25 @@ async def _spawn_provider_session(
     }.get(session_type, RoleKind.ACE)
 
     service = RuntimeService()
-    handle = await service.spawn_existing_session(
-        StartRoleRequest(
-            session_id=session.id,
-            provider_name=provider_name,
-            role=role,
-            project_id=project_id,
-            connection=conn,
-            working_dir=working_dir,
-            context_ref=str(context_file) if context_file else None,
-            metadata={"launch_command": launch_command} if launch_command else {},
-        )
+    request = StartRoleRequest(
+        session_id=session.id,
+        provider_name=provider_name,
+        role=role,
+        project_id=project_id,
+        connection=conn,
+        working_dir=working_dir,
+        context_ref=str(context_file) if context_file else None,
+        metadata={"launch_command": launch_command} if launch_command else {},
     )
+    try:
+        handle = await service.spawn_existing_session(request)
+    finally:
+        await _persist_delivery_trace_events(
+            conn,
+            session_id=session.id,
+            project_id=project_id,
+            trace_events=request.metadata.get("delivery_trace_events", []),
+        )
     pane_id = str(handle.tmux_pane or "")
     tmux_session = str(handle.tmux_session or ATC_TMUX_SESSION)
     if not pane_id:
@@ -341,7 +355,6 @@ async def create_ace(
             hooks, settings.json) using the real session_id after DB creation.
     """
     # Step 1: DB row first — guarantees the UI always sees every entity
-    project = await db_ops.get_project(conn, project_id)
     provider_cfg = get_connection_app_state(conn)
     if provider_cfg is not None and getattr(provider_cfg, "settings", None) is not None:
         provider = provider_cfg.settings.agent_provider.default
@@ -402,7 +415,9 @@ async def create_ace(
                         role=RoleKind.ACE,
                         project_id=project_id,
                         working_dir=effective_working_dir,
-                        context_ref=str(deployed.claude_md_path) if deployed and deployed.claude_md_path.exists() else None,
+                        context_ref=str(deployed.claude_md_path)
+                        if deployed and deployed.claude_md_path.exists()
+                        else None,
                     )
                 )
             except Exception as _prep_exc:
@@ -418,7 +433,9 @@ async def create_ace(
             project_id=project_id,
             session_type="ace",
             working_dir=effective_working_dir,
-            context_file=deployed.claude_md_path if deployed and deployed.claude_md_path.exists() else None,
+            context_file=deployed.claude_md_path
+            if deployed and deployed.claude_md_path.exists()
+            else None,
             launch_command=launch_command,
         )
         await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
@@ -450,7 +467,12 @@ async def _send_session_instruction(
     instruction: str,
 ) -> bool:
     """Send an instruction through the new runtime service/provider contract."""
-    from atc.runtime.models import InstructionRequest, RoleKind, RuntimeSessionHandle, RuntimeTransport
+    from atc.runtime.models import (
+        InstructionRequest,
+        RoleKind,
+        RuntimeSessionHandle,
+        RuntimeTransport,
+    )
     from atc.runtime.service import RuntimeService
 
     session = await db_ops.get_session(conn, session_id)
@@ -478,8 +500,41 @@ async def _send_session_instruction(
         session_id=session.id,
         message=instruction,
     )
-    await service.send_instruction(handle, request)
+    try:
+        await service.send_instruction(handle, request)
+    finally:
+        await _persist_delivery_trace_events(
+            conn,
+            session_id=session.id,
+            project_id=session.project_id,
+            trace_events=request.metadata.get("delivery_trace_events", []),
+        )
     return True
+
+
+async def _persist_delivery_trace_events(
+    conn: aiosqlite.Connection,
+    *,
+    session_id: str,
+    project_id: str | None,
+    trace_events: object,
+) -> None:
+    """Persist delivery trace events into the existing app_events stream."""
+
+    if not isinstance(trace_events, list):
+        return
+    for event in trace_events:
+        if not isinstance(event, dict):
+            continue
+        await log_event(
+            conn,
+            level="info" if event.get("verdict") != "failed" else "error",
+            category="delivery_trace",
+            message=f"Delivery trace {event.get('stage', 'unknown')}",
+            detail=event,
+            project_id=project_id,
+            session_id=session_id,
+        )
 
 
 async def start_ace(
@@ -758,7 +813,9 @@ async def schedule_verification(
         await asyncio.sleep(60)  # 120s total
         result = await verify_progressing(conn, session_id, previous_output=mid_output)
         if not result.ok:
-            logger.warning("Session %s: output-progress check failed (%s)", session_id, result.detail)
+            logger.warning(
+                "Session %s: output-progress check failed (%s)", session_id, result.detail
+            )
             await _handle_stalled(conn, session_id, event_bus)
 
     asyncio.create_task(_run_checks())

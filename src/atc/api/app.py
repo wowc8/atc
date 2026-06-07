@@ -567,6 +567,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await heartbeat_monitor.stop()
     await pty_pool.stop()
     await event_bus.stop()
+    clear_connection_app_state(db)
     await db.close()
 
 
@@ -666,6 +667,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Register routers
     from atc.api.routers import (
         aces,
+        app_events,
         backup,
         context,
         failure_logs,
@@ -690,6 +692,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(task_graphs.router, prefix="/api", tags=["task_graphs"])
     app.include_router(leader.router, prefix="/api", tags=["leader"])
     app.include_router(aces.router, prefix="/api", tags=["aces"])
+    app.include_router(app_events.router, prefix="/api", tags=["app_events"])
     app.include_router(usage.router, prefix="/api/usage", tags=["usage"])
     app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
     app.include_router(failure_logs.router, prefix="/api", tags=["failure_logs"])
