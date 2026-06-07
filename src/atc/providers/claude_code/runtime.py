@@ -11,7 +11,6 @@ from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
     ReadinessState,
-    RoleKind,
     RuntimeBlockReason,
     RuntimeInspection,
     RuntimeSessionHandle,
@@ -28,6 +27,14 @@ from atc.runtime.tmux.substrate import (
     kill_pane,
     pane_exists,
     spawn_window_pane,
+)
+from atc.runtime.tracing import (
+    DeliveryAction,
+    DeliveryReasonCode,
+    DeliveryStage,
+    DeliveryVerdict,
+    append_trace_event,
+    trace_event,
 )
 
 _BARE_PROMPT_RE = re.compile(r"(^|\n)\s*❯\s*$", re.MULTILINE)
@@ -105,30 +112,159 @@ class ClaudeCodeRuntime(ProviderRuntime):
         handle: RuntimeSessionHandle,
         request: InstructionRequest,
     ) -> None:
+        trace_id = str(request.metadata.get("delivery_trace_id") or "")
         if not handle.tmux_pane:
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.FAILED,
+                DeliveryVerdict.FAILED,
+                DeliveryReasonCode.PANE_MISSING,
+            )
             raise RuntimeSessionMissingError("Claude session has no tmux pane recorded")
         if not await pane_exists(handle.tmux_pane):
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.FAILED,
+                DeliveryVerdict.FAILED,
+                DeliveryReasonCode.PANE_MISSING,
+            )
             raise RuntimeSessionMissingError("Claude session pane is missing")
 
         text = request.message or ""
         if not text and request.message_file:
-            text = open(request.message_file, encoding="utf-8").read()
+            with open(request.message_file, encoding="utf-8") as f:
+                text = f.read()
         if not text:
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.FAILED,
+                DeliveryVerdict.FAILED,
+                DeliveryReasonCode.EMPTY_PAYLOAD,
+            )
             raise RuntimeDeliveryError("Instruction payload was empty")
 
+        before = await capture_pane_text(handle.tmux_pane, lines=40)
+        before_state = self._prompt_state_for_excerpt(before)
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            DeliveryStage.WRITE_STARTED,
+            DeliveryVerdict.PENDING,
+            DeliveryReasonCode.PTY_WRITE_STARTED,
+            prompt_state_before=before_state,
+            first_output_excerpt=before,
+        )
         await send_bracketed_instruction(self.tmux_session, handle.tmux_pane, text)
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            DeliveryStage.SUBMIT_ATTEMPTED,
+            DeliveryVerdict.ACCEPTED,
+            DeliveryReasonCode.SUBMIT_SENT,
+            prompt_state_before=before_state,
+        )
         await asyncio.sleep(0.75)
         output = await capture_pane_text(handle.tmux_pane, lines=80)
+        after_state = self._prompt_state_for_excerpt(output)
         lowered = output.lower()
         fingerprint = text[:80].strip()
 
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            DeliveryStage.WRITTEN_TO_PTY,
+            DeliveryVerdict.ACCEPTED,
+            DeliveryReasonCode.PTY_WRITE_ACCEPTED,
+            prompt_state_before=before_state,
+            prompt_state_after=after_state,
+            first_output_excerpt=output,
+        )
+        if after_state == "blocked:trust":
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.BLOCKED,
+                DeliveryVerdict.BLOCKED,
+                DeliveryReasonCode.TRUST_REQUIRED,
+                prompt_state_before=before_state,
+                prompt_state_after=after_state,
+                first_output_excerpt=output,
+            )
+            return
+        if after_state == "blocked:auth":
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.BLOCKED,
+                DeliveryVerdict.BLOCKED,
+                DeliveryReasonCode.AUTH_REQUIRED,
+                prompt_state_before=before_state,
+                prompt_state_after=after_state,
+                first_output_excerpt=output,
+            )
+            return
         if fingerprint and fingerprint in output:
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.AGENT_OUTPUT_OBSERVED,
+                DeliveryVerdict.CONFIRMED,
+                DeliveryReasonCode.AGENT_OUTPUT,
+                prompt_state_before=before_state,
+                prompt_state_after=after_state,
+                first_output_excerpt=output,
+            )
             return
         if any(trigger in lowered for trigger in _WELCOME_TRIGGERS):
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.AGENT_OUTPUT_OBSERVED,
+                DeliveryVerdict.ACCEPTED,
+                DeliveryReasonCode.AGENT_OUTPUT,
+                prompt_state_before=before_state,
+                prompt_state_after=after_state,
+                first_output_excerpt=output,
+            )
             return
         if not _BARE_PROMPT_RE.search(output):
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.CONFIRMED_RUNNING,
+                DeliveryVerdict.CONFIRMED,
+                DeliveryReasonCode.SESSION_RUNNING,
+                prompt_state_before=before_state,
+                prompt_state_after=after_state,
+                first_output_excerpt=output,
+            )
             return
 
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            DeliveryStage.FAILED,
+            DeliveryVerdict.FAILED,
+            DeliveryReasonCode.DELIVERY_UNVERIFIED,
+            prompt_state_before=before_state,
+            prompt_state_after=after_state,
+            first_output_excerpt=output,
+        )
         raise RuntimeDeliveryError("Claude instruction delivery could not be verified")
 
     async def assign_task(
@@ -138,7 +274,8 @@ class ClaudeCodeRuntime(ProviderRuntime):
     ) -> None:
         text = request.message
         if not text and request.message_file:
-            text = open(request.message_file, encoding="utf-8").read()
+            with open(request.message_file, encoding="utf-8") as f:
+                text = f.read()
         await self.send_instruction(
             handle,
             InstructionRequest(
@@ -146,6 +283,7 @@ class ClaudeCodeRuntime(ProviderRuntime):
                 message=text,
                 context_ref=request.context_ref,
                 instruction_id=request.assignment_id or request.task_id,
+                metadata=request.metadata,
             ),
         )
 
@@ -188,7 +326,9 @@ class ClaudeCodeRuntime(ProviderRuntime):
             last_output_excerpt=excerpt,
         )
         inspection.details["provider_runtime_hint"] = self._runtime_hint_for_inspection(inspection)
-        inspection.details["provider_runtime_action"] = self._runtime_action_for_inspection(inspection)
+        inspection.details["provider_runtime_action"] = self._runtime_action_for_inspection(
+            inspection
+        )
         return inspection
 
     def _runtime_hint_for_inspection(self, inspection: RuntimeInspection) -> str:
@@ -199,9 +339,15 @@ class ClaudeCodeRuntime(ProviderRuntime):
             if any(trigger in lowered for trigger in _WELCOME_TRIGGERS):
                 return "startup_banner"
             return "processing"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.TRUST:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.TRUST
+        ):
             return "trust_prompt"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "auth_prompt"
         if inspection.readiness is ReadinessState.STOPPED:
             return "pane_missing"
@@ -212,9 +358,15 @@ class ClaudeCodeRuntime(ProviderRuntime):
             return "send_or_resume"
         if inspection.readiness is ReadinessState.BUSY:
             return "wait"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.TRUST:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.TRUST
+        ):
             return "resolve_trust"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "resolve_auth"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
@@ -266,9 +418,15 @@ class ClaudeCodeRuntime(ProviderRuntime):
             if any(trigger in lowered for trigger in _WELCOME_TRIGGERS):
                 return "warming_up"
             return "active"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.TRUST:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.TRUST
+        ):
             return "trust_gate"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "auth_gate"
         if inspection.readiness is ReadinessState.STOPPED:
             return "missing"
@@ -279,9 +437,15 @@ class ClaudeCodeRuntime(ProviderRuntime):
             return "resume"
         if inspection.readiness is ReadinessState.BUSY:
             return "wait"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.TRUST:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.TRUST
+        ):
             return "resolve_trust"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "resolve_auth"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
@@ -298,6 +462,51 @@ class ClaudeCodeRuntime(ProviderRuntime):
         if _BARE_PROMPT_RE.search(excerpt):
             return ReadinessState.READY, None
         return ReadinessState.BUSY, None
+
+    def _prompt_state_for_excerpt(self, excerpt: str) -> str:
+        readiness, block_reason = self._classify_readiness(excerpt)
+        if block_reason is not None:
+            return f"{readiness.value}:{block_reason.value}"
+        return readiness.value
+
+    @staticmethod
+    def _append_instruction_trace(
+        request: InstructionRequest,
+        handle: RuntimeSessionHandle,
+        trace_id: str,
+        stage: DeliveryStage,
+        verdict: DeliveryVerdict,
+        reason_code: DeliveryReasonCode,
+        *,
+        prompt_state_before: str | None = None,
+        prompt_state_after: str | None = None,
+        first_output_excerpt: str | None = None,
+    ) -> None:
+        if not trace_id:
+            return
+        raw_action = request.metadata.get("delivery_action")
+        action = (
+            DeliveryAction.TASK_ASSIGNMENT
+            if raw_action == DeliveryAction.TASK_ASSIGNMENT.value
+            else DeliveryAction.INSTRUCTION
+        )
+        append_trace_event(
+            request.metadata,
+            trace_event(
+                trace_id=trace_id,
+                session_id=handle.session_id,
+                role=handle.role.value,
+                provider=handle.provider_name,
+                pane_id=handle.tmux_pane,
+                action=action,
+                stage=stage,
+                verdict=verdict,
+                reason_code=reason_code,
+                prompt_state_before=prompt_state_before,
+                prompt_state_after=prompt_state_after,
+                first_output_excerpt=first_output_excerpt,
+            ),
+        )
 
     @staticmethod
     def _summary_for_state(

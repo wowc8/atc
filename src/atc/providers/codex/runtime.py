@@ -27,6 +27,14 @@ from atc.runtime.tmux.substrate import (
     pane_exists,
     spawn_window_pane,
 )
+from atc.runtime.tracing import (
+    DeliveryAction,
+    DeliveryReasonCode,
+    DeliveryStage,
+    DeliveryVerdict,
+    append_trace_event,
+    trace_event,
+)
 
 _CODEX_PROMPT_RE = re.compile(r"(^|\n)\s*(❯|>)\s*$", re.MULTILINE)
 _AUTH_TRIGGERS = (
@@ -34,6 +42,11 @@ _AUTH_TRIGGERS = (
     "sign in",
     "authentication",
     "api key",
+)
+_TRUST_TRIGGERS = (
+    "trust this folder",
+    "do you trust",
+    "trust the contents",
 )
 
 
@@ -94,16 +107,107 @@ class CodexRuntime(ProviderRuntime):
         handle: RuntimeSessionHandle,
         request: InstructionRequest,
     ) -> None:
+        trace_id = str(request.metadata.get("delivery_trace_id") or "")
         if not handle.tmux_pane:
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.FAILED,
+                DeliveryVerdict.FAILED,
+                DeliveryReasonCode.PANE_MISSING,
+            )
             raise RuntimeSessionMissingError("Codex session has no tmux pane recorded")
         if not await pane_exists(handle.tmux_pane):
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.FAILED,
+                DeliveryVerdict.FAILED,
+                DeliveryReasonCode.PANE_MISSING,
+            )
             raise RuntimeSessionMissingError("Codex session pane is missing")
         text = request.message or ""
         if not text and request.message_file:
-            text = open(request.message_file, encoding="utf-8").read()
+            with open(request.message_file, encoding="utf-8") as f:
+                text = f.read()
         if not text:
+            self._append_instruction_trace(
+                request,
+                handle,
+                trace_id,
+                DeliveryStage.FAILED,
+                DeliveryVerdict.FAILED,
+                DeliveryReasonCode.EMPTY_PAYLOAD,
+            )
             raise RuntimeDeliveryError("Instruction payload was empty")
+
+        before = await capture_pane_text(handle.tmux_pane, lines=40)
+        before_state = self._prompt_state_for_excerpt(before)
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            DeliveryStage.WRITE_STARTED,
+            DeliveryVerdict.PENDING,
+            DeliveryReasonCode.PTY_WRITE_STARTED,
+            prompt_state_before=before_state,
+            first_output_excerpt=before,
+        )
         await send_bracketed_instruction(self.tmux_session, handle.tmux_pane, text)
+        after = await capture_pane_text(handle.tmux_pane, lines=80)
+        after_state = self._prompt_state_for_excerpt(after)
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            DeliveryStage.WRITTEN_TO_PTY,
+            DeliveryVerdict.ACCEPTED,
+            DeliveryReasonCode.PTY_WRITE_ACCEPTED,
+            prompt_state_before=before_state,
+            prompt_state_after=after_state,
+            first_output_excerpt=after,
+        )
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            DeliveryStage.SUBMIT_ATTEMPTED,
+            DeliveryVerdict.ACCEPTED,
+            DeliveryReasonCode.SUBMIT_SENT,
+            prompt_state_before=before_state,
+            prompt_state_after=after_state,
+        )
+        terminal_stage = DeliveryStage.CONFIRMED_RUNNING
+        terminal_reason = DeliveryReasonCode.SESSION_RUNNING
+        terminal_verdict = DeliveryVerdict.CONFIRMED
+        if after_state == "blocked:trust":
+            terminal_stage = DeliveryStage.BLOCKED
+            terminal_reason = DeliveryReasonCode.TRUST_REQUIRED
+            terminal_verdict = DeliveryVerdict.BLOCKED
+        elif after_state == "blocked:auth":
+            terminal_stage = DeliveryStage.BLOCKED
+            terminal_reason = DeliveryReasonCode.AUTH_REQUIRED
+            terminal_verdict = DeliveryVerdict.BLOCKED
+        elif _CODEX_PROMPT_RE.search(after):
+            terminal_stage = DeliveryStage.PROMPT_CLEARED
+            terminal_reason = DeliveryReasonCode.PROMPT_STILL_VISIBLE
+            terminal_verdict = DeliveryVerdict.ACCEPTED
+        elif after.strip():
+            terminal_stage = DeliveryStage.AGENT_OUTPUT_OBSERVED
+            terminal_reason = DeliveryReasonCode.AGENT_OUTPUT
+        self._append_instruction_trace(
+            request,
+            handle,
+            trace_id,
+            terminal_stage,
+            terminal_verdict,
+            terminal_reason,
+            prompt_state_before=before_state,
+            prompt_state_after=after_state,
+            first_output_excerpt=after,
+        )
 
     async def assign_task(
         self,
@@ -112,7 +216,8 @@ class CodexRuntime(ProviderRuntime):
     ) -> None:
         text = request.message
         if not text and request.message_file:
-            text = open(request.message_file, encoding="utf-8").read()
+            with open(request.message_file, encoding="utf-8") as f:
+                text = f.read()
         await self.send_instruction(
             handle,
             InstructionRequest(
@@ -120,6 +225,7 @@ class CodexRuntime(ProviderRuntime):
                 message=text,
                 context_ref=request.context_ref,
                 instruction_id=request.assignment_id or request.task_id,
+                metadata=request.metadata,
             ),
         )
 
@@ -162,7 +268,9 @@ class CodexRuntime(ProviderRuntime):
             last_output_excerpt=excerpt,
         )
         inspection.details["provider_runtime_hint"] = self._runtime_hint_for_inspection(inspection)
-        inspection.details["provider_runtime_action"] = self._runtime_action_for_inspection(inspection)
+        inspection.details["provider_runtime_action"] = self._runtime_action_for_inspection(
+            inspection
+        )
         return inspection
 
     def _runtime_hint_for_inspection(self, inspection: RuntimeInspection) -> str:
@@ -170,7 +278,10 @@ class CodexRuntime(ProviderRuntime):
             return "prompt_visible"
         if inspection.readiness is ReadinessState.BUSY:
             return "processing"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "auth_prompt"
         if inspection.readiness is ReadinessState.STOPPED:
             return "pane_missing"
@@ -181,7 +292,10 @@ class CodexRuntime(ProviderRuntime):
             return "send_or_resume"
         if inspection.readiness is ReadinessState.BUSY:
             return "wait"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "resolve_auth"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
@@ -230,7 +344,10 @@ class CodexRuntime(ProviderRuntime):
             return "ready"
         if inspection.readiness is ReadinessState.BUSY:
             return "active"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "auth_gate"
         if inspection.readiness is ReadinessState.STOPPED:
             return "missing"
@@ -241,7 +358,10 @@ class CodexRuntime(ProviderRuntime):
             return "resume"
         if inspection.readiness is ReadinessState.BUSY:
             return "wait"
-        if inspection.readiness is ReadinessState.BLOCKED and inspection.block_reason is RuntimeBlockReason.AUTH:
+        if (
+            inspection.readiness is ReadinessState.BLOCKED
+            and inspection.block_reason is RuntimeBlockReason.AUTH
+        ):
             return "resolve_auth"
         if inspection.readiness is ReadinessState.STOPPED:
             return "respawn"
@@ -249,11 +369,58 @@ class CodexRuntime(ProviderRuntime):
 
     def _classify_readiness(self, excerpt: str) -> tuple[ReadinessState, RuntimeBlockReason | None]:
         lowered = excerpt.lower()
+        if any(trigger in lowered for trigger in _TRUST_TRIGGERS):
+            return ReadinessState.BLOCKED, RuntimeBlockReason.TRUST
         if any(trigger in lowered for trigger in _AUTH_TRIGGERS):
             return ReadinessState.BLOCKED, RuntimeBlockReason.AUTH
         if _CODEX_PROMPT_RE.search(excerpt):
             return ReadinessState.READY, None
         return ReadinessState.BUSY, None
+
+    def _prompt_state_for_excerpt(self, excerpt: str) -> str:
+        readiness, block_reason = self._classify_readiness(excerpt)
+        if block_reason is not None:
+            return f"{readiness.value}:{block_reason.value}"
+        return readiness.value
+
+    @staticmethod
+    def _append_instruction_trace(
+        request: InstructionRequest,
+        handle: RuntimeSessionHandle,
+        trace_id: str,
+        stage: DeliveryStage,
+        verdict: DeliveryVerdict,
+        reason_code: DeliveryReasonCode,
+        *,
+        prompt_state_before: str | None = None,
+        prompt_state_after: str | None = None,
+        first_output_excerpt: str | None = None,
+    ) -> None:
+        if not trace_id:
+            return
+        raw_action = request.metadata.get("delivery_action")
+        action = (
+            DeliveryAction.TASK_ASSIGNMENT
+            if raw_action == DeliveryAction.TASK_ASSIGNMENT.value
+            else DeliveryAction.INSTRUCTION
+        )
+        append_trace_event(
+            request.metadata,
+            trace_event(
+                trace_id=trace_id,
+                session_id=handle.session_id,
+                role=handle.role.value,
+                provider=handle.provider_name,
+                pane_id=handle.tmux_pane,
+                action=action,
+                stage=stage,
+                verdict=verdict,
+                reason_code=reason_code,
+                prompt_state_before=prompt_state_before,
+                prompt_state_after=prompt_state_after,
+                first_output_excerpt=first_output_excerpt,
+            ),
+        )
 
     @staticmethod
     def _summary_for_state(

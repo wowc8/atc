@@ -1806,6 +1806,47 @@ async def list_app_events(
     return [AppEvent(**dict(r)) for r in rows]
 
 
+async def create_app_event(
+    db: aiosqlite.Connection,
+    *,
+    level: str,
+    category: str,
+    message: str,
+    detail: dict[str, Any] | None = None,
+    project_id: str | None = None,
+    session_id: str | None = None,
+) -> AppEvent:
+    """Insert a structured app event and return it."""
+
+    event = AppEvent(
+        id=_uuid(),
+        level=level,
+        category=category,
+        message=message,
+        detail=json.dumps(detail or {}, sort_keys=True),
+        project_id=project_id,
+        session_id=session_id,
+        created_at=_now(),
+    )
+    await db.execute(
+        """INSERT INTO app_events
+           (id, level, category, message, detail, project_id, session_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            event.id,
+            event.level,
+            event.category,
+            event.message,
+            event.detail,
+            event.project_id,
+            event.session_id,
+            event.created_at,
+        ),
+    )
+    await db.commit()
+    return event
+
+
 async def is_feature_enabled(db: aiosqlite.Connection, key: str) -> bool:
     """Check if a feature flag is enabled. Returns False if flag doesn't exist."""
     flag = await get_feature_flag(db, key)
