@@ -72,6 +72,8 @@ These docs exist to:
   - runtime/provider boundary rules
 - `docs/runtime_orchestration_refactor_phases.md`
   - phased implementation plan for the runtime/orchestration hardening refactor
+- `docs/runtime_orchestration_phase0_baseline.md`
+  - Phase 0 validation evidence, current delivery/session path map, test inventory, and Playwright baseline gate
 - `docs/agents/README.md`
   - role contracts and behavior boundaries for Tower, Leader, and Ace
 - `docs/ARCHITECTURE.md`
