@@ -13,7 +13,7 @@ interface Props {
 const GITHUB_ORG_KEY = "atc:github_default_org";
 
 const EMPTY_PROVIDER_CONFIG: AgentProviderConfig = {
-  default: "claude_code",
+  default: "codex",
   opencode_url: "http://localhost:4096",
   tmux_session: "atc",
   claude_command: "claude",

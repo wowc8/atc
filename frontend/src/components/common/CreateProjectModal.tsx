@@ -20,7 +20,7 @@ export default function CreateProjectModal({
   const [description, setDescription] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
-  const [agentProvider, setAgentProvider] = useState<Project["agent_provider"]>("claude_code");
+  const [agentProvider, setAgentProvider] = useState<Project["agent_provider"]>("codex");
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

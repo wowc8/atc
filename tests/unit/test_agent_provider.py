@@ -606,7 +606,7 @@ class TestConfigIntegration:
         from atc.config import AgentProviderConfig
 
         cfg = AgentProviderConfig()
-        assert cfg.default == "claude_code"
+        assert cfg.default == "codex"
         assert cfg.opencode_url == "http://localhost:4096"
         assert cfg.codex_command == "codex"
         assert cfg.tmux_session == "atc"
@@ -615,7 +615,7 @@ class TestConfigIntegration:
         from atc.config import Settings
 
         settings = Settings()
-        assert settings.agent_provider.default == "claude_code"
+        assert settings.agent_provider.default == "codex"
         assert settings.agent_provider.codex_command == "codex"
 
     def test_create_provider_from_config(self) -> None:

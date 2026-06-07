@@ -31,7 +31,7 @@ class CreateProjectRequest(BaseModel):
     description: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
-    agent_provider: str = "claude_code"
+    agent_provider: str = "codex"
 
 
 class ProjectResponse(BaseModel):
@@ -41,7 +41,7 @@ class ProjectResponse(BaseModel):
     description: str | None = None
     repo_path: str | None = None
     github_repo: str | None = None
-    agent_provider: str = "claude_code"
+    agent_provider: str = "codex"
     position: int = 0
     created_at: str
     updated_at: str

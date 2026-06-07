@@ -635,7 +635,7 @@ async def create_project(
     description: str | None = None,
     repo_path: str | None = None,
     github_repo: str | None = None,
-    agent_provider: str = "claude_code",
+    agent_provider: str = "codex",
 ) -> Project:
     """Insert a new project row and return the dataclass."""
     now = _now()
@@ -902,7 +902,7 @@ async def create_session(
     session_type: str,
     name: str,
     *,
-    provider: str = "claude_code",
+    provider: str = "codex",
     scope_type: str = "project",
     scope_id: str | None = None,
     task_id: str | None = None,
