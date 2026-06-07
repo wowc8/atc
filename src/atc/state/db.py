@@ -36,6 +36,14 @@ from atc.state.models import (
     TaskGraph,
     UsageEvent,
 )
+from atc.state.transitions import (
+    TASK_ASSIGNMENT_TRANSITIONS,
+    TASK_GRAPH_TRANSITIONS,
+    TaskAssignmentStatus,
+    TaskGraphStatus,
+    validate_task_assignment_transition,
+    validate_task_graph_transition,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator
@@ -1054,15 +1062,10 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
 # TaskGraph CRUD
 # ---------------------------------------------------------------------------
 
-_VALID_TASK_GRAPH_STATUSES = {"todo", "assigned", "in_progress", "review", "done", "error"}
-
+_VALID_TASK_GRAPH_STATUSES = {status.value for status in TaskGraphStatus}
 _TASK_GRAPH_TRANSITIONS: dict[str, set[str]] = {
-    "todo": {"assigned"},
-    "assigned": {"in_progress", "todo", "error", "assigned"},  # assigned→assigned is a no-op re-assign
-    "in_progress": {"review", "done", "error", "assigned"},    # allow re-assignment from in_progress
-    "review": {"done", "in_progress", "error"},
-    "done": {"todo"},   # re-open for retry
-    "error": {"todo"},  # retry from scratch
+    current.value: {target.value for target in targets}
+    for current, targets in TASK_GRAPH_TRANSITIONS.items()
 }
 
 
@@ -1204,20 +1207,15 @@ async def update_task_graph_status(
     new_status: str,
 ) -> TaskGraph | None:
     """Transition task_graph status with validation."""
-    if new_status not in _VALID_TASK_GRAPH_STATUSES:
-        raise ValueError(f"Invalid status: {new_status}")
-
     existing = await get_task_graph(db, task_graph_id)
     if existing is None:
         return None
 
-    allowed = _TASK_GRAPH_TRANSITIONS.get(existing.status, set())
-    if new_status not in allowed:
-        raise ValueError(f"Cannot transition from '{existing.status}' to '{new_status}'")
+    target = validate_task_graph_transition(task_graph_id, existing.status, new_status)
 
     await db.execute(
         "UPDATE task_graphs SET status = ?, updated_at = ? WHERE id = ?",
-        (new_status, _now(), task_graph_id),
+        (target.value, _now(), task_graph_id),
     )
     await db.commit()
     return await get_task_graph(db, task_graph_id)
@@ -1240,13 +1238,10 @@ async def delete_task_graph(
 # TaskAssignment CRUD (idempotent assignments)
 # ---------------------------------------------------------------------------
 
-_VALID_ASSIGNMENT_STATUSES = {"assigned", "working", "done", "failed"}
-
+_VALID_ASSIGNMENT_STATUSES = {status.value for status in TaskAssignmentStatus}
 _ASSIGNMENT_TRANSITIONS: dict[str, set[str]] = {
-    "assigned": {"working", "failed"},
-    "working": {"done", "failed"},
-    "done": set(),
-    "failed": set(),
+    current.value: {target.value for target in targets}
+    for current, targets in TASK_ASSIGNMENT_TRANSITIONS.items()
 }
 
 
@@ -1424,21 +1419,16 @@ async def update_task_assignment_status(
     new_status: str,
 ) -> TaskAssignment | None:
     """Transition a task assignment's status with validation."""
-    if new_status not in _VALID_ASSIGNMENT_STATUSES:
-        raise ValueError(f"Invalid assignment status: {new_status}")
-
     existing = await get_task_assignment(db, assignment_id)
     if existing is None:
         return None
 
-    allowed = _ASSIGNMENT_TRANSITIONS.get(existing.status, set())
-    if new_status not in allowed:
-        raise ValueError(f"Cannot transition assignment from '{existing.status}' to '{new_status}'")
+    target = validate_task_assignment_transition(assignment_id, existing.status, new_status)
 
     now = _now()
     await db.execute(
         "UPDATE task_assignments SET status = ?, updated_at = ? WHERE assignment_id = ?",
-        (new_status, now, assignment_id),
+        (target.value, now, assignment_id),
     )
     await db.commit()
     return await get_task_assignment(db, assignment_id)

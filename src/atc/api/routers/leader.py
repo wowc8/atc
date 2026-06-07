@@ -15,11 +15,12 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from atc.leader.decomposer import TaskSpec, decompose_goal
 from atc.leader.orchestrator import LeaderOrchestrator
 from atc.state import db as db_ops
+from atc.state.transitions import LifecycleTransitionError
 
 router = APIRouter()
 
@@ -78,6 +79,7 @@ class ProgressResponse(BaseModel):
     all_done: bool
     progress_pct: int
     assignments: list[dict[str, Any]]
+    blocked_transition_errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +93,11 @@ async def _get_db(request: Request) -> Any:
 
 def _get_event_bus(request: Request) -> Any:
     return getattr(request.app.state, "event_bus", None)
+
+
+def _transition_error_detail(exc: LifecycleTransitionError) -> dict[str, object]:
+    """Return normalized lifecycle-transition error detail for API callers."""
+    return exc.to_detail()
 
 
 async def _broadcast_tower_progress(request: Request) -> None:
@@ -291,7 +298,10 @@ async def task_done(
 ) -> dict[str, str]:
     """Mark a task graph entry as done and clean up its Ace."""
     orch = await _get_or_create_orchestrator(request, project_id)
-    await orch.mark_task_done(body.task_graph_id)
+    try:
+        await orch.mark_task_done(body.task_graph_id)
+    except LifecycleTransitionError as exc:
+        raise HTTPException(status_code=409, detail=_transition_error_detail(exc)) from None
     await _broadcast_tower_progress(request)
     return {"status": "done"}
 
@@ -304,7 +314,10 @@ async def task_failed(
 ) -> dict[str, str]:
     """Mark a task graph entry as failed and allow retry."""
     orch = await _get_or_create_orchestrator(request, project_id)
-    await orch.mark_task_failed(body.task_graph_id, reason=body.reason)
+    try:
+        await orch.mark_task_failed(body.task_graph_id, reason=body.reason)
+    except LifecycleTransitionError as exc:
+        raise HTTPException(status_code=409, detail=_transition_error_detail(exc)) from None
     await _broadcast_tower_progress(request)
     return {"status": "failed"}
 

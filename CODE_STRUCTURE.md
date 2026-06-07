@@ -48,6 +48,11 @@ Prefer:
 - explicit lifecycle transitions over ad hoc status mutation
 - source-of-truth records over reconstructing behavior from side effects
 
+Current durable task graph and task assignment transitions are centralized in
+`src/atc/state/transitions.py`. API-visible transition failures return stable
+reason codes and allowed-target lists so Tower/Leader surfaces can display why a
+workflow is blocked instead of treating a rejected mutation as a silent stall.
+
 If a session, leader, or tower state matters to the user, it should be representable in durable state.
 
 ## Current Major Boundaries

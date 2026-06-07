@@ -22,6 +22,7 @@ from atc.state.db import (
 from atc.state.db import (
     run_migrations as async_run_migrations,
 )
+from atc.state.transitions import LifecycleTransitionError, TransitionReasonCode
 
 
 @pytest.fixture
@@ -287,7 +288,7 @@ class TestTaskGraphStatusTransitions:
     async def test_invalid_status(self, db) -> None:
         project = await create_project(db, "p1")
         tg = await create_task_graph(db, project.id, "Task")
-        with pytest.raises(ValueError, match="Invalid status"):
+        with pytest.raises(LifecycleTransitionError, match="invalid_status"):
             await update_task_graph_status(db, tg.id, "invalid")
 
     async def test_same_status_rejected(self, db) -> None:
@@ -462,8 +463,10 @@ class TestIdempotentAssignment:
         await assign_task(db, tg.id, "ace-1", "key-1")
 
         # Cannot go from assigned -> done (must go through working)
-        with pytest.raises(ValueError, match="Cannot transition assignment"):
+        with pytest.raises(LifecycleTransitionError, match="invalid_transition") as exc_info:
             await update_task_assignment_status(db, "key-1", "done")
+        assert exc_info.value.reason_code == TransitionReasonCode.INVALID_TRANSITION
+        assert exc_info.value.to_detail()["allowed"] == ["failed", "working"]
 
     async def test_assignment_to_failed(self, db) -> None:
         project = await create_project(db, "p1")

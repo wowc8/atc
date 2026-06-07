@@ -222,7 +222,8 @@ class TestTaskGraphStatusTransitions:
             f"/api/task-graphs/{tg_id}/status",
             json={"status": "in_progress"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "invalid_transition"
 
     def test_invalid_transition_same_status(self, client: TestClient) -> None:
         project_id = _create_project(client)
@@ -235,7 +236,8 @@ class TestTaskGraphStatusTransitions:
             f"/api/task-graphs/{tg_id}/status",
             json={"status": "todo"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "invalid_transition"
 
     def test_invalid_status_value(self, client: TestClient) -> None:
         project_id = _create_project(client)
@@ -248,7 +250,8 @@ class TestTaskGraphStatusTransitions:
             f"/api/task-graphs/{tg_id}/status",
             json={"status": "invalid"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "invalid_status"
 
     def test_status_transition_not_found(self, client: TestClient) -> None:
         resp = client.patch(
@@ -407,4 +410,5 @@ class TestIdempotentAssignment:
             "/api/task-assignments/key-invalid/status",
             json={"status": "done"},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["code"] == "invalid_transition"
