@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import shutil
 from pathlib import Path
 
@@ -103,6 +104,7 @@ def build_path_env_prefix(*, current_path: str | None = None, home: str | None =
     candidates = [
         "/usr/local/bin",
         "/opt/homebrew/bin",
+        f"{home}/.local/bin",
         f"{home}/.nvm/current/bin",
         f"{home}/.volta/bin",
         f"{home}/.asdf/shims",
@@ -112,4 +114,4 @@ def build_path_env_prefix(*, current_path: str | None = None, home: str | None =
     if not extras:
         return ""
     enriched = ":".join(extras) + ":" + current_path
-    return f"PATH={enriched!s} "
+    return f"PATH={shlex.quote(enriched)} "
