@@ -13,6 +13,7 @@ from atc.runtime.models import (
     RuntimeSessionHandle,
     RuntimeTransport,
     StartRoleRequest,
+    StopRoleRequest,
     TaskAssignmentRequest,
 )
 from atc.runtime.service import RuntimeService
@@ -28,6 +29,7 @@ class DummyProviderRuntime:
         self.spawned_existing: list[StartRoleRequest] = []
         self.instructions: list[InstructionRequest] = []
         self.assignments: list[TaskAssignmentRequest] = []
+        self.stopped: list[tuple[RuntimeSessionHandle, StopRoleRequest | None]] = []
 
     async def prepare_workspace(self, request: StartRoleRequest) -> None:
         self.prepared.append(request)
@@ -57,6 +59,7 @@ class DummyProviderRuntime:
         )
 
     async def stop_role(self, handle: RuntimeSessionHandle, request=None) -> None:
+        self.stopped.append((handle, request))
         return None
 
     async def send_instruction(
@@ -328,3 +331,74 @@ def test_delivery_exception_permission_maps_to_permission_required() -> None:
         )
         is DeliveryReasonCode.PERMISSION_REQUIRED
     )
+
+
+def test_runtime_service_send_instruction_returns_delivery_result() -> None:
+    register_provider_runtime("dummy_runtime_result_instruction", DummyProviderRuntime)
+    service = RuntimeService()
+    handle = asyncio.run(
+        service.start_leader(
+            StartRoleRequest(
+                session_id="sess-result-leader-1",
+                provider_name="dummy_runtime_result_instruction",
+                role=RoleKind.LEADER,
+            )
+        )
+    )
+    request = InstructionRequest(session_id=handle.session_id, message="hello")
+
+    result = asyncio.run(service.assign_project_to_leader(handle, request))
+
+    assert result.session_id == "sess-result-leader-1"
+    assert result.provider_name == "dummy_runtime_result_instruction"
+    assert result.role is RoleKind.LEADER
+    assert result.status == "delivered"
+    assert result.stage == "confirmed_running"
+    assert result.verdict == "accepted"
+    assert result.reason_code == "delivery_unverified"
+    assert result.as_dict()["status"] == "delivered"
+
+
+def test_runtime_service_handle_from_session_record_maps_manager_and_stops_provider() -> None:
+    register_provider_runtime("dummy_runtime_record_stop", DummyProviderRuntime)
+    service = RuntimeService()
+    session = SimpleNamespace(
+        id="sess-record-manager-1",
+        provider="dummy_runtime_record_stop",
+        session_type="manager",
+        project_id="proj-record",
+        tmux_session="atc",
+        tmux_pane="%42",
+    )
+
+    handle = service.handle_from_session_record(session)
+    asyncio.run(
+        service.stop_session_record(session, StopRoleRequest(reason="test-stop", graceful=True))
+    )
+
+    provider = service.get_provider("dummy_runtime_record_stop")
+    stopped_handle, stop_request = provider.stopped[-1]
+    assert handle.role is RoleKind.LEADER
+    assert stopped_handle.session_id == "sess-record-manager-1"
+    assert stopped_handle.tmux_pane == "%42"
+    assert stop_request.reason == "test-stop"
+
+
+def test_runtime_service_inspect_session_record_uses_provider_boundary() -> None:
+    register_provider_runtime("dummy_runtime_record_inspect", DummyProviderRuntime)
+    service = RuntimeService()
+    session = SimpleNamespace(
+        id="sess-record-ace-1",
+        provider="dummy_runtime_record_inspect",
+        session_type="worker",
+        project_id="proj-record",
+        tmux_session="atc",
+        tmux_pane="%99",
+    )
+
+    inspection = asyncio.run(service.inspect_session_record(session))
+
+    assert inspection.session_id == "sess-record-ace-1"
+    assert inspection.provider_name == "dummy_runtime_record_inspect"
+    assert inspection.alive is True
+    assert service.get_handle("sess-record-ace-1").role is RoleKind.ACE

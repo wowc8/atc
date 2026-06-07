@@ -12,7 +12,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from atc.session.ace import VerificationResult, _get_alternate_on, verify_alive, verify_progressing, verify_working
+from atc.runtime.models import ReadinessState, RuntimeInspection
+from atc.session.ace import (
+    VerificationResult,
+    _get_alternate_on,
+    verify_alive,
+    verify_progressing,
+    verify_working,
+)
 from atc.state.models import Session
 
 
@@ -52,14 +59,20 @@ class TestGetAlternateOn:
 
 class TestVerifyAlive:
     @pytest.mark.asyncio
-    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
+    @patch("atc.session.ace.RuntimeService.inspect_session_record", new_callable=AsyncMock)
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
-    async def test_healthy(self, mock_get: AsyncMock, mock_alive: AsyncMock) -> None:
+    async def test_healthy(self, mock_get: AsyncMock, mock_inspect: AsyncMock) -> None:
         mock_get.return_value = _make_session()
-        mock_alive.return_value = True
+        mock_inspect.return_value = RuntimeInspection(
+            session_id="test-session-1",
+            provider_name="codex",
+            alive=True,
+            readiness=ReadinessState.READY,
+        )
         result = await verify_alive(AsyncMock(), "test-session-1")
         assert result.ok is True
         assert result.phase == "alive"
+        assert result.detail == "ready"
 
     @pytest.mark.asyncio
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
@@ -77,19 +90,33 @@ class TestVerifyAlive:
         assert result.ok is False
 
     @pytest.mark.asyncio
+    @patch("atc.session.ace.RuntimeService.inspect_session_record", new_callable=AsyncMock)
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
-    async def test_no_pane(self, mock_get: AsyncMock) -> None:
+    async def test_no_pane(self, mock_get: AsyncMock, mock_inspect: AsyncMock) -> None:
         mock_get.return_value = _make_session(tmux_pane=None)
+        mock_inspect.return_value = RuntimeInspection(
+            session_id="test-session-1",
+            provider_name="codex",
+            alive=False,
+            readiness=ReadinessState.STOPPED,
+            summary="Pane missing",
+        )
         result = await verify_alive(AsyncMock(), "test-session-1")
         assert result.ok is False
-        assert "no tmux pane" in result.detail
+        assert "Pane missing" in result.detail
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
+    @patch("atc.session.ace.RuntimeService.inspect_session_record", new_callable=AsyncMock)
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
-    async def test_dead_pane(self, mock_get: AsyncMock, mock_alive: AsyncMock) -> None:
+    async def test_dead_pane(self, mock_get: AsyncMock, mock_inspect: AsyncMock) -> None:
         mock_get.return_value = _make_session()
-        mock_alive.return_value = False
+        mock_inspect.return_value = RuntimeInspection(
+            session_id="test-session-1",
+            provider_name="codex",
+            alive=False,
+            readiness=ReadinessState.STOPPED,
+            summary="runtime session is dead",
+        )
         result = await verify_alive(AsyncMock(), "test-session-1")
         assert result.ok is False
         assert "dead" in result.detail
@@ -106,7 +133,9 @@ class TestVerifyWorking:
     @pytest.mark.asyncio
     @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
-    async def test_output_counts_as_activity(self, mock_get: AsyncMock, mock_capture: AsyncMock) -> None:
+    async def test_output_counts_as_activity(
+        self, mock_get: AsyncMock, mock_capture: AsyncMock
+    ) -> None:
         mock_get.return_value = _make_session(status="idle")
         mock_capture.return_value = "some output"
         result = await verify_working(AsyncMock(), "test-session-1")
@@ -126,7 +155,9 @@ class TestVerifyWorking:
     @pytest.mark.asyncio
     @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
-    async def test_capture_failure_is_handled(self, mock_get: AsyncMock, mock_capture: AsyncMock) -> None:
+    async def test_capture_failure_is_handled(
+        self, mock_get: AsyncMock, mock_capture: AsyncMock
+    ) -> None:
         mock_get.return_value = _make_session(status="idle")
         mock_capture.side_effect = RuntimeError("tmux failed")
         result = await verify_working(AsyncMock(), "test-session-1")
@@ -195,7 +226,9 @@ class TestVerifyProgressing:
     @pytest.mark.asyncio
     @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
-    async def test_error_pattern_traceback(self, mock_get: AsyncMock, mock_capture: AsyncMock) -> None:
+    async def test_error_pattern_traceback(
+        self, mock_get: AsyncMock, mock_capture: AsyncMock
+    ) -> None:
         mock_get.return_value = _make_session(status="working")
         mock_capture.return_value = "Traceback (most recent call last): ..."
         result = await verify_progressing(AsyncMock(), "test-session-1")
@@ -205,7 +238,9 @@ class TestVerifyProgressing:
     @pytest.mark.asyncio
     @patch("atc.session.ace._capture_pane", new_callable=AsyncMock)
     @patch("atc.session.ace.db_ops.get_session", new_callable=AsyncMock)
-    async def test_error_pattern_permission_denied(self, mock_get: AsyncMock, mock_capture: AsyncMock) -> None:
+    async def test_error_pattern_permission_denied(
+        self, mock_get: AsyncMock, mock_capture: AsyncMock
+    ) -> None:
         mock_get.return_value = _make_session(status="working")
         mock_capture.return_value = "Permission denied when opening file"
         result = await verify_progressing(AsyncMock(), "test-session-1")

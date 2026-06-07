@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any
 
 from atc.agents.claude_runtime import accept_startup_dialogs
 from atc.core.app_events import log_event
+from atc.runtime.models import StopRoleRequest
+from atc.runtime.service import RuntimeService
 from atc.session.state_machine import (
     SessionStatus,
     transition,
@@ -601,9 +603,9 @@ async def destroy_ace(
     if session is None:
         raise ValueError(f"Session {session_id} not found")
 
-    # Kill tmux pane if present
-    if session.tmux_pane:
-        await _kill_pane(session.tmux_pane)
+    await RuntimeService().stop_session_record(
+        session, StopRoleRequest(reason="ace_destroy", graceful=True)
+    )
 
     # Delete from DB
     await db_ops.delete_session(conn, session_id)
@@ -655,15 +657,15 @@ async def verify_alive(
     if session.status == SessionStatus.ERROR.value:
         return VerificationResult(ok=False, phase="alive", detail="session status is error")
 
-    if not session.tmux_pane:
-        return VerificationResult(ok=False, phase="alive", detail="no tmux pane assigned")
-
-    if not await _pane_is_alive(session.tmux_pane):
+    inspection = await RuntimeService().inspect_session_record(session)
+    if not inspection.alive:
         return VerificationResult(
-            ok=False, phase="alive", detail=f"tmux pane {session.tmux_pane} is dead"
+            ok=False,
+            phase="alive",
+            detail=inspection.summary or "runtime session is not alive",
         )
 
-    return VerificationResult(ok=True, phase="alive")
+    return VerificationResult(ok=True, phase="alive", detail=inspection.readiness.value)
 
 
 async def verify_working(

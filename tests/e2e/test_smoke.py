@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from atc.api.app import create_app
 from atc.config import Settings
+from atc.runtime.models import RoleKind, RuntimeDeliveryResult
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -107,7 +108,7 @@ class TestProjectCRUD:
 @patch(
     "atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1")
 )
-@patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
+@patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
 class TestLeaderLifecycle:
     def test_start_leader(
         self,
@@ -164,8 +165,41 @@ class TestLeaderLifecycle:
             json={"message": "Hello leader"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "sent"
+        assert resp.json()["status"] == "delivered"
         mock_send.assert_called()
+
+    def test_send_leader_message_surfaces_blocked_delivery(
+        self,
+        mock_send: AsyncMock,
+        mock_spawn_provider: AsyncMock,
+        mock_tmux: AsyncMock,
+        client: TestClient,
+    ) -> None:
+        mock_send.return_value = RuntimeDeliveryResult(
+            session_id="session-test",
+            provider_name="codex",
+            role=RoleKind.LEADER,
+            status="blocked",
+            stage="interrupted",
+            verdict="blocked",
+            reason_code="trust_required",
+            message="Leader instruction blocked: trust_required",
+            trace_id="trace-test",
+        )
+        resp = client.post("/api/projects", json={"name": "blocked-msg-proj"})
+        project_id = resp.json()["id"]
+
+        client.post(f"/api/projects/{project_id}/leader/start", json={"goal": "Accept messages"})
+        resp = client.post(
+            f"/api/projects/{project_id}/leader/message",
+            json={"message": "Hello leader"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "blocked"
+        assert data["delivery"]["status"] == "blocked"
+        assert data["delivery"]["reason_code"] == "trust_required"
 
     def test_message_without_active_leader(
         self,
@@ -235,7 +269,7 @@ class TestTowerStatus:
         data = resp.json()
         assert data["total_sessions"] >= 1
 
-    @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
+    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
     @patch(
         "atc.leader.leader._spawn_provider_session",
         new_callable=AsyncMock,
@@ -263,7 +297,7 @@ class TestTowerStatus:
         resp = client.post("/api/tower/goal", json={"project_id": "nonexistent", "goal": "Ship v1"})
         assert resp.status_code == 404
 
-    @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
+    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
     @patch(
         "atc.leader.leader._spawn_provider_session",
         new_callable=AsyncMock,
@@ -287,8 +321,8 @@ class TestTowerStatus:
         assert resp.status_code == 200
 
     @patch("atc.tower.session.stop_tower_session", new_callable=AsyncMock)
-    @patch("atc.leader.leader._kill_pane", new_callable=AsyncMock)
-    @patch("atc.leader.leader._send_session_instruction", new_callable=AsyncMock, return_value=True)
+    @patch("atc.runtime.service.RuntimeService.stop_session_record", new_callable=AsyncMock)
+    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
     @patch(
         "atc.leader.leader._spawn_provider_session",
         new_callable=AsyncMock,

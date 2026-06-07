@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from atc.core.errors import CreationFailedError
 from atc.leader import leader as leader_ops
+from atc.runtime.models import RuntimeDeliveryResult
 from atc.state import db as db_ops
 
 logger = logging.getLogger(__name__)
@@ -115,10 +116,13 @@ async def create_project(body: CreateProjectRequest, request: Request) -> Projec
     ws_hub = await _get_ws_hub(request)
     if ws_hub is not None:
         try:
-            await ws_hub.broadcast("state", {
-                "project_created": True,
-                "project": resp.model_dump(),
-            })
+            await ws_hub.broadcast(
+                "state",
+                {
+                    "project_created": True,
+                    "project": resp.model_dump(),
+                },
+            )
         except Exception:
             logger.debug("Failed to broadcast project_created via WebSocket")
 
@@ -138,10 +142,13 @@ async def delete_project(project_id: str, request: Request) -> None:
     ws_hub = await _get_ws_hub(request)
     if ws_hub is not None:
         try:
-            await ws_hub.broadcast("state", {
-                "project_deleted": True,
-                "project_id": project_id,
-            })
+            await ws_hub.broadcast(
+                "state",
+                {
+                    "project_deleted": True,
+                    "project_id": project_id,
+                },
+            )
         except Exception:
             logger.debug("Failed to broadcast project_deleted via WebSocket")
 
@@ -161,10 +168,13 @@ async def archive_project(project_id: str, request: Request) -> ProjectResponse:
     ws_hub = await _get_ws_hub(request)
     if ws_hub is not None:
         try:
-            await ws_hub.broadcast("state", {
-                "project_updated": True,
-                "project": resp.model_dump(),
-            })
+            await ws_hub.broadcast(
+                "state",
+                {
+                    "project_updated": True,
+                    "project": resp.model_dump(),
+                },
+            )
         except Exception:
             logger.debug("Failed to broadcast project_updated via WebSocket")
 
@@ -219,10 +229,13 @@ async def update_project_status(
     ws_hub = await _get_ws_hub(request)
     if ws_hub is not None:
         try:
-            await ws_hub.broadcast("state", {
-                "project_updated": True,
-                "project": resp.model_dump(),
-            })
+            await ws_hub.broadcast(
+                "state",
+                {
+                    "project_updated": True,
+                    "project": resp.model_dump(),
+                },
+            )
         except Exception:
             logger.debug("Failed to broadcast project_updated via WebSocket")
 
@@ -271,10 +284,13 @@ async def update_project_provider(
     ws_hub = await _get_ws_hub(request)
     if ws_hub is not None:
         try:
-            await ws_hub.broadcast("state", {
-                "project_updated": True,
-                "project": resp.model_dump(),
-            })
+            await ws_hub.broadcast(
+                "state",
+                {
+                    "project_updated": True,
+                    "project": resp.model_dump(),
+                },
+            )
         except Exception:
             logger.debug("Failed to broadcast project_updated via WebSocket")
 
@@ -306,7 +322,10 @@ async def start_leader(
     event_bus = await _get_event_bus(request)
     try:
         session_id = await leader_ops.start_leader(
-            db, project_id, goal=body.goal, event_bus=event_bus,
+            db,
+            project_id,
+            goal=body.goal,
+            event_bus=event_bus,
         )
     except RuntimeError as exc:
         raise CreationFailedError(str(exc)) from None
@@ -315,6 +334,7 @@ async def start_leader(
     # populates regardless of whether Tower or CLI started the Leader.
     if body.goal:
         from atc.state import db as db_ops
+
         seed = [("goal", "text", body.goal)]
         cursor = await db.execute(
             "SELECT name, description, repo_path, github_repo FROM projects WHERE id = ?",
@@ -322,14 +342,22 @@ async def start_leader(
         )
         row = await cursor.fetchone()
         if row:
-            if row[1]: seed.append(("project_description", "text", row[1]))
-            if row[2]: seed.append(("repo_path", "text", row[2]))
-            if row[3]: seed.append(("github_repo", "text", row[3]))
+            if row[1]:
+                seed.append(("project_description", "text", row[1]))
+            if row[2]:
+                seed.append(("repo_path", "text", row[2]))
+            if row[3]:
+                seed.append(("github_repo", "text", row[3]))
         for key, etype, val in seed:
             try:
                 await db_ops.create_context_entry(
-                    db, scope="project", key=key, entry_type=etype,
-                    value=val, project_id=project_id, updated_by="leader-start",
+                    db,
+                    scope="project",
+                    key=key,
+                    entry_type=etype,
+                    value=val,
+                    project_id=project_id,
+                    updated_by="leader-start",
                 )
                 await db.commit()
             except Exception:
@@ -348,10 +376,12 @@ async def start_leader(
     # directly from the API for standalone (non-Tower) usage.
     if body.goal and body.auto_kickoff:
         import asyncio as _asyncio
+
         from atc.leader.leader import send_leader_message as _send_leader_msg
 
         async def _kickoff() -> None:
             import logging as _logging
+
             _log = _logging.getLogger(__name__)
             # Build kickoff message
             cursor = await db.execute(
@@ -379,9 +409,12 @@ async def start_leader(
                 "Do NOT write product files yourself.",
                 "Operate through the ATC orchestration API only.",
                 "",
-                "1. First decompose the goal into well-scoped tasks via POST /api/projects/{project_id}/leader/decompose.",
-                "2. Then spawn Aces for ready tasks via POST /api/projects/{project_id}/leader/spawn-aces.",
-                "3. Then instruct spawned Aces via POST /api/projects/{project_id}/leader/instruct.",
+                "1. First decompose the goal into well-scoped tasks via POST "
+                "/api/projects/{project_id}/leader/decompose.",
+                "2. Then spawn Aces for ready tasks via POST "
+                "/api/projects/{project_id}/leader/spawn-aces.",
+                "3. Then instruct spawned Aces via POST "
+                "/api/projects/{project_id}/leader/instruct.",
                 "4. Monitor progress via GET /api/projects/{project_id}/leader/progress.",
                 "5. Drive the project to completion by delegating, not by coding directly.",
                 "",
@@ -401,15 +434,25 @@ async def start_leader(
                 await _asyncio.sleep(5)  # wait for pane to initialise
                 try:
                     await _send_leader_msg(db, project_id, kickoff_msg, event_bus=event_bus)
-                    _log.info("Auto-kickoff sent to leader for project %s (attempt %d)", project_id, attempt)
+                    _log.info(
+                        "Auto-kickoff sent to leader for project %s (attempt %d)",
+                        project_id,
+                        attempt,
+                    )
                     return
                 except ValueError as exc:
-                    _log.debug("Auto-kickoff attempt %d for project %s: %s", attempt, project_id, exc)
+                    _log.debug(
+                        "Auto-kickoff attempt %d for project %s: %s", attempt, project_id, exc
+                    )
                     # Pane not ready yet — retry
                 except Exception:
-                    _log.exception("Auto-kickoff failed for project %s on attempt %d", project_id, attempt)
+                    _log.exception(
+                        "Auto-kickoff failed for project %s on attempt %d", project_id, attempt
+                    )
                     return  # non-retryable error
-            _log.warning("Auto-kickoff timed out for project %s after %d attempts", project_id, attempt)
+            _log.warning(
+                "Auto-kickoff timed out for project %s after %d attempts", project_id, attempt
+            )
 
         _asyncio.ensure_future(_kickoff())
 
@@ -427,18 +470,20 @@ async def stop_leader(project_id: str, request: Request) -> dict[str, str]:
 @router.post("/{project_id}/leader/message")
 async def send_leader_message(
     project_id: str, body: LeaderMessageRequest, request: Request
-) -> dict[str, str]:
+) -> dict[str, object]:
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
     try:
-        await leader_ops.send_leader_message(db, project_id, body.message, event_bus=event_bus)
+        result = await leader_ops.send_leader_message(
+            db, project_id, body.message, event_bus=event_bus
+        )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
     except RuntimeError as e:
-        raise HTTPException(
-            status_code=409, detail=f"Leader pane unavailable: {e}"
-        ) from None
-    return {"status": "sent"}
+        raise HTTPException(status_code=409, detail=f"Leader pane unavailable: {e}") from None
+    if isinstance(result, RuntimeDeliveryResult):
+        return {"status": result.status, "delivery": result.as_dict()}
+    return {"status": "delivered"}
 
 
 # ---------------------------------------------------------------------------

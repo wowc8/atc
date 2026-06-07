@@ -17,15 +17,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
-from atc.config import AgentProviderConfig
-from atc.session.ace import (
-    _accept_trust_dialog,
-    _ensure_tmux_session,
-    _kill_pane,
-    _send_session_instruction,
-    _spawn_pane,
-    _spawn_provider_session,
-)
+from atc.runtime.models import InstructionRequest, StopRoleRequest
+from atc.runtime.service import RuntimeService
+from atc.session.ace import _accept_trust_dialog as _accept_trust_dialog  # noqa: F401
+from atc.session.ace import _spawn_provider_session
 from atc.session.state_machine import SessionStatus, transition
 from atc.state import db as db_ops
 from atc.state.db import get_connection_app_state
@@ -33,6 +28,7 @@ from atc.state.db import get_connection_app_state
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
 
+    from atc.config import AgentProviderConfig
     from atc.core.events import EventBus
 
 logger = logging.getLogger(__name__)
@@ -111,7 +107,8 @@ async def start_leader(
             if existing.provider == provider:
                 return leader.session_id
             logger.warning(
-                "Leader session %s provider mismatch on reuse (session=%s current=%s) — refusing reuse",
+                "Leader session %s provider mismatch on reuse "
+                "(session=%s current=%s) — refusing reuse",
                 leader.session_id,
                 existing.provider,
                 provider,
@@ -120,7 +117,8 @@ async def start_leader(
                 conn, leader.session_id, SessionStatus.DISCONNECTED.value
             )
             await conn.execute(
-                "UPDATE leaders SET session_id = NULL, status = 'idle', updated_at = datetime('now') WHERE id = ?",
+                "UPDATE leaders SET session_id = NULL, status = 'idle',"
+                " updated_at = datetime('now') WHERE id = ?",
                 (leader.id,),
             )
             await conn.commit()
@@ -151,10 +149,12 @@ async def start_leader(
         # not a hardcoded default.  Falls back to ATC_API_URL env var / load_settings()
         # via _resolve_api_base_url if settings are unavailable here.
         import os as _os
+
         _api_url = _os.environ.get("ATC_API_URL", "")
         if not _api_url:
             try:
                 from atc.config import load_settings as _ls
+
                 _s = _ls()
                 _api_url = f"http://{_s.server.host}:{_s.server.port}"
             except Exception:
@@ -183,6 +183,7 @@ async def start_leader(
         # Claude Code picks up the leader instructions when starting in the repo.
         if spec.repo_path and Path(spec.repo_path) != deployed.root:
             import shutil as _shutil
+
             dest = Path(spec.repo_path)
             dest.mkdir(parents=True, exist_ok=True)
             claude_md_src = deployed.root / "CLAUDE.md"
@@ -201,6 +202,7 @@ async def start_leader(
         # working_dir does not exist, causing Claude Code to start in the wrong place.
         if spec.repo_path:
             import os as _os
+
             _os.makedirs(spec.repo_path, exist_ok=True)
             logger.info("Ensured repo_path exists: %s", spec.repo_path)
         working_dir = spec.repo_path or str(deployed.root)
@@ -281,11 +283,11 @@ async def stop_leader(
     if session is None:
         return
 
-    # Kill tmux pane
-    if session.tmux_pane:
-        await _kill_pane(session.tmux_pane)
+    await RuntimeService().stop_session_record(
+        session, StopRoleRequest(reason="leader_stop", graceful=True)
+    )
 
-    # Transition session to idle (or just set directly since we killed the pane)
+    # Transition session to idle after provider-neutral stop.
     await db_ops.update_session_status(conn, session.id, SessionStatus.IDLE.value)
 
     if event_bus:
@@ -313,8 +315,8 @@ async def send_leader_message(
     message: str,
     *,
     event_bus: EventBus | None = None,
-) -> None:
-    """Send a message to the Leader's tmux pane."""
+):
+    """Send a message to the Leader through the runtime boundary."""
     leader = await db_ops.get_leader_by_project(conn, project_id)
     if leader is None or leader.session_id is None:
         raise ValueError(f"No active leader for project {project_id}")
@@ -322,12 +324,9 @@ async def send_leader_message(
     session = await db_ops.get_session(conn, leader.session_id)
     if session is None:
         raise ValueError("Leader session not found")
-    if session.tmux_pane is None:
-        raise ValueError("Leader session has no tmux pane")
-
     current = SessionStatus(session.status)
 
-    # Reject sends to sessions that are clearly not running
+    # Reject sends to sessions that are clearly not running.
     if current in (SessionStatus.ERROR, SessionStatus.DISCONNECTED):
         raise ValueError(f"Leader session is {current.value} — stop and restart the leader")
 
@@ -335,12 +334,14 @@ async def send_leader_message(
         await transition(session.id, current, SessionStatus.WORKING, event_bus)
         await db_ops.update_session_status(conn, session.id, SessionStatus.WORKING.value)
 
-    # Verify the pane is alive before sending keys
-    from atc.session.ace import _pane_is_alive
-
-    if not await _pane_is_alive(session.tmux_pane):
-        raise ValueError("Leader tmux pane is dead — stop and restart the leader")
-
-    delivered = await _send_session_instruction(conn, session.id, message)
-    if not delivered:
-        raise ValueError("Leader instruction delivery failed")
+    runtime = RuntimeService()
+    handle = runtime.handle_from_session_record(session)
+    result = await runtime.assign_project_to_leader(
+        handle,
+        InstructionRequest(
+            session_id=session.id,
+            message=message,
+            metadata={"source": "leader_message"},
+        ),
+    )
+    return result
