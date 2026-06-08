@@ -107,7 +107,8 @@ class LeaderOrchestrator:
             project_id=self.project_id,
         )
 
-        ready = get_ready_tasks(task_graphs)
+        active_aces_by_task = await self._active_ace_sessions_by_task()
+        ready = [tg for tg in get_ready_tasks(task_graphs) if tg.id not in active_aces_by_task]
         if not ready:
             return []
 
@@ -124,9 +125,7 @@ class LeaderOrchestrator:
                 )
                 return []
             # Reserve slots atomically before spawning
-            spawnable_count = len(
-                [tg for tg in get_ready_tasks(task_graphs) if tg.id not in self.assignments]
-            )
+            spawnable_count = len([tg for tg in ready if tg.id not in self.assignments])
             slots_to_use = min(available_slots, spawnable_count)
             _GLOBAL_ACTIVE_ACES += slots_to_use
 
@@ -141,6 +140,20 @@ class LeaderOrchestrator:
                 _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
 
         return new_assignments
+
+    async def _active_ace_sessions_by_task(self) -> dict[str, str]:
+        """Return active Ace sessions keyed by task id to preserve 1:1 pairing."""
+        terminal_statuses = {"completed", "cancelled", "error", "disconnected"}
+        sessions = await db_ops.list_sessions(
+            self.conn,
+            project_id=self.project_id,
+            session_type="ace",
+        )
+        return {
+            session.task_id: session.id
+            for session in sessions
+            if session.task_id and session.status not in terminal_statuses
+        }
 
     async def _spawn_ace_for_task(
         self,

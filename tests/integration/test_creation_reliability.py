@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from atc.core.events import EventBus
+from atc.runtime.models import ReadinessState, RoleKind, RuntimeDeliveryResult, RuntimeInspection
 from atc.session.ace import (
     create_ace,
     start_ace,
@@ -79,7 +80,11 @@ class TestDBFirstCreation:
         assert session is not None
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%2"))
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%2"),
+    )
     async def test_session_moves_to_idle_on_success(
         self,
         mock_spawn_provider: AsyncMock,
@@ -96,7 +101,40 @@ class TestDBFirstCreation:
         assert session.tmux_pane == "%2"
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, side_effect=RuntimeError("tmux not available"))
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%2"),
+    )
+    async def test_create_ace_rejects_second_active_session_for_same_task(
+        self,
+        mock_spawn_provider: AsyncMock,
+        conn,
+        event_bus: EventBus,
+    ) -> None:
+        project = await db_ops.create_project(conn, "test-project")
+        task = await db_ops.create_task_graph(conn, project.id, "Task A")
+
+        await create_ace(conn, project.id, "test-ace", event_bus=event_bus, task_id=task.id)
+
+        with pytest.raises(ValueError, match="already has active Ace session"):
+            await create_ace(
+                conn,
+                project.id,
+                "duplicate-ace",
+                event_bus=event_bus,
+                task_id=task.id,
+            )
+
+        sessions = await db_ops.list_sessions(conn, project_id=project.id, session_type="ace")
+        assert len(sessions) == 1
+
+    @pytest.mark.asyncio
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("tmux not available"),
+    )
     async def test_session_moves_to_error_on_failure(
         self,
         mock_spawn_provider: AsyncMock,
@@ -115,7 +153,11 @@ class TestDBFirstCreation:
         assert sessions[0].status == SessionStatus.ERROR.value
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%3"))
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%3"),
+    )
     async def test_creation_event_published(
         self,
         mock_spawn_provider: AsyncMock,
@@ -142,7 +184,11 @@ class TestAtomicInstructionSending:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace._send_session_instruction", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%4"))
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%4"),
+    )
     async def test_start_ace_uses_send_instruction(
         self,
         mock_spawn_provider: AsyncMock,
@@ -150,7 +196,12 @@ class TestAtomicInstructionSending:
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_send.return_value = True
+        mock_send.return_value = RuntimeDeliveryResult(
+            session_id="test-ace",
+            provider_name="codex",
+            role=RoleKind.ACE,
+            status="confirmed",
+        )
 
         project = await db_ops.create_project(conn, "test-project")
         session_id = await create_ace(conn, project.id, "test-ace", event_bus=event_bus)
@@ -161,7 +212,11 @@ class TestAtomicInstructionSending:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace._send_session_instruction", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%5"))
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%5"),
+    )
     async def test_start_ace_errors_on_failed_delivery(
         self,
         mock_spawn_provider: AsyncMock,
@@ -169,13 +224,18 @@ class TestAtomicInstructionSending:
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_send.return_value = False  # delivery failed
+        mock_send.return_value = RuntimeDeliveryResult(
+            session_id="test-ace",
+            provider_name="codex",
+            role=RoleKind.ACE,
+            status="failed",
+        )
 
         project = await db_ops.create_project(conn, "test-project")
         session_id = await create_ace(conn, project.id, "test-ace", event_bus=event_bus)
 
-        with pytest.raises(RuntimeError, match="Failed to deliver instruction"):
-            await start_ace(conn, session_id, instruction="do work", event_bus=event_bus)
+        result = await start_ace(conn, session_id, instruction="do work", event_bus=event_bus)
+        assert result.status == "failed"
 
         # Session should be in error state
         session = await db_ops.get_session(conn, session_id)
@@ -187,16 +247,25 @@ class TestVerificationChecks:
     """Integration tests for the verification checks."""
 
     @pytest.mark.asyncio
-    @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%6"))
+    @patch("atc.session.ace.RuntimeService.inspect_session_record", new_callable=AsyncMock)
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%6"),
+    )
     async def test_verify_session_alive(
         self,
         mock_spawn_provider: AsyncMock,
-        mock_alive: AsyncMock,
+        mock_inspect: AsyncMock,
         conn,
         event_bus: EventBus,
     ) -> None:
-        mock_alive.return_value = True
+        mock_inspect.return_value = RuntimeInspection(
+            session_id="test-ace",
+            provider_name="codex",
+            alive=True,
+            readiness=ReadinessState.READY,
+        )
 
         project = await db_ops.create_project(conn, "test-project")
         session_id = await create_ace(conn, project.id, "test-ace", event_bus=event_bus)
@@ -205,7 +274,11 @@ class TestVerificationChecks:
 
     @pytest.mark.asyncio
     @patch("atc.session.ace._pane_is_alive", new_callable=AsyncMock)
-    @patch("atc.session.ace._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%7"))
+    @patch(
+        "atc.session.ace._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%7"),
+    )
     async def test_verify_session_dead_pane(
         self,
         mock_spawn_provider: AsyncMock,
