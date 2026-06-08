@@ -37,6 +37,28 @@ function transformTerminalOutput(data: string): string {
 /** @deprecated Use transformTerminalOutput instead */
 const transformSeparators = transformTerminalOutput;
 
+interface TerminalViewport {
+  buffer: {
+    active: {
+      baseY: number;
+      viewportY: number;
+    };
+  };
+}
+
+/**
+ * xterm should follow streaming output only while the user is already at the
+ * bottom. If the operator scrolls up to inspect earlier thinking/log lines,
+ * new writes must not yank the viewport back down on every chunk.
+ */
+export function isTerminalViewportAtBottom(
+  term: TerminalViewport,
+  toleranceRows = 1,
+): boolean {
+  const buffer = term.buffer.active;
+  return buffer.baseY - buffer.viewportY <= toleranceRows;
+}
+
 /**
  * Hook that manages an xterm.js Terminal instance and connects it to the
  * ATC WebSocket for streaming PTY output.
@@ -55,10 +77,55 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
   // when write() is called on a terminal that hasn't been opened yet.
   const pendingWritesRef = useRef<string[]>([]);
   const termOpenRef = useRef(false);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const fitFrameRef = useRef<number | null>(null);
+
+  const sendTerminalResize = useCallback((term: Terminal) => {
+    const ws = wsRef.current;
+    const ch = channelRef.current;
+    if (
+      ws?.readyState === WebSocket.OPEN &&
+      ch &&
+      term.cols > 0 &&
+      term.rows > 0
+    ) {
+      ws.send(
+        JSON.stringify({
+          channel: ch,
+          type: "resize",
+          data: { cols: term.cols, rows: term.rows },
+        }),
+      );
+    }
+  }, []);
+
+  const fitTerminal = useCallback(() => {
+    const fit = fitRef.current;
+    const term = termRef.current;
+    if (!fit || !term || !containerRef.current) return;
+    try {
+      fit.fit();
+      sendTerminalResize(term);
+    } catch {
+      // Terminal renderer may not be fully initialized
+    }
+  }, [sendTerminalResize]);
+
+  const scheduleFit = useCallback(() => {
+    if (fitFrameRef.current !== null) {
+      cancelAnimationFrame(fitFrameRef.current);
+    }
+    fitFrameRef.current = requestAnimationFrame(() => {
+      fitFrameRef.current = null;
+      fitTerminal();
+    });
+  }, [fitTerminal]);
 
   const writeToTerminal = useCallback((term: Terminal, data: string) => {
+    const shouldFollowOutput = isTerminalViewportAtBottom(term);
     try {
       term.write(data, () => {
+        if (!shouldFollowOutput) return;
         try {
           term.scrollToBottom();
         } catch {
@@ -125,7 +192,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           try {
-            fit.fit();
+            fitTerminal();
           } catch {
             /* not ready */
           }
@@ -136,27 +203,28 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     }
 
     return () => {
+      if (fitFrameRef.current !== null) {
+        cancelAnimationFrame(fitFrameRef.current);
+        fitFrameRef.current = null;
+      }
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
       termOpenRef.current = false;
       pendingWritesRef.current = [];
     };
-  }, [enabled, flushPendingWrites]);
+  }, [enabled, fitTerminal, flushPendingWrites]);
 
-  // Fit on resize
+  // Fit on browser resize. Container-level resize is handled in attachRef via
+  // ResizeObserver so flex split dragging also refits the xterm dimensions.
   useEffect(() => {
     if (!enabled) return;
-    const handleResize = () => {
-      try {
-        fitRef.current?.fit();
-      } catch {
-        // Terminal renderer may not be fully initialized
-      }
-    };
+    const handleResize = () => scheduleFit();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [enabled]);
+  }, [enabled, scheduleFit]);
 
   // WebSocket connection for terminal channel.
   // The `cancelled` flag gates every callback so that React StrictMode
@@ -170,8 +238,13 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
 
     function connect() {
       if (cancelled) return;
-      const isTauriEnv = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-      const protocol = isTauriEnv ? "ws:" : (window.location.protocol === "https:" ? "wss:" : "ws:");
+      const isTauriEnv =
+        typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+      const protocol = isTauriEnv
+        ? "ws:"
+        : window.location.protocol === "https:"
+          ? "wss:"
+          : "ws:";
       const host = isTauriEnv ? "127.0.0.1:8420" : window.location.host;
       const ws = new WebSocket(`${protocol}//${host}/ws`);
       wsRef.current = ws;
@@ -184,15 +257,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
         ws.send(JSON.stringify({ channel: "subscribe", data: [channel] }));
         // Send initial terminal dimensions so tmux pane matches display
         const term = termRef.current;
-        if (term && term.cols > 0 && term.rows > 0) {
-          ws.send(
-            JSON.stringify({
-              channel,
-              type: "resize",
-              data: { cols: term.cols, rows: term.rows },
-            }),
-          );
-        }
+        if (term) sendTerminalResize(term);
       };
 
       ws.onmessage = (evt) => {
@@ -236,7 +301,7 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [channel, enabled, writeToTerminal]);
+  }, [channel, enabled, sendTerminalResize, writeToTerminal]);
 
   // Handle user input → send to backend via WebSocket
   useEffect(() => {
@@ -273,57 +338,59 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
 
   // Ref callback for container div — handles initial open and re-attach
   // after the container is re-mounted (e.g. minimize → restore).
-  const attachRef = useCallback((el: HTMLDivElement | null) => {
-    containerRef.current = el;
-    if (el && termRef.current) {
-      const term = termRef.current;
-      // If the terminal's element is missing or is a detached DOM node,
-      // re-open on the new container.
-      if (!term.element || !el.contains(term.element)) {
-        term.open(el);
+  const attachRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      containerRef.current = el;
+      if (!el) {
+        resizeObserverRef.current?.disconnect();
+        resizeObserverRef.current = null;
+        return;
       }
-      // Delay fit to ensure container has dimensions.
-      // Double-RAF avoids the xterm.js "Cannot read properties of undefined
-      // (reading 'dimensions')" error that occurs when fit() runs before
-      // the terminal renderer is fully initialized.
-      requestAnimationFrame(() => {
+      if (termRef.current) {
+        const term = termRef.current;
+        // If the terminal's element is missing or is a detached DOM node,
+        // re-open on the new container.
+        if (!term.element || !el.contains(term.element)) {
+          term.open(el);
+        }
+        resizeObserverRef.current?.disconnect();
+        resizeObserverRef.current = null;
+        if (typeof ResizeObserver !== "undefined") {
+          const observer = new ResizeObserver(() => scheduleFit());
+          observer.observe(el);
+          resizeObserverRef.current = observer;
+        }
+        // Delay fit to ensure container has dimensions.
+        // Double-RAF avoids the xterm.js "Cannot read properties of undefined
+        // (reading 'dimensions')" error that occurs when fit() runs before
+        // the terminal renderer is fully initialized.
         requestAnimationFrame(() => {
-          try {
-            fitRef.current?.fit();
-          } catch {
-            // Terminal may not be fully initialized yet — safe to ignore
-          }
-          termOpenRef.current = true;
-          // Send initial dimensions to backend so tmux pane matches
-          const t = termRef.current;
-          const ws = wsRef.current;
-          if (t && ws?.readyState === WebSocket.OPEN && channelRef.current) {
-            ws.send(
-              JSON.stringify({
-                channel: channelRef.current,
-                type: "resize",
-                data: { cols: t.cols, rows: t.rows },
-              }),
-            );
-          }
-          // Flush any data that arrived before the terminal was opened
-          flushPendingWrites();
+          requestAnimationFrame(() => {
+            try {
+              fitTerminal();
+            } catch {
+              // Terminal may not be fully initialized yet — safe to ignore
+            }
+            termOpenRef.current = true;
+            // Send initial dimensions to backend so tmux pane matches
+            const t = termRef.current;
+            if (t) sendTerminalResize(t);
+            // Flush any data that arrived before the terminal was opened
+            flushPendingWrites();
+          });
         });
-      });
-    }
-  }, [flushPendingWrites]);
+      }
+    },
+    [fitTerminal, flushPendingWrites, scheduleFit, sendTerminalResize],
+  );
 
   const writeLine = useCallback((text: string) => {
     termRef.current?.writeln(text);
   }, []);
 
   const fit = useCallback(() => {
-    try {
-      fitRef.current?.fit();
-    } catch {
-      // Guard against fit() before terminal is fully initialized
-    }
-  }, []);
+    fitTerminal();
+  }, [fitTerminal]);
 
   /**
    * Re-send the subscribe message to the backend, triggering a fresh
@@ -350,5 +417,12 @@ export function useTerminal({ channel, enabled = true }: UseTerminalOptions) {
     [channel],
   );
 
-  return { attachRef, terminal: termRef, writeLine, fit, sendInput, requestSnapshot };
+  return {
+    attachRef,
+    terminal: termRef,
+    writeLine,
+    fit,
+    sendInput,
+    requestSnapshot,
+  };
 }
