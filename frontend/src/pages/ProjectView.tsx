@@ -7,7 +7,14 @@ import TaskBoard from "../components/leader/TaskBoard";
 import AceList from "../components/ace/AceList";
 import AceConsole from "../components/ace/AceConsole";
 import ContextHub from "../components/context/ContextHub";
+import type { Session } from "../types";
 import "./ProjectView.css";
+
+export function getProjectAceSessions(sessions: Session[], projectId?: string) {
+  return sessions.filter(
+    (s) => s.project_id === projectId && s.session_type === "ace",
+  );
+}
 
 export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
@@ -15,7 +22,7 @@ export default function ProjectView() {
   const { projects, sessions, leaders, taskGraphs } = state;
 
   const project = projects.find((p) => p.id === id);
-  const projectSessions = sessions.filter((s) => s.project_id === id);
+  const projectAceSessions = getProjectAceSessions(sessions, id);
   const leader = id ? leaders[id] : undefined;
   const projectTaskGraphs = id ? (taskGraphs[id] ?? []) : [];
 
@@ -25,7 +32,7 @@ export default function ProjectView() {
   // If the expanded Ace was removed, collapse back to list
   const expandedAceExists =
     expandedAceId !== null &&
-    projectSessions.some((s) => s.id === expandedAceId);
+    projectAceSessions.some((s) => s.id === expandedAceId);
   const activeAceId = expandedAceExists ? expandedAceId : null;
 
   if (!project) {
@@ -74,7 +81,7 @@ export default function ProjectView() {
             {activeAceId ? (
               <AceConsole
                 projectId={project.id}
-                sessions={projectSessions}
+                sessions={projectAceSessions}
                 activeAceId={activeAceId}
                 onRefresh={fetchAll}
                 onSelectAce={(sid) => setExpandedAceId(sid)}
@@ -83,7 +90,7 @@ export default function ProjectView() {
             ) : (
               <AceList
                 projectId={project.id}
-                sessions={projectSessions}
+                sessions={projectAceSessions}
                 onRefresh={fetchAll}
                 onExpand={(sid) => setExpandedAceId(sid)}
                 compact
