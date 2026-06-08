@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from atc.providers.registry import create_provider_runtime, runtime_kwargs_for_provider
@@ -9,7 +10,9 @@ from atc.runtime.errors import RuntimeInvocationError
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
+    ReadinessState,
     RoleKind,
+    RuntimeBlockReason,
     RuntimeDeliveryResult,
     RuntimeInspection,
     RuntimeSessionHandle,
@@ -28,6 +31,11 @@ from atc.runtime.tracing import (
     trace_event,
 )
 from atc.state.db import get_connection_app_state
+
+_STARTUP_INITIAL_DELAY_SECONDS = 2.0
+_STARTUP_RESOLVE_DELAY_SECONDS = 1.0
+_STARTUP_FINAL_DELAY_SECONDS = 1.0
+_STARTUP_AUTO_RESOLVE_REASONS = {RuntimeBlockReason.TRUST}
 
 if TYPE_CHECKING:
     from atc.providers.base import ProviderRuntime
@@ -189,7 +197,9 @@ class RuntimeService:
             )
             raise
         self._append_spawned_event(request, handle, trace_id)
-        return self.remember_handle(handle)
+        handle = self.remember_handle(handle)
+        await self._initialize_spawned_session(request, handle, trace_id, provider)
+        return handle
 
     async def send_instruction(
         self,
@@ -366,7 +376,135 @@ class RuntimeService:
             )
             raise
         self._append_spawned_event(request, handle, trace_id)
-        return self.remember_handle(handle)
+        handle = self.remember_handle(handle)
+        await self._initialize_spawned_session(request, handle, trace_id, provider)
+        return handle
+
+    async def _initialize_spawned_session(
+        self,
+        request: StartRoleRequest,
+        handle: RuntimeSessionHandle,
+        trace_id: str,
+        provider: ProviderRuntime,
+    ) -> None:
+        """Run the shared post-spawn handshake before any role receives work.
+
+        Tower, Leader, and Ace panes all boot through provider TUIs. Give the
+        TUI time to draw, inspect for startup blockers, auto-answer the narrow
+        set of known safe prompts, then inspect again so callers do not send
+        instructions into a trust/auth/permission question.
+        """
+        await asyncio.sleep(_STARTUP_INITIAL_DELAY_SECONDS)
+        first = await provider.inspect_session(handle)
+        self._append_startup_inspection_event(
+            request,
+            handle,
+            trace_id,
+            first,
+            phase="initial",
+        )
+        if first.readiness is ReadinessState.BLOCKED:
+            resolved = await self._try_resolve_startup_prompt(handle, first)
+            if resolved:
+                await asyncio.sleep(_STARTUP_RESOLVE_DELAY_SECONDS)
+                second = await provider.inspect_session(handle)
+                self._append_startup_inspection_event(
+                    request,
+                    handle,
+                    trace_id,
+                    second,
+                    phase="after_auto_resolve",
+                )
+                await asyncio.sleep(_STARTUP_FINAL_DELAY_SECONDS)
+                final = await provider.inspect_session(handle)
+                self._append_startup_inspection_event(
+                    request,
+                    handle,
+                    trace_id,
+                    final,
+                    phase="final",
+                )
+                return
+        await asyncio.sleep(_STARTUP_FINAL_DELAY_SECONDS)
+        final = await provider.inspect_session(handle)
+        self._append_startup_inspection_event(
+            request,
+            handle,
+            trace_id,
+            final,
+            phase="final",
+        )
+
+    @staticmethod
+    async def _try_resolve_startup_prompt(
+        handle: RuntimeSessionHandle,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        if inspection.block_reason not in _STARTUP_AUTO_RESOLVE_REASONS:
+            return False
+        if not handle.tmux_pane:
+            return False
+        from atc.runtime.tmux.substrate import run_tmux
+
+        await run_tmux("send-keys", "-t", handle.tmux_pane, "Enter")
+        return True
+
+    @staticmethod
+    def _append_startup_inspection_event(
+        request: StartRoleRequest,
+        handle: RuntimeSessionHandle,
+        trace_id: str,
+        inspection: RuntimeInspection,
+        *,
+        phase: str,
+    ) -> None:
+        if inspection.readiness is ReadinessState.BLOCKED:
+            verdict = DeliveryVerdict.BLOCKED
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                reason_code = DeliveryReasonCode.TRUST_REQUIRED
+            elif inspection.block_reason in {RuntimeBlockReason.AUTH, RuntimeBlockReason.LOGIN}:
+                reason_code = DeliveryReasonCode.AUTH_REQUIRED
+            elif inspection.block_reason is RuntimeBlockReason.PERMISSION:
+                reason_code = DeliveryReasonCode.PERMISSION_REQUIRED
+            else:
+                reason_code = DeliveryReasonCode.UNKNOWN_PROMPT_BLOCKER
+        elif inspection.readiness is ReadinessState.ERROR:
+            verdict = DeliveryVerdict.FAILED
+            reason_code = DeliveryReasonCode.PROVIDER_ERROR
+        elif inspection.readiness is ReadinessState.STOPPED:
+            verdict = DeliveryVerdict.FAILED
+            reason_code = DeliveryReasonCode.PANE_MISSING
+        else:
+            verdict = DeliveryVerdict.ACCEPTED
+            reason_code = DeliveryReasonCode.SESSION_RUNNING
+        append_trace_event(
+            request.metadata,
+            trace_event(
+                trace_id=trace_id,
+                session_id=handle.session_id,
+                role=handle.role.value,
+                provider=handle.provider_name,
+                pane_id=handle.tmux_pane,
+                action=DeliveryAction.SPAWN,
+                stage=DeliveryStage.CONFIRMED_RUNNING
+                if verdict is DeliveryVerdict.ACCEPTED
+                else DeliveryStage.BLOCKED
+                if verdict is DeliveryVerdict.BLOCKED
+                else DeliveryStage.FAILED,
+                verdict=verdict,
+                reason_code=reason_code,
+                prompt_state_after=inspection.readiness.value,
+                first_output_excerpt=inspection.last_output_excerpt,
+                details={
+                    "startup_phase": phase,
+                    "summary": inspection.summary,
+                    "block_reason": inspection.block_reason.value
+                    if inspection.block_reason is not None
+                    else None,
+                    **inspection.details,
+                },
+            ),
+        )
 
     async def _stop_role(
         self,

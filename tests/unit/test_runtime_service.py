@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import atc.runtime.service as runtime_service_module
 from atc.providers.registry import register_provider_runtime
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
     ReadinessState,
     RoleKind,
+    RuntimeBlockReason,
     RuntimeInspection,
     RuntimeSessionHandle,
     RuntimeTransport,
@@ -18,6 +20,10 @@ from atc.runtime.models import (
 )
 from atc.runtime.service import RuntimeService
 from atc.state.db import clear_connection_app_state, set_connection_app_state
+
+runtime_service_module._STARTUP_INITIAL_DELAY_SECONDS = 0.0
+runtime_service_module._STARTUP_RESOLVE_DELAY_SECONDS = 0.0
+runtime_service_module._STARTUP_FINAL_DELAY_SECONDS = 0.0
 
 
 class DummyProviderRuntime:
@@ -233,10 +239,102 @@ def test_runtime_service_spawn_existing_session_adds_trace_events() -> None:
     asyncio.run(service.spawn_existing_session(request))
 
     events = request.metadata["delivery_trace_events"]
-    assert [event["stage"] for event in events] == ["queued", "spawn_started", "spawned"]
+    assert [event["stage"] for event in events[:3]] == ["queued", "spawn_started", "spawned"]
     assert events[-1]["action"] == "spawn"
     assert events[-1]["verdict"] == "accepted"
-    assert events[-1]["reason_code"] == "pane_spawned"
+    assert events[-1]["reason_code"] == "session_running"
+    assert events[-1]["details"]["startup_phase"] == "final"
+
+
+def test_runtime_service_startup_handshake_traces_blocked_auth_without_auto_answer() -> None:
+    class AuthBlockedProvider(DummyProviderRuntime):
+        async def inspect_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
+            return RuntimeInspection(
+                session_id=handle.session_id,
+                provider_name=handle.provider_name,
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.AUTH,
+                summary="Blocked on authentication",
+            )
+
+    register_provider_runtime("dummy_runtime_auth_blocked", AuthBlockedProvider)
+    service = RuntimeService()
+    request = StartRoleRequest(
+        session_id="sess-auth-blocked-1",
+        provider_name="dummy_runtime_auth_blocked",
+        role=RoleKind.LEADER,
+    )
+
+    asyncio.run(service.spawn_existing_session(request))
+
+    events = request.metadata["delivery_trace_events"]
+    assert events[-1]["stage"] == "blocked"
+    assert events[-1]["verdict"] == "blocked"
+    assert events[-1]["reason_code"] == "auth_required"
+    assert events[-1]["details"]["startup_phase"] == "final"
+
+
+def test_runtime_service_startup_handshake_auto_resolves_trust(monkeypatch) -> None:
+    send_keys: list[tuple[str, ...]] = []
+
+    async def fake_run_tmux(*args: str) -> str:
+        send_keys.append(args)
+        return ""
+
+    class TrustThenReadyProvider(DummyProviderRuntime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.inspect_count = 0
+
+        async def spawn_existing_session(self, request: StartRoleRequest) -> RuntimeSessionHandle:
+            self.spawned_existing.append(request)
+            return RuntimeSessionHandle(
+                session_id=request.session_id,
+                provider_name=request.provider_name,
+                role=request.role,
+                transport=RuntimeTransport.TMUX,
+                tmux_pane="%42",
+            )
+
+        async def inspect_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
+            self.inspect_count += 1
+            if self.inspect_count == 1:
+                return RuntimeInspection(
+                    session_id=handle.session_id,
+                    provider_name=handle.provider_name,
+                    alive=True,
+                    readiness=ReadinessState.BLOCKED,
+                    block_reason=RuntimeBlockReason.TRUST,
+                    summary="Blocked on trust prompt",
+                )
+            return RuntimeInspection(
+                session_id=handle.session_id,
+                provider_name=handle.provider_name,
+                alive=True,
+                readiness=ReadinessState.READY,
+                summary="Ready",
+            )
+
+    monkeypatch.setattr("atc.runtime.tmux.substrate.run_tmux", fake_run_tmux)
+    register_provider_runtime("dummy_runtime_trust_then_ready", TrustThenReadyProvider)
+    service = RuntimeService()
+    request = StartRoleRequest(
+        session_id="sess-trust-1",
+        provider_name="dummy_runtime_trust_then_ready",
+        role=RoleKind.ACE,
+    )
+
+    asyncio.run(service.spawn_existing_session(request))
+
+    assert send_keys == [("send-keys", "-t", "%42", "Enter")]
+    phases = [
+        event["details"].get("startup_phase")
+        for event in request.metadata["delivery_trace_events"]
+    ]
+    assert "initial" in phases
+    assert "after_auto_resolve" in phases
+    assert "final" in phases
 
 
 def test_runtime_service_send_instruction_adds_queued_trace_event() -> None:

@@ -13,6 +13,7 @@ from atc.state.db import (
     _SCHEMA_SQL,
     create_leader,
     create_project,
+    create_session,
     create_task_graph,
     get_connection,
     get_project,
@@ -128,9 +129,12 @@ class TestSpawnAces:
         call_kwargs = mock_create.call_args
         assert call_kwargs is not None
         from atc.agents.factory import get_launch_command
+
         project = await get_project(db, orchestrator.project_id)
         assert project is not None
-        assert call_kwargs.kwargs.get("launch_command") == get_launch_command(project.agent_provider)
+        assert call_kwargs.kwargs.get("launch_command") == get_launch_command(
+            project.agent_provider
+        )
 
     async def test_skips_tasks_with_unmet_deps(
         self,
@@ -193,6 +197,49 @@ class TestSpawnAces:
 
         assignments = await orchestrator.spawn_aces_for_ready_tasks()
         assert len(assignments) == 0
+
+    async def test_skip_task_with_active_ace_session_row(
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        """A task may have only one active Ace, even after orchestrator reloads."""
+        tg = await create_task_graph(db, orchestrator.project_id, "Task A")
+        await create_session(
+            db,
+            orchestrator.project_id,
+            "ace",
+            "ace-task-a",
+            task_id=tg.id,
+            status="idle",
+        )
+
+        assignments = await orchestrator.spawn_aces_for_ready_tasks()
+
+        assert assignments == []
+        mock_create.assert_not_called()
+
+    async def test_allows_new_ace_when_existing_task_ace_is_terminal(
+        self,
+        mock_create: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        tg = await create_task_graph(db, orchestrator.project_id, "Task A")
+        await create_session(
+            db,
+            orchestrator.project_id,
+            "ace",
+            "ace-task-a-old",
+            task_id=tg.id,
+            status="error",
+        )
+
+        assignments = await orchestrator.spawn_aces_for_ready_tasks()
+
+        assert len(assignments) == 1
+        mock_create.assert_called_once()
 
     async def test_marks_task_in_progress(
         self,
@@ -396,7 +443,9 @@ class TestSpawnRetryAssignmentReuse:
         from atc.state import db as db_ops
 
         tg = await create_task_graph(db, orchestrator.project_id, "Task Retry")
-        first, created = await db_ops.assign_task(db, tg.id, "ace-old", f"{orchestrator.leader_id}:{tg.id}")
+        first, created = await db_ops.assign_task(
+            db, tg.id, "ace-old", f"{orchestrator.leader_id}:{tg.id}"
+        )
         assert created is True
         updated = await db_ops.update_task_assignment_status(db, first.assignment_id, "working")
         assert updated is not None
@@ -410,7 +459,10 @@ class TestSpawnRetryAssignmentReuse:
         with (
             patch("atc.leader.orchestrator.create_ace", new=AsyncMock(return_value="ace-new")),
             patch("atc.leader.orchestrator.get_launch_command", return_value="claude"),
-            patch("atc.leader.orchestrator.build_context_package", new=AsyncMock(return_value={"context_entries": []})),
+            patch(
+                "atc.leader.orchestrator.build_context_package",
+                new=AsyncMock(return_value={"context_entries": []}),
+            ),
         ):
             assignment = await orchestrator._spawn_ace_for_task(tg.id, tg.title, tg.description)
 
@@ -495,6 +547,7 @@ class TestMarkTaskDone:
         """
         import atc.leader.orchestrator as orch_mod
         from atc.state import db as db_ops
+
         tg = await create_task_graph(db, orchestrator.project_id, "Task A")
         # Advance through state machine so mark_task_done can mark it done
         await db_ops.update_task_graph_status(db, tg.id, "assigned")
@@ -550,11 +603,9 @@ class TestMarkTaskFailed:
         assert len(captured) == 1
         assert captured[0]["reason"] == "Test failure"
 
-
-# ---------------------------------------------------------------------------
-# get_progress
-# ---------------------------------------------------------------------------
-
+    # ---------------------------------------------------------------------------
+    # get_progress
+    # ---------------------------------------------------------------------------
 
     async def test_failed_counter_decremented_without_in_memory_assignment(
         self,
@@ -564,6 +615,7 @@ class TestMarkTaskFailed:
     ) -> None:
         """Bug #163: mark_task_failed must also decrement counter unconditionally."""
         import atc.leader.orchestrator as orch_mod
+
         tg = await create_task_graph(db, orchestrator.project_id, "Task Fail")
 
         orch_mod._GLOBAL_ACTIVE_ACES = 2

@@ -356,6 +356,24 @@ async def create_ace(
         deploy_spec_kwargs: If provided, deploy Ace config files (CLAUDE.md,
             hooks, settings.json) using the real session_id after DB creation.
     """
+    # Keep task execution one-to-one: a task graph entry may have at most one
+    # non-terminal Ace session. Retry paths should reuse/reset the existing Ace
+    # instead of creating extra unpaired workers for the same task.
+    if task_id:
+        existing_sessions = await db_ops.list_sessions(
+            conn,
+            project_id=project_id,
+            session_type="ace",
+        )
+        for existing in existing_sessions:
+            if existing.task_id != task_id:
+                continue
+            if existing.status in {"completed", "cancelled", "error", "disconnected"}:
+                continue
+            raise ValueError(
+                f"Task {task_id} already has active Ace session {existing.id}"
+            )
+
     # Step 1: DB row first — guarantees the UI always sees every entity
     provider_cfg = get_connection_app_state(conn)
     project = await db_ops.get_project(conn, project_id) if project_id else None
