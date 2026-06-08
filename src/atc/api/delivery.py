@@ -62,7 +62,7 @@ def delivery_response(
             recovery=recovery,
         ).model_dump(exclude_none=True)
 
-    state = result.status
+    state = "submitted" if result.status == "accepted" else result.status
     return DeliveryStatusResponse(
         status=state,
         delivery_state=state,

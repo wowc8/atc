@@ -157,3 +157,39 @@ class TestAceLifecycle:
     def test_destroy_nonexistent_session(self, mock_tmux: AsyncMock, client: TestClient) -> None:
         resp = client.delete("/api/aces/nonexistent")
         assert resp.status_code == 404
+
+    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
+    def test_start_ace_surfaces_blocked_delivery(
+        self, mock_send: AsyncMock, mock_tmux: AsyncMock, client: TestClient
+    ) -> None:
+        mock_tmux.return_value = "%1"
+        mock_send.return_value = RuntimeDeliveryResult(
+            session_id="session-test",
+            provider_name="codex",
+            role=RoleKind.ACE,
+            status="blocked",
+            stage="interrupted",
+            verdict="blocked",
+            reason_code="auth_required",
+            message="auth required",
+        )
+
+        resp = client.post("/api/projects", json={"name": "blocked-ace-proj"})
+        project_id = resp.json()["id"]
+        resp = client.post(
+            f"/api/projects/{project_id}/aces",
+            json={"name": "worker-blocked"},
+        )
+        session_id = resp.json()["id"]
+
+        resp = client.post(
+            f"/api/aces/{session_id}/start",
+            json={"instruction": "do blocked work"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "blocked"
+        assert data["delivery_state"] == "blocked"
+        assert data["delivery"]["reason_code"] == "auth_required"
+        assert "inspect Ace runtime" in data["recovery"]

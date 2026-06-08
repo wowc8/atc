@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from atc.config import load_settings
 from atc.leader.context_package import build_context_package
 from atc.leader.leader import send_leader_message, start_leader, stop_leader
-from atc.runtime.models import RuntimeDeliveryResult
+from atc.runtime.models import RoleKind, RuntimeDeliveryResult
 from atc.session.state_machine import SessionStatus
 from atc.state import db as db_ops
 from atc.tower.session import send_tower_message, start_tower_session, stop_tower_session
@@ -380,7 +380,7 @@ class TowerController:
             )
 
             # Send kickoff and start background verification loop
-            await self._send_leader_kickoff(leader_session_id, goal)
+            kickoff_delivery = await self._send_leader_kickoff(leader_session_id, goal)
             asyncio.create_task(self._verify_leader_started(project_id, leader_session_id, goal))
 
             # Notify Tower's own Claude session so it knows a Leader is running
@@ -390,6 +390,24 @@ class TowerController:
                 asyncio.create_task(
                     self._notify_tower_goal_started(project_id, leader_session_id, goal)
                 )
+
+            if _delivery_failed(kickoff_delivery):
+                return {
+                    "status": kickoff_delivery.status,
+                    "delivery_state": kickoff_delivery.status,
+                    "message": kickoff_delivery.message
+                    or f"Leader kickoff {kickoff_delivery.status}",
+                    "project_id": project_id,
+                    "session_id": self._current_session_id,
+                    "leader_session_id": leader_session_id,
+                    "context_package": context_package,
+                    "provider": kickoff_delivery.provider_name,
+                    "delivery": kickoff_delivery.as_dict(),
+                    "recovery": (
+                        "inspect Leader runtime/session status before assuming "
+                        "kickoff delivery"
+                    ),
+                }
 
             return {
                 "status": "queued",
@@ -590,10 +608,12 @@ class TowerController:
             logger.exception("Failed to respawn leader for project %s", project_id)
             return None
 
-    async def _send_leader_kickoff(self, session_id: str, goal: str) -> None:
+    async def _send_leader_kickoff(
+        self, session_id: str, goal: str
+    ) -> RuntimeDeliveryResult | None:
         """Send the initial kickoff message to the Leader pane, including context."""
         if not self._current_project_id:
-            return
+            return None
         try:
             # Fetch project metadata and context entries for a rich kickoff prompt
             cursor = await self._db.execute(
@@ -649,10 +669,7 @@ class TowerController:
                     event_bus=self._event_bus,
                 )
                 if _delivery_failed(delivery):
-                    raise ValueError(
-                        delivery.message
-                        or f"Leader instruction {delivery.status}: {delivery.reason_code}"
-                    )
+                    return delivery
             except ValueError as exc:
                 # Pane died between spawn and kickoff — respawn once and retry
                 err_msg = str(exc).lower()
@@ -671,10 +688,9 @@ class TowerController:
                             event_bus=self._event_bus,
                         )
                         if _delivery_failed(retry_delivery):
-                            raise ValueError(
-                                retry_delivery.message or "Leader kickoff retry delivery failed"
-                            ) from exc
+                            return retry_delivery
                         session_id = new_id
+                        delivery = retry_delivery
                     else:
                         raise
                 else:
@@ -684,8 +700,19 @@ class TowerController:
                 session_id,
                 self._current_project_id,
             )
-        except Exception:
+            return delivery
+        except Exception as exc:
             logger.exception("Failed to send kickoff to leader session %s", session_id)
+            return RuntimeDeliveryResult(
+                session_id=session_id,
+                provider_name="unknown",
+                role=RoleKind.LEADER,
+                status="failed",
+                stage="kickoff",
+                verdict="failed",
+                reason_code="kickoff_failed",
+                message=str(exc),
+            )
 
     async def _verify_leader_started(self, project_id: str, session_id: str, goal: str) -> None:
         """Background loop: verify the Leader acknowledged and started working.
