@@ -323,6 +323,10 @@ class LeaderOrchestrator:
             instruction=instruction,
             event_bus=self.event_bus,
         )
+        if not result.ok:
+            assignment.status = "assigned"
+            return result
+
         assignment.status = "working"
         if assignment.assignment_id:
             try:

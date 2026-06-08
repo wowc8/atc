@@ -343,19 +343,25 @@ def test_tower_driven_project_flow_manages_leader_and_ace(client: TestClient) ->
         json={"title": "phase8 tower-managed ace task"},
     ).json()
 
-    with patch.object(
-        RuntimeService,
-        "send_instruction",
-        new_callable=AsyncMock,
-        return_value=RuntimeDeliveryResult(
-            session_id="ace-phase8",
-            provider_name="codex",
-            role=RoleKind.ACE,
-            status="confirmed",
-            stage="agent_output_observed",
-            verdict="confirmed",
-            reason_code="agent_output",
-            trace_id="phase8-confirmed",
+    with (
+        patch(
+            "atc.tracking.resources.ResourceGovernor.get_system_usage",
+            return_value=(0.0, 0.0),
+        ),
+        patch.object(
+            RuntimeService,
+            "send_instruction",
+            new_callable=AsyncMock,
+            return_value=RuntimeDeliveryResult(
+                session_id="ace-phase8",
+                provider_name="codex",
+                role=RoleKind.ACE,
+                status="confirmed",
+                stage="agent_output_observed",
+                verdict="confirmed",
+                reason_code="agent_output",
+                trace_id="phase8-confirmed",
+            ),
         ),
     ):
         start = client.post(
@@ -384,3 +390,77 @@ def test_tower_driven_project_flow_manages_leader_and_ace(client: TestClient) ->
     assert refreshed.status_code == 200
     assert refreshed.json()["assigned_ace_id"] == spawned[0]["ace_session_id"]
     assert refreshed.json()["status"] in {"assigned", "in_progress"}
+
+
+def test_blocked_ace_instruction_preserves_assignment_for_operator_resolution(
+    client: TestClient,
+) -> None:
+    """Blocked runtime prompts must not fail/destroy the Ace before operator action."""
+
+    project = client.post(
+        "/api/projects",
+        json={"name": "phase8 blocked ace", "agent_provider": "codex"},
+    ).json()
+    task = client.post(
+        f"/api/projects/{project['id']}/task-graphs",
+        json={"title": "blocked trust prompt task"},
+    ).json()
+
+    with (
+        patch(
+            "atc.tracking.resources.ResourceGovernor.get_system_usage",
+            return_value=(0.0, 0.0),
+        ),
+        patch.object(
+            RuntimeService,
+            "send_instruction",
+            new_callable=AsyncMock,
+            return_value=RuntimeDeliveryResult(
+                session_id="ace-phase8-blocked",
+                provider_name="codex",
+                role=RoleKind.ACE,
+                status="blocked",
+                stage="blocked",
+                verdict="blocked",
+                reason_code="trust_required",
+                trace_id="phase8-blocked",
+            ),
+        ),
+    ):
+        start = client.post(
+            f"/api/projects/{project['id']}/leader/start",
+            json={"goal": "Phase 8 blocked scenario", "auto_kickoff": False},
+        )
+        assert start.status_code == 200
+
+        spawn = client.post(f"/api/projects/{project['id']}/leader/spawn-aces", json={})
+        assert spawn.status_code == 200
+        spawned = spawn.json()["spawned"]
+        assert spawned
+        ace_session_id = spawned[0]["ace_session_id"]
+
+        instruct = client.post(
+            f"/api/projects/{project['id']}/leader/instruct",
+            json={
+                "task_graph_id": task["id"],
+                "instruction": "This should block on trust, not fail the Ace.",
+            },
+        )
+        assert instruct.status_code == 200
+        assert instruct.json()["delivery_state"] == "blocked"
+
+    refreshed = client.get(f"/api/task-graphs/{task['id']}")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["assigned_ace_id"] == ace_session_id
+    assert refreshed.json()["status"] == "in_progress"
+
+    aces = client.get(f"/api/projects/{project['id']}/aces")
+    assert aces.status_code == 200
+    ace = next(item for item in aces.json() if item["id"] == ace_session_id)
+    assert ace["status"] == "waiting"
+
+    progress = client.get(f"/api/projects/{project['id']}/leader/progress")
+    assert progress.status_code == 200
+    assignments = progress.json()["assignments"]
+    assert assignments[0]["task_graph_id"] == task["id"]
+    assert assignments[0]["status"] == "assigned"
