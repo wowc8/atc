@@ -49,6 +49,7 @@ def _build_manager_deploy_spec(
     goal: str,
     *,
     project_id: str | None = None,
+    session_id: str | None = None,
     repo_path: str | None = None,
     github_repo: str | None = None,
     context_entries: list[dict[str, Any]] | None = None,
@@ -60,6 +61,7 @@ def _build_manager_deploy_spec(
         project_name=project_name,
         goal=goal,
         project_id=project_id,
+        session_id=session_id,
         repo_path=repo_path,
         github_repo=github_repo,
         context_entries=context_entries or [],
@@ -164,13 +166,12 @@ async def start_leader(
             project_name=ctx.get("project_name") or (project.name if project else ""),
             goal=goal or leader.goal or "",
             project_id=project_id,
+            session_id=session.id,
             repo_path=ctx.get("repo_path") or (project.repo_path if project else None),
             github_repo=ctx.get("github_repo") or (project.github_repo if project else None),
             context_entries=ctx.get("context_entries"),
             api_base_url=_api_url,
         )
-        # Pass the real session_id so hooks reference the correct ID
-        spec.session_id = session.id
         deployed = deploy_manager_files(spec)
         logger.info(
             "Deployed manager config for leader %s (session %s) → %s",

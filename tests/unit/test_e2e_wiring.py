@@ -57,11 +57,15 @@ class TestBuildManagerDeploySpec:
             leader_id="leader-1",
             project_name="Phoenix",
             goal="Ship the MVP",
+            project_id="project-1",
+            session_id="session-1",
             repo_path="/home/user/phoenix",
             github_repo="acme/phoenix",
         )
         assert isinstance(spec, ManagerDeploySpec)
         assert spec.leader_id == "leader-1"
+        assert spec.project_id == "project-1"
+        assert spec.session_id == "session-1"
         assert spec.project_name == "Phoenix"
         assert spec.goal == "Ship the MVP"
         assert spec.repo_path == "/home/user/phoenix"
@@ -135,6 +139,8 @@ class TestTowerToLeaderWiring:
         assert isinstance(spec, ManagerDeploySpec)
         assert spec.goal == "Build feature X"
         assert spec.project_name == "test-proj"
+        assert spec.session_id is not None
+        assert spec.session_id != spec.leader_id
 
     @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
     @patch("atc.leader.leader.deploy_manager_files")

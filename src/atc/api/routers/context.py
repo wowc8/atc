@@ -289,9 +289,27 @@ async def list_session_context(
     if effective_scope not in _VALID_SCOPES:
         raise HTTPException(status_code=422, detail=f"Invalid scope: {effective_scope}")
 
-    entries = await db_ops.list_context_entries_by_scope(
-        db, effective_scope, session_id=session_id,
-    )
+    if scope is None:
+        # Default helper behavior should mirror what the agent can actually
+        # see: Leaders inherit global + project context plus their own session
+        # entries; Aces inherit global + project + parent Leader + own entries.
+        # Project-level goal entries shown in the UI must therefore be visible
+        # from deployed context_read.sh scripts too.
+        parent_session_id = None
+        if effective_scope == "ace":
+            leader = await db_ops.get_leader_by_project(db, session.project_id)
+            parent_session_id = leader.session_id if leader else None
+        entries = await db_ops.get_context_for_agent(
+            db,
+            effective_scope,
+            project_id=session.project_id,
+            session_id=session_id,
+            parent_session_id=parent_session_id,
+        )
+    else:
+        entries = await db_ops.list_context_entries_by_scope(
+            db, effective_scope, session_id=session_id,
+        )
     if restricted is not None:
         entries = [e for e in entries if e.restricted is restricted]
     if key is not None:

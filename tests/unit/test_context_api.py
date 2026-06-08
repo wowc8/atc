@@ -9,13 +9,13 @@ import pytest
 from atc.state.db import (
     _SCHEMA_SQL,
     create_context_entry,
+    create_leader,
     create_project,
     create_session,
     get_connection,
     get_context_entry,
     run_migrations,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -425,7 +425,6 @@ async def http_db():
 @pytest.fixture
 def http_app(http_db):
     """FastAPI app with db wired into state."""
-    from unittest.mock import MagicMock
 
     from fastapi import FastAPI
 
@@ -708,6 +707,27 @@ class TestHTTPSessionEndpoints:
         assert resp.status_code == 200
         assert len(resp.json()) == 1
         assert resp.json()[0]["scope"] == "leader"
+
+    async def test_leader_session_context_inherits_project_goal(self, client, http_db) -> None:
+        project = await create_project(http_db, "portfolio")
+        session = await create_session(http_db, project.id, "manager", "leader-1")
+        await create_leader(http_db, project.id, goal="Build a profile page portfolio")
+        await create_context_entry(
+            http_db,
+            "project",
+            "goal",
+            "text",
+            "Build a profile page portfolio",
+            project_id=project.id,
+            updated_by="tower",
+        )
+
+        resp = await client.get(f"/api/sessions/{session.id}/context")
+
+        assert resp.status_code == 200
+        keys = {entry["key"]: entry for entry in resp.json()}
+        assert keys["goal"]["scope"] == "project"
+        assert keys["goal"]["value"] == "Build a profile page portfolio"
 
     async def test_filter_session_by_restricted(self, client, http_db) -> None:
         project = await create_project(http_db, "test-proj")
