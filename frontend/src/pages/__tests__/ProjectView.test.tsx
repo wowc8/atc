@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppProvider } from "../../context/AppContext";
-import ProjectView from "../ProjectView";
+import ProjectView, { getProjectAceSessions } from "../ProjectView";
+import type { Session } from "../../types";
 
 // Mock WebSocket
 class MockWebSocket {
@@ -41,6 +42,25 @@ function renderProjectView(projectId = "test-id") {
   );
 }
 
+function session(overrides: Partial<Session>): Session {
+  return {
+    id: "session-id",
+    project_id: "test-id",
+    session_type: "ace",
+    name: "Ace",
+    status: "idle",
+    task_id: null,
+    host: null,
+    tmux_session: null,
+    tmux_pane: null,
+    alternate_on: false,
+    auto_accept: false,
+    created_at: "2026-06-08T00:00:00Z",
+    updated_at: "2026-06-08T00:00:00Z",
+    ...overrides,
+  };
+}
+
 describe("ProjectView", () => {
   it("renders the project view", () => {
     renderProjectView();
@@ -63,5 +83,20 @@ describe("ProjectView", () => {
     renderProjectView();
     // The task board renders even with empty tasks
     expect(screen.getByTestId("project-view")).toBeInTheDocument();
+  });
+
+  it("passes only Ace sessions to the Project Aces panel", () => {
+    const visible = getProjectAceSessions(
+      [
+        session({ id: "tower", name: "tower-codex", session_type: "tower" }),
+        session({ id: "leader", name: "leader", session_type: "manager" }),
+        session({ id: "ace", name: "Scaffold Ace", session_type: "ace" }),
+        session({ id: "other", project_id: "other-project", session_type: "ace" }),
+      ],
+      "test-id",
+    );
+
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.name).toBe("Scaffold Ace");
   });
 });
