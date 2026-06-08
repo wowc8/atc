@@ -43,6 +43,14 @@ Phase validation must include Playwright verification on the Mac Studio for both
 - **Changed behavior:** every UI-visible or workflow-visible behavior touched by the phase, with screenshots and a written pass/fail report.
 - **Baseline regression coverage:** a stable smoke path that proves core ATC functionality has not drifted, including app boot, dashboard/project navigation, Tower as the operator-facing surface, Codex/default-provider expectations, Tower Start without an active project, and a Tower-driven Leader/Ace orchestration path when safe to run.
 
+Any phase that touches Tower/Leader/Ace orchestration, task assignment, runtime delivery, tmux/provider spawning, lifecycle state, reconnect/reconcile behavior, or task progress must also prove **Ace execution truth** before merge and again post-merge:
+
+- Tower drives the flow through a Leader; normal product validation must not shortcut directly from the operator/assistant to an Ace.
+- A Leader-created task assignment produces or reuses a live `ace` session, not a Tower/Leader/manager session masquerading as the assignee.
+- The task graph/assignment state points to that live Ace session and uses allowed lifecycle transitions.
+- Runtime delivery evidence shows the Ace received the assignment/instruction and is working it, or reports a classified blocked state with a stable reason code and operator action.
+- Evidence includes API/session/task state plus Playwright screenshots/report paths; `202 Accepted`, `sent`, or “session row exists” is not sufficient proof.
+
 Playwright evidence should be stored under a timestamped project-local `screenshots/` or `test-results/` directory and reported with absolute paths. Console errors, failed network requests, blocked provider/runtime prompts, and any skipped destructive workflow steps must be recorded explicitly. If Playwright cannot complete because of environment/auth/provider state, that blocker must be treated as unfinished phase work, not ignored.
 
 ## Phase 0 — Baseline validation and docs alignment
