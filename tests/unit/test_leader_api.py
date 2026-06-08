@@ -282,3 +282,61 @@ class TestCleanupEndpoint:
 
         assert result["status"] == "cleaned_up"
         assert project.id not in leader_module._orchestrators
+
+
+@pytest.mark.asyncio
+async def test_instruct_returns_delivery_state_and_marks_assignment_working(
+    db, project_with_leader, mock_request,
+) -> None:
+    from atc.api.routers.leader import InstructRequest, instruct_ace
+    from atc.runtime.models import RoleKind, RuntimeDeliveryResult
+    from atc.state.db import assign_task, create_session, create_task_graph, get_task_assignment
+
+    project, leader = project_with_leader
+    task = await create_task_graph(db, project.id, "Truthful Ace work")
+    ace = await create_session(
+        db,
+        project_id=project.id,
+        session_type="ace",
+        name="ace-truthful-work",
+        status="idle",
+        provider="codex",
+        task_id=task.id,
+    )
+    idempotency_key = f"{leader.id}:{task.id}"
+    assignment, _ = await assign_task(db, task.id, ace.id, idempotency_key)
+
+    orch = LeaderOrchestrator(project.id, leader.id, db, event_bus=mock_request.app.state.event_bus)
+    orch.assignments[task.id] = AceAssignment(
+        ace_session_id=ace.id,
+        task_graph_id=task.id,
+        task_title=task.title,
+        assignment_id=idempotency_key,
+        status="assigned",
+    )
+    leader_module._orchestrators[project.id] = orch
+
+    delivery = RuntimeDeliveryResult(
+        session_id=ace.id,
+        provider_name="codex",
+        role=RoleKind.ACE,
+        status="delivered",
+        stage="delivery",
+        verdict="confirmed",
+        trace_id="trace-phase7",
+        message="instruction delivered",
+    )
+
+    with patch("atc.leader.orchestrator.start_ace", new=AsyncMock(return_value=delivery)):
+        response = await instruct_ace(
+            project.id,
+            InstructRequest(task_graph_id=task.id, instruction="Work this task"),
+            mock_request,
+        )
+
+    assert response["status"] == "delivered"
+    assert response["delivery_state"] == "delivered"
+    assert response["delivery"]["trace_id"] == "trace-phase7"
+    refreshed = await get_task_assignment(db, idempotency_key)
+    assert refreshed is not None
+    assert refreshed.status == "working"

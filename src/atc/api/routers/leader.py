@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from atc.api.delivery import delivery_response
 from atc.leader.decomposer import TaskSpec, decompose_goal
 from atc.leader.orchestrator import LeaderOrchestrator
 from atc.state import db as db_ops
@@ -275,19 +276,27 @@ async def instruct_ace(
     project_id: str,
     body: InstructRequest,
     request: Request,
-) -> dict[str, str]:
+) -> dict[str, object]:
     """Send a work instruction to the Ace assigned to a task."""
     orch = await _get_or_create_orchestrator(request, project_id)
 
     try:
-        await orch.send_instruction_to_ace(
+        result = await orch.send_instruction_to_ace(
             body.task_graph_id,
             body.instruction,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LifecycleTransitionError as exc:
+        raise HTTPException(status_code=409, detail=_transition_error_detail(exc)) from None
 
-    return {"status": "sent"}
+    return delivery_response(
+        result,
+        fallback_state="submitted",
+        message="Ace instruction submitted; provider acknowledgement is not verified",
+        project_id=project_id,
+        recovery="inspect Ace runtime/session status and task assignment state for confirmation",
+    )
 
 
 @router.post("/projects/{project_id}/leader/task-done")

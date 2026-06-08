@@ -470,7 +470,7 @@ async def _send_session_instruction(
     conn: aiosqlite.Connection,
     session_id: str,
     instruction: str,
-) -> bool:
+):
     """Send an instruction through the new runtime service/provider contract."""
     from atc.runtime.models import (
         InstructionRequest,
@@ -521,7 +521,7 @@ async def _send_session_instruction(
             result.status,
             result.reason_code,
         )
-    return result.ok
+    return result
 
 
 async def _persist_delivery_trace_events(
@@ -555,7 +555,7 @@ async def start_ace(
     *,
     instruction: str | None = None,
     event_bus: EventBus | None = None,
-) -> None:
+):
     """Start an ace session — send an instruction to its tmux pane.
 
     Uses atomic instruction sending with TUI readiness check and
@@ -572,12 +572,14 @@ async def start_ace(
     await db_ops.update_session_status(conn, session_id, SessionStatus.WORKING.value)
 
     if instruction:
-        delivered = await _send_session_instruction(conn, session_id, instruction)
-        if not delivered:
+        result = await _send_session_instruction(conn, session_id, instruction)
+        if not result.ok:
             logger.error("Session %s: instruction delivery failed, marking error", session_id)
             await transition(session_id, SessionStatus.WORKING, SessionStatus.ERROR, event_bus)
             await db_ops.update_session_status(conn, session_id, SessionStatus.ERROR.value)
             raise RuntimeError(f"Failed to deliver instruction to session {session_id}")
+        return result
+    return None
 
 
 async def stop_ace(

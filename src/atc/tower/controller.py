@@ -392,11 +392,20 @@ class TowerController:
                 )
 
             return {
-                "status": "accepted",
+                "status": "queued",
+                "delivery_state": "queued",
+                "message": (
+                    "Goal queued; Leader session was created and kickoff verification "
+                    "is still pending"
+                ),
                 "project_id": project_id,
                 "session_id": self._current_session_id,
                 "leader_session_id": leader_session_id,
                 "context_package": context_package,
+                "recovery": (
+                    "watch Tower/Leader status and runtime traces; queued is not proof "
+                    "the Leader acted on the goal"
+                ),
             }
 
         except Exception:

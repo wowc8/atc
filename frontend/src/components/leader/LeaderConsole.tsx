@@ -6,7 +6,7 @@ import StatusBadge from "../common/StatusBadge";
 import ConfirmPopover from "../common/ConfirmPopover";
 import GitHubPanel from "../dashboard/GitHubPanel";
 import BudgetPanel from "./BudgetPanel";
-import type { Leader, Project } from "../../types";
+import type { DeliveryStatusResponse, Leader, Project } from "../../types";
 import "./LeaderConsole.css";
 
 interface LeaderConsoleProps {
@@ -33,6 +33,7 @@ export default function LeaderConsole({
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatusResponse | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("github");
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
@@ -74,12 +75,14 @@ export default function LeaderConsole({
     userStopped.current = false;
     setLoading(true);
     setError(null);
+    setDeliveryStatus(null);
     try {
-      const res = await api.post<{ session_id?: string }>(
+      const res = await api.post<DeliveryStatusResponse>(
         `/projects/${projectId}/leader/start`,
         { goal: goal.trim() || null },
       );
       setGoal("");
+      setDeliveryStatus(res);
       // Update session_id immediately so the terminal can subscribe
       if (res.session_id) {
         dispatch({
@@ -167,6 +170,14 @@ export default function LeaderConsole({
       {error && (
         <div className="leader-console__error" role="alert">
           {error}
+        </div>
+      )}
+
+      {deliveryStatus && (
+        <div className="leader-console__error" data-testid="leader-delivery-state">
+          Delivery state: <strong>{deliveryStatus.delivery_state}</strong>
+          {deliveryStatus.message ? ` — ${deliveryStatus.message}` : ""}
+          {deliveryStatus.recovery ? ` Recovery: ${deliveryStatus.recovery}` : ""}
         </div>
       )}
 

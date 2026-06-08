@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from atc.api.delivery import delivery_response
 from atc.core.errors import CreationFailedError, SessionNotFoundError, SessionStaleError
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
@@ -150,16 +151,32 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
 
 
 @router.post("/aces/{session_id}/start")
-async def start_ace(session_id: str, body: StartAceRequest, request: Request) -> dict[str, str]:
+async def start_ace(session_id: str, body: StartAceRequest, request: Request) -> dict[str, object]:
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
     try:
-        await ace_ops.start_ace(db, session_id, instruction=body.instruction, event_bus=event_bus)
+        result = await ace_ops.start_ace(
+            db, session_id, instruction=body.instruction, event_bus=event_bus
+        )
     except ValueError as e:
         raise SessionNotFoundError(str(e)) from None
     except InvalidTransitionError as e:
         raise SessionStaleError(str(e)) from None
-    return {"status": "started"}
+    except RuntimeError as e:
+        raise SessionStaleError(str(e)) from None
+    return delivery_response(
+        result,
+        fallback_state="started" if body.instruction is None else "submitted",
+        message=(
+            "Ace session started; no instruction delivery was requested"
+            if body.instruction is None
+            else "Ace instruction submitted; provider acknowledgement is not verified"
+        ),
+        session_id=session_id,
+        recovery="inspect Ace runtime/session status for delivery confirmation"
+        if body.instruction is not None
+        else None,
+    )
 
 
 @router.post("/aces/{session_id}/stop")
@@ -265,7 +282,7 @@ async def message_ace(
     session_id: str,
     body: MessageRequest,
     request: Request,
-) -> dict[str, str]:
+) -> dict[str, object]:
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
 
@@ -288,7 +305,15 @@ async def message_ace(
             pass
 
     await _send_keys(session.tmux_pane, body.message)
-    return {"status": "sent"}
+    return delivery_response(
+        None,
+        fallback_state="submitted",
+        message="Message submitted to Ace terminal; provider acknowledgement is not verified",
+        session_id=session_id,
+        project_id=session.project_id,
+        provider=session.provider,
+        recovery="inspect Ace runtime/session status and task assignment state for confirmation",
+    )
 
 
 @router.delete("/aces/{session_id}", status_code=204)

@@ -114,7 +114,9 @@ class TestSubmitGoal:
 
         result = await tower.submit_goal(project.id, "Build feature X")
 
-        assert result["status"] == "accepted"
+        assert result["status"] == "queued"
+        assert result["delivery_state"] == "queued"
+        assert "not proof" in result["recovery"]
         assert result["project_id"] == project.id
         assert result["leader_session_id"] == "leader-sess-123"
         assert result["context_package"]["goal"] == "Build feature X"
@@ -176,7 +178,7 @@ class TestSubmitGoal:
         await tower.mark_complete()
 
         result = await tower.submit_goal(project.id, "Second goal")
-        assert result["status"] == "accepted"
+        assert result["status"] == "queued"
 
     async def test_submit_goal_after_error(
         self, mock_start: AsyncMock, db, event_bus: EventBus
@@ -190,7 +192,7 @@ class TestSubmitGoal:
         tower._state = TowerState.ERROR  # simulate error
 
         result = await tower.submit_goal(project.id, "Recovery goal")
-        assert result["status"] == "accepted"
+        assert result["status"] == "queued"
 
 
 @patch("atc.tower.controller.stop_leader", new_callable=AsyncMock)

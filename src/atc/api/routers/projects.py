@@ -17,6 +17,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from atc.api.delivery import delivery_response, queued_response
 from atc.core.errors import CreationFailedError
 from atc.leader import leader as leader_ops
 from atc.runtime.models import RuntimeDeliveryResult
@@ -456,7 +457,21 @@ async def start_leader(
 
         _asyncio.ensure_future(_kickoff())
 
-    return {"status": "started", "session_id": session_id}
+    if body.goal and body.auto_kickoff:
+        return queued_response(
+            message="Leader session started; auto-kickoff queued and awaiting runtime verification",
+            project_id=project_id,
+            leader_session_id=session_id,
+            session_id=session_id,
+        )
+    return {
+        "status": "started",
+        "delivery_state": "started",
+        "session_id": session_id,
+        "leader_session_id": session_id,
+        "project_id": project_id,
+        "message": "Leader session started; no kickoff delivery was requested",
+    }
 
 
 @router.post("/{project_id}/leader/stop")
@@ -481,9 +496,13 @@ async def send_leader_message(
         raise HTTPException(status_code=409, detail=str(e)) from None
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=f"Leader pane unavailable: {e}") from None
-    if isinstance(result, RuntimeDeliveryResult):
-        return {"status": result.status, "delivery": result.as_dict()}
-    return {"status": "delivered"}
+    return delivery_response(
+        result if isinstance(result, RuntimeDeliveryResult) else None,
+        fallback_state="submitted",
+        message="Leader message submitted; provider acknowledgement is not verified",
+        project_id=project_id,
+        recovery="inspect Leader runtime/session status for delivery confirmation",
+    )
 
 
 # ---------------------------------------------------------------------------

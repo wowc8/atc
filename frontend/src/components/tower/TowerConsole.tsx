@@ -3,6 +3,7 @@ import { useAppContext } from "../../context/AppContext";
 import { useTerminal } from "../../hooks/useTerminal";
 import { api } from "../../utils/api";
 import StatusBadge from "../common/StatusBadge";
+import type { DeliveryStatusResponse } from "../../types";
 import "./TowerConsole.css";
 
 /**
@@ -19,6 +20,7 @@ export default function TowerConsole() {
   const [goal, setGoal] = useState("");
   const [projectId, setProjectId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatusResponse | null>(null);
   const [providerSwitchPending, setProviderSwitchPending] = useState(false);
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
@@ -86,6 +88,7 @@ export default function TowerConsole() {
     if (!projectId) return;
     userStopped.current = false;
     setLoading(true);
+    setDeliveryStatus(null);
     try {
       if (isTerminalProvider) {
         const res = await api.post<{ session_id?: string }>("/tower/start", {
@@ -98,11 +101,12 @@ export default function TowerConsole() {
           });
         }
       } else {
-        const res = await api.post<{ session_id?: string }>("/tower/goal", {
+        const res = await api.post<DeliveryStatusResponse>("/tower/goal", {
           project_id: projectId,
           goal: goal.trim() || null,
         });
         setGoal("");
+        setDeliveryStatus(res);
         if (res.session_id) {
           dispatch({
             type: "SET_TOWER_DETAIL",
@@ -239,6 +243,14 @@ export default function TowerConsole() {
           >
             {loading ? "Restarting..." : "Restart Tower for selected project"}
           </button>
+        </div>
+      )}
+
+      {deliveryStatus && (
+        <div className="tower-console__error" data-testid="tower-delivery-state">
+          Delivery state: <strong>{deliveryStatus.delivery_state}</strong>
+          {deliveryStatus.message ? ` — ${deliveryStatus.message}` : ""}
+          {deliveryStatus.recovery ? ` Recovery: ${deliveryStatus.recovery}` : ""}
         </div>
       )}
 
