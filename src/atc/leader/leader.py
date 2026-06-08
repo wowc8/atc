@@ -180,25 +180,31 @@ async def start_leader(
             deployed.root,
         )
 
-        # Copy CLAUDE.md (and .claude/) from staging dir into repo_path so that
-        # Claude Code picks up the leader instructions when starting in the repo.
+        # Copy provider-neutral instructions (and provider compatibility files)
+        # into repo_path so the selected CLI agent picks up the leader role.
         if spec.repo_path and Path(spec.repo_path) != deployed.root:
             import shutil as _shutil
 
             dest = Path(spec.repo_path)
             dest.mkdir(parents=True, exist_ok=True)
-            claude_md_src = deployed.root / "CLAUDE.md"
-            if claude_md_src.exists():
-                _shutil.copy2(claude_md_src, dest / "CLAUDE.md")
-                logger.info("Copied leader CLAUDE.md to repo_path: %s", dest)
-            else:
-                logger.warning("CLAUDE.md not found at %s, skipping copy", deployed.root)
+            for instructions_src in (deployed.agents_md_path, deployed.claude_md_path):
+                if instructions_src.exists():
+                    _shutil.copy2(instructions_src, dest / instructions_src.name)
+                    logger.info(
+                        "Copied leader instructions %s to repo_path: %s",
+                        instructions_src.name,
+                        dest,
+                    )
+                else:
+                    logger.warning(
+                        "%s not found at %s, skipping copy", instructions_src.name, deployed.root
+                    )
             claude_src = deployed.root / ".claude"
             if claude_src.exists():
                 _shutil.copytree(claude_src, dest / ".claude", dirs_exist_ok=True)
 
         # Use repo_path if available so Claude Code starts in the actual repo;
-        # fall back to staging dir so it finds the deployed CLAUDE.md and hooks.
+        # fall back to staging dir so it finds the deployed instructions and hooks.
         # Ensure the directory exists — tmux silently falls back to $HOME if the
         # working_dir does not exist, causing Claude Code to start in the wrong place.
         if spec.repo_path:
@@ -213,7 +219,7 @@ async def start_leader(
             from atc.runtime.models import RoleKind, StartRoleRequest
             from atc.runtime.service import RuntimeService
 
-            _cmp = deployed.claude_md_path
+            _cmp = deployed.instructions_md_path
             _ctx = str(_cmp) if _cmp.exists() else None
             await RuntimeService().prepare_workspace(
                 StartRoleRequest(
@@ -238,7 +244,9 @@ async def start_leader(
             project_id=project_id,
             session_type="manager",
             working_dir=working_dir,
-            context_file=deployed.claude_md_path if deployed.claude_md_path.exists() else None,
+            context_file=deployed.instructions_md_path
+            if deployed.instructions_md_path.exists()
+            else None,
         )
         await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 

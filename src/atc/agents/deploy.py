@@ -1,7 +1,8 @@
 """Agent deployment SOT — single source of truth for all agent configuration files.
 
-Writes CLAUDE.md, .claude/settings.json, and hook scripts into a staging
-directory (typically /tmp/{session_id}/) before launching an Ace or Manager.
+Writes provider-neutral AGENTS.md instructions, Claude-compatible CLAUDE.md,
+.claude/settings.json, and hook scripts into a staging directory (typically
+/tmp/{session_id}/) before launching an Ace or Manager.
 Hook scripts report status back to the ATC API via the ``atc`` CLI.
 """
 
@@ -55,12 +56,18 @@ class DeployedFiles:
     files: list[str]
 
     @property
-    def claude_md_path(self) -> Path:
-        return self.root / "CLAUDE.md"
-
-    @property
     def agents_md_path(self) -> Path:
         return self.root / "AGENTS.md"
+
+    @property
+    def instructions_md_path(self) -> Path:
+        """Provider-neutral ATC role instructions."""
+        return self.agents_md_path
+
+    @property
+    def claude_md_path(self) -> Path:
+        """Claude Code compatibility copy of the provider-neutral instructions."""
+        return self.root / "CLAUDE.md"
 
     @property
     def settings_path(self) -> Path:
@@ -69,6 +76,14 @@ class DeployedFiles:
     @property
     def manifest_path(self) -> Path:
         return self.root / ".manifest.json"
+
+
+def _write_instruction_files(root: Path, content: str) -> list[str]:
+    """Write provider-neutral instructions plus provider compatibility copies."""
+    return [
+        _write_file(root / "AGENTS.md", content),
+        _write_file(root / "CLAUDE.md", content),
+    ]
 
 
 @dataclass(frozen=True)
@@ -142,7 +157,7 @@ def deploy_ace_files(
     *,
     staging_root: Path | None = None,
 ) -> DeployedFiles:
-    """Write CLAUDE.md, .claude/settings.json, and hooks for an Ace session.
+    """Write role instructions, .claude/settings.json, and hooks for an Ace session.
 
     Args:
         spec: Deployment specification for the Ace.
@@ -165,10 +180,9 @@ def deploy_ace_files(
     # Code skips the "Do you trust this project?" dialog.
     _write_user_trust_settings(root)
 
-    # CLAUDE.md
-    claude_md = _build_ace_claude_md(spec)
-    written.append(_write_file(root / "CLAUDE.md", claude_md))
-    written.append(_write_file(root / "AGENTS.md", claude_md))
+    # Role instructions: AGENTS.md is provider-neutral; CLAUDE.md is a compatibility copy.
+    instructions_md = _build_ace_instructions_md(spec)
+    written.extend(_write_instruction_files(root, instructions_md))
 
     # .claude/settings.json
     settings = _build_settings(
@@ -199,7 +213,7 @@ def deploy_manager_files(
     *,
     staging_root: Path | None = None,
 ) -> DeployedFiles:
-    """Write CLAUDE.md, .claude/settings.json, and hooks for a Manager/Leader session.
+    """Write role instructions, .claude/settings.json, and hooks for a Manager/Leader session.
 
     Args:
         spec: Deployment specification for the Manager.
@@ -222,10 +236,9 @@ def deploy_manager_files(
     # Code skips the "Do you trust this project?" dialog.
     _write_user_trust_settings(root)
 
-    # CLAUDE.md
-    claude_md = _build_manager_claude_md(spec)
-    written.append(_write_file(root / "CLAUDE.md", claude_md))
-    written.append(_write_file(root / "AGENTS.md", claude_md))
+    # Role instructions: AGENTS.md is provider-neutral; CLAUDE.md is a compatibility copy.
+    instructions_md = _build_manager_instructions_md(spec)
+    written.extend(_write_instruction_files(root, instructions_md))
 
     # .claude/settings.json
     # Leaders must NOT create or edit files — that's the Ace's job.
@@ -263,7 +276,7 @@ def deploy_tower_files(
     *,
     staging_root: Path | None = None,
 ) -> DeployedFiles:
-    """Write CLAUDE.md, .claude/settings.json, and hooks for a Tower session.
+    """Write role instructions, .claude/settings.json, and hooks for a Tower session.
 
     Args:
         spec: Deployment specification for the Tower.
@@ -286,10 +299,9 @@ def deploy_tower_files(
     # Code skips the "Do you trust this project?" dialog.
     _write_user_trust_settings(root)
 
-    # CLAUDE.md
-    claude_md = _build_tower_claude_md(spec)
-    written.append(_write_file(root / "CLAUDE.md", claude_md))
-    written.append(_write_file(root / "AGENTS.md", claude_md))
+    # Role instructions: AGENTS.md is provider-neutral; CLAUDE.md is a compatibility copy.
+    instructions_md = _build_tower_instructions_md(spec)
+    written.extend(_write_instruction_files(root, instructions_md))
 
     # .claude/settings.json
     settings = _build_settings(
@@ -344,12 +356,12 @@ def cleanup_deployed_files(root: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLAUDE.md builders
+# Instruction Markdown builders
 # ---------------------------------------------------------------------------
 
 
-def _build_ace_claude_md(spec: AceDeploySpec) -> str:
-    """Build the CLAUDE.md content for an Ace session."""
+def _build_ace_instructions_md(spec: AceDeploySpec) -> str:
+    """Build the provider-neutral instruction content for an Ace session."""
     lines = [
         f"# {spec.project_name} — Ace Session",
         "",
@@ -440,8 +452,8 @@ def _build_ace_claude_md(spec: AceDeploySpec) -> str:
     return "\n".join(lines)
 
 
-def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
-    """Build the CLAUDE.md content for a Manager/Leader session."""
+def _build_manager_instructions_md(spec: ManagerDeploySpec) -> str:
+    """Build the provider-neutral instruction content for a Manager/Leader session."""
     lines = [
         f"# {spec.project_name} — Leader Session",
         "",
@@ -611,8 +623,8 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
     return "\n".join(lines)
 
 
-def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
-    """Build the CLAUDE.md content for a Tower session."""
+def _build_tower_instructions_md(spec: TowerDeploySpec) -> str:
+    """Build the provider-neutral instruction content for a Tower session."""
     lines = [
         f"# {spec.project_name} — Tower Session",
         "",
@@ -647,7 +659,7 @@ def _build_tower_claude_md(spec: TowerDeploySpec) -> str:
         "5. If leader fails 3 times: report to user with a summary and ask how to proceed",
         "",
         "**CRITICAL — NEVER paste context, goals, or project details into the Leader terminal.**",
-        "Leader already has everything it needs in its CLAUDE.md. Only send short nudges.",
+        "Leader already has everything it needs in its role instructions. Only send short nudges.",
         "Wrong: `atc leader message ... --message 'Build a web app that does X. '",
         "       `'Requirements: ...'`",
         "Right: `atc leader message ... --message 'Please continue with your goal.'`",
@@ -775,7 +787,7 @@ def _build_settings(
 
 
 def _context_cli_instructions(hooks_dir: str) -> list[str]:
-    """Return CLAUDE.md lines explaining the context read/write scripts."""
+    """Return instruction lines explaining the context read/write scripts."""
     return [
         "## Context Read/Write",
         "",

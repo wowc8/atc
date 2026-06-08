@@ -11,11 +11,11 @@ import enum
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from atc.state.models import Project, Session
-
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
+
+    from atc.state.models import Project, Session
 
 
 class SessionStatus(enum.Enum):
@@ -129,7 +129,7 @@ class AgentProvider(Protocol):
             session_id: Unique identifier for this session.
             working_dir: Working directory for the agent process.
             env: Extra environment variables to pass.
-            context_file: Optional path to a CLAUDE.md to copy into working_dir.
+            context_file: Optional path to role instructions to copy into working_dir.
             role: Role hint for the session (``tower``, ``leader``, or ``ace``).
 
         Returns:
@@ -152,8 +152,8 @@ class AgentProvider(Protocol):
         Args:
             session_id: Unique identifier for the session being prepared.
             working_dir: Directory to create if it does not exist.
-            context_file: Optional CLAUDE.md to copy into working_dir.
-                Skipped if working_dir/CLAUDE.md already exists.
+            context_file: Optional role instructions to copy into working_dir.
+                Providers may write AGENTS.md plus compatibility filenames.
         """
         ...
 

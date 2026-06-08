@@ -622,6 +622,7 @@ class TestDeployedFiles:
         df = DeployedFiles(root=tmp_path / "test", files=[])
         assert df.claude_md_path == tmp_path / "test" / "CLAUDE.md"
         assert df.agents_md_path == tmp_path / "test" / "AGENTS.md"
+        assert df.instructions_md_path == df.agents_md_path
         assert df.settings_path == tmp_path / "test" / ".claude" / "settings.json"
         assert df.manifest_path == tmp_path / "test" / ".manifest.json"
 

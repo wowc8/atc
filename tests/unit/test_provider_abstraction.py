@@ -32,7 +32,7 @@ class TestPrepareWorkspace:
     @pytest.mark.asyncio
     async def test_copies_context_file(self, tmp_path: Path) -> None:
         provider = ClaudeCodeProvider()
-        context_file = tmp_path / "src_CLAUDE.md"
+        context_file = tmp_path / "AGENTS.md"
         context_file.write_text("# Leader instructions\n")
 
         working_dir = tmp_path / "workspace"
@@ -43,9 +43,10 @@ class TestPrepareWorkspace:
             context_file=context_file,
         )
 
-        dest = working_dir / "CLAUDE.md"
-        assert dest.exists()
-        assert dest.read_text() == "# Leader instructions\n"
+        for filename in ("AGENTS.md", "CLAUDE.md"):
+            dest = working_dir / filename
+            assert dest.exists()
+            assert dest.read_text() == "# Leader instructions\n"
 
     @pytest.mark.asyncio
     async def test_does_not_overwrite_existing_claude_md(self, tmp_path: Path) -> None:
@@ -66,6 +67,7 @@ class TestPrepareWorkspace:
         )
 
         assert existing.read_text() == "# Existing instructions\n"
+        assert (working_dir / "AGENTS.md").read_text() == "# New instructions\n"
 
     @pytest.mark.asyncio
     async def test_no_context_file_still_creates_dir(self, tmp_path: Path) -> None:
@@ -75,6 +77,7 @@ class TestPrepareWorkspace:
         await provider.prepare_workspace("sess-4", working_dir=str(target))
 
         assert target.is_dir()
+        assert not (target / "AGENTS.md").exists()
         assert not (target / "CLAUDE.md").exists()
 
 
@@ -155,7 +158,9 @@ class TestHandleStartup:
             status=SessionStatus.STARTING,
         )
 
-        with patch("atc.agents.claude_provider.accept_startup_dialogs", new_callable=AsyncMock) as mock_startup:
+        with patch(
+            "atc.agents.claude_provider.accept_startup_dialogs", new_callable=AsyncMock
+        ) as mock_startup:
             await provider.handle_startup("sess-start")
 
         mock_startup.assert_awaited_once()

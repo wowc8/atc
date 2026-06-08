@@ -64,8 +64,7 @@ async def _resolve_tower_project_id(conn: aiosqlite.Connection) -> str:
         conn,
         "Tower Workspace",
         description=(
-            "Auto-created by Tower on first start. "
-            "Safe to delete once you add real projects."
+            "Auto-created by Tower on first start. Safe to delete once you add real projects."
         ),
     )
     await conn.commit()
@@ -106,6 +105,7 @@ async def start_tower_session(
     )
     rows = await cursor.fetchall()
     from atc.state.db import _row_to_session
+
     existing = [_row_to_session(r) for r in rows]
     for sess in existing:
         if sess.status in (SessionStatus.ERROR.value, SessionStatus.DISCONNECTED.value):
@@ -209,7 +209,9 @@ async def start_tower_session(
             project_id=project_id,
             session_type="tower",
             working_dir=working_dir,
-            context_file=deployed.claude_md_path if deployed.claude_md_path.exists() else None,
+            context_file=deployed.instructions_md_path
+            if deployed.instructions_md_path.exists()
+            else None,
         )
         await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 
@@ -300,7 +302,7 @@ def _log_working_dir_contents(working_dir: str, session_id: str, caller: str) ->
     path that will be passed as -c to tmux (i.e. where Claude Code starts).
     """
     logger.warning(
-        "=== TOWER DEBUG [%s] session=%s ===\n" "  working_dir: %s\n" "  working_dir exists: %s",
+        "=== TOWER DEBUG [%s] session=%s ===\n  working_dir: %s\n  working_dir exists: %s",
         caller,
         session_id,
         working_dir,
