@@ -250,6 +250,8 @@ Playwright evidence should be stored under a timestamped project-local `screensh
 - Old duplicated recovery/delivery code is removed or clearly quarantined.
 - Docs and code agree on runtime/orchestration responsibilities.
 
+**Phase 8 scenario suite:** `tests/e2e/test_phase8_scenarios.py` is the regression boundary for the final runtime/orchestration cluster. It covers restart/restore classification, trust/permission prompt blocking before PTY writes, partial Ace delivery failure recovery, stale active-session reconcile repair, explicit retry-path task transitions, and Tower-driven Leader/Ace management with truthful delivery state. Remaining compatibility shims are intentionally narrow: Codex/current migrated delivery paths use the shared runner, while Claude's direct tmux-control delivery remains a provider-local compatibility path covered by the same interrupt/recovery scenario expectations until it is migrated.
+
 ## Suggested PR sequence
 
 1. **PR A:** Phase 0 validation notes + Phase 1 trace model skeleton.

@@ -580,8 +580,6 @@ class TowerController:
     async def _respawn_leader(self, project_id: str, goal: str) -> str | None:
         """Respawn a dead leader and return the new session_id, or None on failure."""
         try:
-            from atc.leader.leader import stop_leader
-
             logger.info("Respawning dead leader for project %s", project_id)
             # Wipe the dead session link from the leader row so start_leader
             # creates a fresh session instead of reusing the corpse.
@@ -627,7 +625,9 @@ class TowerController:
             github_repo = row[3] if row else None
 
             cursor = await self._db.execute(
-                "SELECT key, value FROM context_entries WHERE project_id = ? AND scope = 'project' ORDER BY created_at ASC",
+                "SELECT key, value FROM context_entries "
+                "WHERE project_id = ? AND scope = 'project' "
+                "ORDER BY created_at ASC",
                 (self._current_project_id,),
             )
             context_rows = await cursor.fetchall()
@@ -635,14 +635,14 @@ class TowerController:
             lines = [
                 f"# Mission Brief — {project_name}",
                 "",
-                f"## Goal",
+                "## Goal",
                 goal,
                 "",
             ]
             if description:
                 lines += ["## Project Description", description, ""]
             if repo_path:
-                lines += [f"## Repository", f"Local path: {repo_path}", ""]
+                lines += ["## Repository", f"Local path: {repo_path}", ""]
             if github_repo:
                 lines += [f"GitHub: {github_repo}", ""]
             if context_rows:
@@ -829,64 +829,10 @@ class TowerController:
             f"Project ID: {project_id}\n\n"
             f"Begin monitoring. Check progress with:\n"
             f"  curl -s http://127.0.0.1:8420/api/projects/{project_id}/leader/progress\n"
-            f"Send nudges if stuck:\n"
-            f"  atc leader message --project-id {project_id} --message 'Please continue with your goal.'\n"
-            f"\nDo NOT write code or create files yourself — delegate to the Leader only."
-        )
-
-        try:
-            await send_tower_message(
-                self._db,
-                self._current_session_id,
-                notification,
-                event_bus=self._event_bus,
-            )
-            logger.info(
-                "Sent goal notification to Tower session %s (project %s)",
-                self._current_session_id,
-                project_id,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not notify Tower session %s of new goal: %s",
-                self._current_session_id,
-                exc,
-            )
-
-    async def _on_leader_output(self, data: dict[str, Any]) -> None:
-        """Capture PTY output from the Leader session for monitoring.
-
-        After submit_goal() starts a Leader, Tower's Claude session needs to
-        know the goal and leader session ID so it can begin monitoring.
-        This is fire-and-forget: if Tower's terminal isn't ready, we log and move on.
-        """
-        if not self._current_session_id:
-            return
-
-        # Wait briefly for Tower's pane to be ready before sending
-        await asyncio.sleep(3.0)
-
-        # Look up the project name for a friendlier message
-        try:
-            cursor = await self._db.execute(
-                "SELECT name FROM projects WHERE id = ?",
-                (project_id,),
-            )
-            row = await cursor.fetchone()
-            project_name = row[0] if row else project_id[:8]
-        except Exception:
-            project_name = project_id[:8]
-
-        notification = (
-            f"[ATC] Leader started for project '{project_name}'.\n"
-            f"Goal: {goal}\n"
-            f"Leader session: {leader_session_id}\n"
-            f"Project ID: {project_id}\n\n"
-            f"Begin monitoring. Check progress with:\n"
-            f"  curl -s http://127.0.0.1:8420/api/projects/{project_id}/leader/progress\n"
-            f"Send nudges if stuck:\n"
-            f"  atc leader message --project-id {project_id} --message 'Please continue with your goal.'\n"
-            f"\nDo NOT write code or create files yourself — delegate to the Leader only."
+            "Send nudges if stuck:\n"
+            f"  atc leader message --project-id {project_id} "
+            "--message 'Please continue with your goal.'\n"
+            "\nDo NOT write code or create files yourself — delegate to the Leader only."
         )
 
         try:
@@ -1016,8 +962,8 @@ class TowerController:
         new_status = data.get("new_status")
 
         # Decrement active counter when any leader/ace session reaches a terminal status
-        _TERMINAL_STATUSES = {"disconnected", "error", "completed", "cancelled"}
-        if new_status in _TERMINAL_STATUSES:
+        terminal_statuses = {"disconnected", "error", "completed", "cancelled"}
+        if new_status in terminal_statuses:
             # Look up session type to decide if this counts against our limit
             try:
                 cursor = await self._db.execute(
