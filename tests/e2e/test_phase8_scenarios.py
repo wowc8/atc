@@ -135,7 +135,31 @@ def test_restart_restore_scenario_preserves_readiness_without_respawn() -> None:
     assert blocked.details["provider_restore_action"] == "resolve_auth"
 
 
-def test_trust_dialog_intercept_blocks_before_pty_write() -> None:
+def test_codex_stale_trust_scrollback_does_not_block_ready_prompt() -> None:
+    """Resolved trust text in scrollback must not block delivery to a ready Codex prompt."""
+
+    excerpt = """
+Do you trust the contents of this directory?
+› 1. Yes, continue
+Press enter to continue
+
+╭──────────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.137.0)                               │
+│ model:       gpt-5.5   /model to change                  │
+╰──────────────────────────────────────────────────────────╯
+
+› Implement {feature}
+
+  gpt-5.5 default · /private/tmp/atc-agents/session
+"""
+    codex = CodexRuntime()
+
+    assert codex._detect_interrupt(excerpt) is None
+    assert codex._classify_readiness(excerpt) == (ReadinessState.READY, None)
+
+
+def test_dialog_interruption_scenario_blocks_before_delivery() -> None:
+
     """A visible trust dialog is a blocker, not a successful delivery."""
 
     metadata: dict[str, object] = {}
@@ -159,14 +183,14 @@ def test_trust_dialog_intercept_blocks_before_pty_write() -> None:
         pytest.raises(Exception, match="runtime interrupt"),
     ):
         asyncio.run(
-                runner.deliver_instruction(
-                    handle=_handle(provider="claude_code", role=RoleKind.LEADER),
-                    metadata=metadata,
-                    trace_id="phase8-trust",
-                    action=DeliveryAction.INSTRUCTION,
-                    payload_loader=AsyncMock(return_value="do work"),
-                )
+            runner.deliver_instruction(
+                handle=_handle(provider="claude_code", role=RoleKind.LEADER),
+                metadata=metadata,
+                trace_id="phase8-trust",
+                action=DeliveryAction.INSTRUCTION,
+                payload_loader=AsyncMock(return_value="do work"),
             )
+        )
 
     send.assert_not_awaited()
     event = metadata["delivery_trace_events"][-1]  # type: ignore[index]

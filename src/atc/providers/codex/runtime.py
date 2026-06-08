@@ -38,7 +38,7 @@ from atc.runtime.tracing import (
     DeliveryVerdict,
 )
 
-_CODEX_PROMPT_RE = re.compile(r"(^|\n)\s*(❯|>)\s*$", re.MULTILINE)
+_CODEX_PROMPT_RE = re.compile(r"(^|\n)\s*(❯|>)\s*$|(^|\n)\s*›\s+(?!\d+\.)", re.MULTILINE)
 _AUTH_TRIGGERS = (
     "login",
     "sign in",
@@ -337,6 +337,26 @@ class CodexRuntime(ProviderRuntime):
 
     @staticmethod
     def _detect_interrupt(excerpt: str):
+        lower = excerpt.lower()
+        last_interrupt = max(
+            lower.rfind(trigger)
+            for trigger in (
+                *_TRUST_TRIGGERS,
+                *_PERMISSION_TRIGGERS,
+                *_AUTH_TRIGGERS,
+                *_PROVIDER_ERROR_TRIGGERS,
+            )
+        )
+        last_ready = max(
+            lower.rfind(marker)
+            for marker in (
+                "\n› ",
+                "gpt-5.5 default",
+                "gpt-5 default",
+            )
+        )
+        if last_interrupt >= 0 and last_ready > last_interrupt:
+            return None
         return detect_runtime_interrupt(excerpt, _INTERRUPT_SPEC)
 
     @staticmethod
