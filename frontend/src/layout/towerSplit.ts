@@ -3,8 +3,12 @@ export const SIDE_TOWER_MIN_WIDTH = 320;
 export const SIDE_TOWER_MAX_RATIO = 0.55;
 export const SIDE_TOWER_DEFAULT_WIDTH = 520;
 
-export function isSideTowerRoute(pathname: string) {
+export function shouldShowTowerPanel(pathname: string) {
   return pathname === "/dashboard" || pathname.startsWith("/projects/");
+}
+
+export function isSideTowerRoute(pathname: string) {
+  return shouldShowTowerPanel(pathname);
 }
 
 export function readStoredTowerWidth() {
