@@ -35,42 +35,54 @@
   color: var(--color-text-secondary);
 }
 
-/* Left-side project stack, with Tower living in the app shell on the right */
+/*
+ * Project pages are intentionally a single scrollable left column inside the
+ * app-shell's two-column split. The shell-owned Tower resize handle is the only
+ * horizontal divider: dragging Tower wider makes this column narrower and vice
+ * versa. Do not add nested page-level resize handles here.
+ */
 .project-view__layout {
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .project-view__left {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  gap: 0;
+  gap: var(--space-3);
+  padding-right: var(--space-2);
 }
 
-.project-view__tasks {
-  flex-shrink: 0;
-  overflow-y: auto;
+.project-view__leader,
+.project-view__tasks,
+.project-view__aces,
+.project-view__context {
+  flex: 0 0 auto;
 }
 
-/* Aces fills remaining left-column space after tasks */
+.project-view__tasks,
+.project-view__aces,
+.project-view__context {
+  overflow: visible;
+}
+
 .project-view__aces {
-  flex: 1;
-  min-height: 120px;
-  overflow: hidden;
+  min-height: 0;
 }
 
-/* When an Ace is expanded, the panel grows to fill available space */
 .project-view__aces--expanded {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 520px;
 }
 
 .project-view__aces--expanded .ace-console {
@@ -81,15 +93,11 @@
 }
 
 .project-view__leader {
-  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  margin-bottom: var(--space-3);
+  min-height: 240px;
 }
 
 .project-view__context {
-  min-height: 180px;
-  overflow-y: auto;
-  margin-top: var(--space-3);
+  min-height: 0;
 }

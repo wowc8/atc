@@ -13,7 +13,7 @@ ATC’s frontend is a React + Vite SPA wrapped by a very thin Tauri shell. The m
   - Initializes Sentry, wraps app in `ErrorBoundary`, and mounts a `QueryClientProvider`.
   - React Query is configured, but the actual app mostly does not use it yet. Most fetching is manual via `api` and local state.
 - Router and shell: `frontend/src/App.tsx`
-  - Global shell is `TowerBar` on top, route content in the middle, persistent `TowerPanel` on bottom.
+  - Global shell is `TowerBar` on top. Dashboard/project routes use a two-column shell split: route content on the left, persistent `TowerPanel` on the right, with a single shell-owned resize handle between them. Non-Tower routes keep the bottom `TowerPanel` fallback.
   - Routes:
     - `/dashboard` → `pages/Dashboard.tsx`
     - `/projects/:id` → `pages/ProjectView.tsx`

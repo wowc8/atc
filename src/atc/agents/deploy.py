@@ -582,15 +582,17 @@ def _build_manager_claude_md(spec: ManagerDeploySpec) -> str:
     hooks_dir = f"/tmp/atc-agents/{spec.leader_id}/.claude/hooks"
     lines.extend(_context_cli_instructions(hooks_dir))
 
+    status_session_id = spec.session_id or spec.leader_id
     lines.extend(
         [
             "## Reporting",
             "",
-            "Use the `atc` CLI to report status:",
+            "Use the `atc` CLI to report status. Always report against this "
+            "Leader's runtime session ID, not the durable leader row ID:",
             "",
             "```bash",
-            f'atc ace status "{spec.leader_id}" working',
-            f'atc ace status "{spec.leader_id}" waiting',
+            f'atc ace status "{status_session_id}" working',
+            f'atc ace status "{status_session_id}" waiting',
             "```",
             "",
         ]
