@@ -72,13 +72,24 @@ class CodexProvider:
         self._check_tmux_available()
 
         if working_dir:
-            await self.prepare_workspace(session_id, working_dir=working_dir, context_file=context_file)
+            await self.prepare_workspace(
+                session_id, working_dir=working_dir, context_file=context_file
+            )
 
         from atc.session.ace import _ensure_tmux_session
 
         await _ensure_tmux_session(self._tmux_session)
 
-        tmux_args = [_TMUX_CMD, "new-window", "-t", self._tmux_session, "-d", "-P", "-F", "#{pane_id}"]
+        tmux_args = [
+            _TMUX_CMD,
+            "new-window",
+            "-t",
+            self._tmux_session,
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+        ]
         if working_dir:
             tmux_args.extend(["-c", working_dir])
         tmux_args.append(self._codex_command)
@@ -114,10 +125,16 @@ class CodexProvider:
 
         _os.makedirs(working_dir, exist_ok=True)
         if context_file is not None:
-            dest = Path(working_dir) / "CLAUDE.md"
-            if not dest.exists():
-                shutil.copy2(str(context_file), str(dest))
-                logger.info("prepare_workspace: copied %s → %s (session %s)", context_file, dest, session_id)
+            for filename in ("AGENTS.md", "CLAUDE.md"):
+                dest = Path(working_dir) / filename
+                if not dest.exists():
+                    shutil.copy2(str(context_file), str(dest))
+                    logger.info(
+                        "prepare_workspace: copied %s → %s (session %s)",
+                        context_file,
+                        dest,
+                        session_id,
+                    )
 
     async def is_ready(self, session_id: str) -> bool:
         tracked = self._sessions.get(session_id)
@@ -166,8 +183,12 @@ class CodexProvider:
         tracked = self._get_tracked(session_id)
         try:
             proc = await asyncio.create_subprocess_exec(
-                _TMUX_CMD, "kill-pane", "-t", tracked.pane_id,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                _TMUX_CMD,
+                "kill-pane",
+                "-t",
+                tracked.pane_id,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
         except OSError as exc:
@@ -181,7 +202,8 @@ class CodexProvider:
     async def _tmux_query(self, *args: str) -> str:
         try:
             proc = await asyncio.create_subprocess_exec(
-                _TMUX_CMD, *args,
+                _TMUX_CMD,
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

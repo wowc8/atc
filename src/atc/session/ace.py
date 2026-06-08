@@ -370,9 +370,7 @@ async def create_ace(
                 continue
             if existing.status in {"completed", "cancelled", "error", "disconnected"}:
                 continue
-            raise ValueError(
-                f"Task {task_id} already has active Ace session {existing.id}"
-            )
+            raise ValueError(f"Task {task_id} already has active Ace session {existing.id}")
 
     # Step 1: DB row first — guarantees the UI always sees every entity
     provider_cfg = get_connection_app_state(conn)
@@ -438,8 +436,8 @@ async def create_ace(
                         role=RoleKind.ACE,
                         project_id=project_id,
                         working_dir=effective_working_dir,
-                        context_ref=str(deployed.claude_md_path)
-                        if deployed and deployed.claude_md_path.exists()
+                        context_ref=str(deployed.instructions_md_path)
+                        if deployed and deployed.instructions_md_path.exists()
                         else None,
                     )
                 )
@@ -456,8 +454,8 @@ async def create_ace(
             project_id=project_id,
             session_type="ace",
             working_dir=effective_working_dir,
-            context_file=deployed.claude_md_path
-            if deployed and deployed.claude_md_path.exists()
+            context_file=deployed.instructions_md_path
+            if deployed and deployed.instructions_md_path.exists()
             else None,
             launch_command=launch_command,
         )

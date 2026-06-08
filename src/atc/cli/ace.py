@@ -1,6 +1,6 @@
 """``atc ace`` subcommands — status reporting from Ace and Manager sessions.
 
-These commands are called by agents (via CLAUDE.md instructions) and by hook
+These commands are called by agents (via role instructions) and by hook
 scripts (PostToolUse, Stop) to report session status back to the ATC API.
 """
 

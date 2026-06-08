@@ -27,7 +27,11 @@ from atc.agents.base import (
 )
 from atc.agents.claude_runtime import (
     accept_startup_dialogs,
+)
+from atc.agents.claude_runtime import (
     send_instruction as claude_send_instruction,
+)
+from atc.agents.claude_runtime import (
     wait_for_prompt as claude_wait_for_prompt,
 )
 from atc.terminal.control import send_instruction_async
@@ -254,34 +258,34 @@ class ClaudeCodeProvider:
         working_dir: str,
         context_file: Path | None = None,
     ) -> None:
-        """Create working_dir and optionally copy context_file to CLAUDE.md.
+        """Create working_dir and optionally copy role instructions.
 
-        Skips the copy if working_dir/CLAUDE.md already exists so we never
-        overwrite a file deployed by AceDeploySpec / ManagerDeploySpec.
+        Writes provider-neutral AGENTS.md plus CLAUDE.md for Claude Code
+        compatibility. Existing files are preserved so we never overwrite files
+        deployed by AceDeploySpec / ManagerDeploySpec.
         """
         import os as _os
 
         _os.makedirs(working_dir, exist_ok=True)
-        logger.debug(
-            "prepare_workspace: ensured %s exists (session %s)", working_dir, session_id
-        )
+        logger.debug("prepare_workspace: ensured %s exists (session %s)", working_dir, session_id)
 
         if context_file is not None:
-            dest = Path(working_dir) / "CLAUDE.md"
-            if not dest.exists():
-                shutil.copy2(str(context_file), str(dest))
-                logger.info(
-                    "prepare_workspace: copied %s → %s (session %s)",
-                    context_file,
-                    dest,
-                    session_id,
-                )
-            else:
-                logger.debug(
-                    "prepare_workspace: %s already exists, skipping copy (session %s)",
-                    dest,
-                    session_id,
-                )
+            for filename in ("AGENTS.md", "CLAUDE.md"):
+                dest = Path(working_dir) / filename
+                if not dest.exists():
+                    shutil.copy2(str(context_file), str(dest))
+                    logger.info(
+                        "prepare_workspace: copied %s → %s (session %s)",
+                        context_file,
+                        dest,
+                        session_id,
+                    )
+                else:
+                    logger.debug(
+                        "prepare_workspace: %s already exists, skipping copy (session %s)",
+                        dest,
+                        session_id,
+                    )
 
     async def is_ready(self, session_id: str) -> bool:
         """Return True when the session's tmux pane shows an idle Claude prompt."""
