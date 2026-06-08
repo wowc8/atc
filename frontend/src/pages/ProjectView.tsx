@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import StatusBadge from "../components/common/StatusBadge";
@@ -7,28 +7,7 @@ import TaskBoard from "../components/leader/TaskBoard";
 import AceList from "../components/ace/AceList";
 import AceConsole from "../components/ace/AceConsole";
 import ContextHub from "../components/context/ContextHub";
-import ResizeHandle from "../components/common/ResizeHandle";
 import "./ProjectView.css";
-
-const MIN_LEFT = 280;
-const MIN_TASKS = 120;
-
-function readStorage(key: string, fallback: number): number {
-  try {
-    const v = globalThis.localStorage?.getItem(key);
-    return v !== null && v !== undefined ? Number(v) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStorage(key: string, value: number): void {
-  try {
-    globalThis.localStorage?.setItem(key, String(value));
-  } catch {
-    // Storage can be unavailable in tests or hardened browser contexts.
-  }
-}
 
 export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
@@ -48,80 +27,6 @@ export default function ProjectView() {
     expandedAceId !== null &&
     projectSessions.some((s) => s.id === expandedAceId);
   const activeAceId = expandedAceExists ? expandedAceId : null;
-
-  // Resize state — pixel sizes persisted to localStorage
-  const [leftWidth, setLeftWidth] = useState(() =>
-    readStorage("atc:pv:split", Math.round(window.innerWidth * 0.4))
-  );
-  const [tasksHeight, setTasksHeight] = useState(() =>
-    readStorage("atc:pv:tasks-h", 240)
-  );
-  const [leaderHeight] = useState(() => readStorage("atc:pv:leader-h", 240));
-
-  const layoutRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    writeStorage("atc:pv:split", leftWidth);
-  }, [leftWidth]);
-  useEffect(() => {
-    writeStorage("atc:pv:tasks-h", tasksHeight);
-  }, [tasksHeight]);
-  useEffect(() => {
-    writeStorage("atc:pv:leader-h", leaderHeight);
-  }, [leaderHeight]);
-
-  const handleSplitDrag = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = leftWidth;
-
-      const onMove = (ev: MouseEvent) => {
-        const containerWidth =
-          layoutRef.current?.offsetWidth ?? window.innerWidth;
-        const next = Math.max(
-          MIN_LEFT,
-          Math.min(
-            startWidth + ev.clientX - startX,
-            containerWidth - 360 - 4
-          )
-        );
-        setLeftWidth(next);
-      };
-
-      const onUp = () => {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-      };
-
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [leftWidth]
-  );
-
-  const handleTasksDrag = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startY = e.clientY;
-      const startHeight = tasksHeight;
-
-      const onMove = (ev: MouseEvent) => {
-        const next = Math.max(MIN_TASKS, startHeight + ev.clientY - startY);
-        setTasksHeight(next);
-      };
-
-      const onUp = () => {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-      };
-
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    },
-    [tasksHeight]
-  );
-
 
   if (!project) {
     return (
@@ -144,9 +49,9 @@ export default function ProjectView() {
         )}
       </div>
 
-      <div className="project-view__layout" ref={layoutRef}>
-        <aside className="project-view__left" style={{ width: leftWidth }}>
-          <div className="panel project-view__leader" style={{ minHeight: leaderHeight }}>
+      <div className="project-view__layout">
+        <aside className="project-view__left">
+          <div className="panel project-view__leader">
             <LeaderConsole
               projectId={project.id}
               leader={leader}
@@ -155,18 +60,13 @@ export default function ProjectView() {
             />
           </div>
 
-          <div
-            className="panel project-view__tasks"
-            style={{ height: tasksHeight }}
-          >
+          <div className="panel project-view__tasks">
             <TaskBoard
               projectId={project.id}
               taskGraphs={projectTaskGraphs}
               onRefresh={fetchAll}
             />
           </div>
-
-          <ResizeHandle direction="row" onMouseDown={handleTasksDrag} />
 
           <div
             className={`panel project-view__aces${activeAceId ? " project-view__aces--expanded" : ""}`}
@@ -199,8 +99,6 @@ export default function ProjectView() {
             />
           </div>
         </aside>
-
-        <ResizeHandle direction="col" onMouseDown={handleSplitDrag} />
       </div>
     </div>
   );

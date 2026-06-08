@@ -367,6 +367,17 @@ class TestDeployManagerFiles:
         assert "Stay under budget" in content
         assert "No force-pushes" in content
 
+    def test_reporting_instructions_use_runtime_session_id(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        manager_spec.session_id = "manager-session-001"
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert 'atc ace status "manager-session-001" working' in content
+        assert 'atc ace status "manager-session-001" waiting' in content
+        assert 'atc ace status "leader-bravo" working' not in content
+        assert "runtime session ID" in content
+
     def test_settings_includes_tower_command(
         self, manager_spec: ManagerDeploySpec, staging_root: Path
     ) -> None:
