@@ -112,7 +112,12 @@ class TestSubmitGoal:
         await create_leader(db, project.id)
         tower = TowerController(db, event_bus)
 
-        result = await tower.submit_goal(project.id, "Build feature X")
+        with patch.object(
+            tower,
+            "_send_leader_kickoff",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await tower.submit_goal(project.id, "Build feature X")
 
         assert result["status"] == "queued"
         assert result["delivery_state"] == "queued"
@@ -174,10 +179,15 @@ class TestSubmitGoal:
         await create_leader(db, project.id)
         tower = TowerController(db, event_bus)
 
-        await tower.submit_goal(project.id, "First goal")
-        await tower.mark_complete()
+        with patch.object(
+            tower,
+            "_send_leader_kickoff",
+            new=AsyncMock(return_value=None),
+        ):
+            await tower.submit_goal(project.id, "First goal")
+            await tower.mark_complete()
 
-        result = await tower.submit_goal(project.id, "Second goal")
+            result = await tower.submit_goal(project.id, "Second goal")
         assert result["status"] == "queued"
 
     async def test_submit_goal_after_error(
@@ -188,10 +198,15 @@ class TestSubmitGoal:
         await create_leader(db, project.id)
         tower = TowerController(db, event_bus)
 
-        await tower.submit_goal(project.id, "First goal")
-        tower._state = TowerState.ERROR  # simulate error
+        with patch.object(
+            tower,
+            "_send_leader_kickoff",
+            new=AsyncMock(return_value=None),
+        ):
+            await tower.submit_goal(project.id, "First goal")
+            tower._state = TowerState.ERROR  # simulate error
 
-        result = await tower.submit_goal(project.id, "Recovery goal")
+            result = await tower.submit_goal(project.id, "Recovery goal")
         assert result["status"] == "queued"
 
 
@@ -677,3 +692,40 @@ class TestAuthBlockDetection:
         assert tower._extract_auth_blocker("Not logged in · Please run /login") is not None
         assert tower._extract_auth_blocker("Run in another terminal: security unlock-keychain") is not None
         assert tower._extract_auth_blocker("All good, working normally") is None
+
+
+@pytest.mark.asyncio
+async def test_submit_goal_returns_observed_kickoff_failure(
+    db, event_bus: EventBus
+) -> None:
+    from atc.runtime.models import RoleKind, RuntimeDeliveryResult
+
+    project = await create_project(db, "failed-kickoff-proj")
+    await create_leader(db, project.id)
+    tower = TowerController(db, event_bus)
+    failed_delivery = RuntimeDeliveryResult(
+        session_id="leader-sess-123",
+        provider_name="codex",
+        role=RoleKind.LEADER,
+        status="blocked",
+        stage="delivery",
+        verdict="blocked",
+        reason_code="auth_required",
+        message="auth required",
+    )
+
+    with patch.object(
+        TowerController,
+        "_send_leader_kickoff",
+        new=AsyncMock(return_value=failed_delivery),
+    ):
+        with patch(
+            "atc.tower.controller.start_leader",
+            new=AsyncMock(return_value="leader-sess-123"),
+        ):
+            result = await tower.submit_goal(project.id, "Build feature X")
+
+    assert result["status"] == "blocked"
+    assert result["delivery_state"] == "blocked"
+    assert result["delivery"]["reason_code"] == "auth_required"
+    assert "inspect Leader runtime" in result["recovery"]

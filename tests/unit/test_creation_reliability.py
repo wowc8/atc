@@ -278,8 +278,9 @@ class TestStartAceDelivery:
         )
 
         conn = AsyncMock()
-        with pytest.raises(RuntimeError, match="Failed to deliver instruction"):
-            await start_ace(conn, session.id, instruction="Do work")
+        result = await start_ace(conn, session.id, instruction="Do work")
 
+        assert result is mock_send.return_value
+        assert result.status == "failed"
         mock_update.assert_any_await(conn, session.id, "working")
         mock_update.assert_any_await(conn, session.id, "error")
