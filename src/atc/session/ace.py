@@ -574,9 +574,23 @@ async def start_ace(
     if instruction:
         result = await _send_session_instruction(conn, session_id, instruction)
         if not result.ok:
-            logger.error("Session %s: instruction delivery failed, marking error", session_id)
-            await transition(session_id, SessionStatus.WORKING, SessionStatus.ERROR, event_bus)
-            await db_ops.update_session_status(conn, session_id, SessionStatus.ERROR.value)
+            if result.status == "blocked" or result.verdict == "blocked":
+                logger.warning(
+                    "Session %s: instruction delivery blocked (%s), marking waiting",
+                    session_id,
+                    result.reason_code,
+                )
+                await transition(
+                    session_id,
+                    SessionStatus.WORKING,
+                    SessionStatus.WAITING,
+                    event_bus,
+                )
+                await db_ops.update_session_status(conn, session_id, SessionStatus.WAITING.value)
+            else:
+                logger.error("Session %s: instruction delivery failed, marking error", session_id)
+                await transition(session_id, SessionStatus.WORKING, SessionStatus.ERROR, event_bus)
+                await db_ops.update_session_status(conn, session_id, SessionStatus.ERROR.value)
         return result
     return None
 
