@@ -126,7 +126,9 @@ class TestLeaderLifecycle:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "started"
+        assert data["status"] == "queued"
+        assert data["delivery_state"] == "queued"
+        assert "does not prove" in data["recovery"]
         assert "session_id" in data
 
     def test_start_and_stop_leader(
@@ -165,7 +167,10 @@ class TestLeaderLifecycle:
             json={"message": "Hello leader"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "delivered"
+        data = resp.json()
+        assert data["status"] == "submitted"
+        assert data["delivery_state"] == "submitted"
+        assert "provider acknowledgement" in data["message"]
         mock_send.assert_called()
 
     def test_send_leader_message_surfaces_blocked_delivery(
@@ -287,7 +292,9 @@ class TestTowerStatus:
         resp = client.post("/api/tower/goal", json={"project_id": project_id, "goal": "Ship v1"})
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "accepted"
+        assert data["status"] == "queued"
+        assert data["delivery_state"] == "queued"
+        assert "not proof" in data["recovery"]
         assert data["project_id"] == project_id
         assert "session_id" in data
         assert "context_package" in data

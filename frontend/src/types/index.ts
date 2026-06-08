@@ -215,6 +215,26 @@ export interface FeatureFlag {
   updated_at: string;
 }
 
+export interface DeliveryStatusResponse {
+  status: string;
+  delivery_state: "queued" | "submitted" | "started" | "delivered" | "confirmed" | "blocked" | "failed" | string;
+  message?: string;
+  session_id?: string;
+  project_id?: string;
+  leader_session_id?: string;
+  provider?: string;
+  recovery?: string;
+  delivery?: {
+    status?: string;
+    stage?: string | null;
+    verdict?: string | null;
+    reason_code?: string | null;
+    trace_id?: string | null;
+    message?: string | null;
+    details?: Record<string, unknown>;
+  };
+}
+
 export interface AppState {
   projects: Project[];
   leaders: Record<string, Leader>;

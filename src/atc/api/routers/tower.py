@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from atc.api.delivery import delivery_response
 from atc.tower.controller import TowerBusyError, TowerController
 
 router = APIRouter()
@@ -183,8 +184,12 @@ async def submit_goal(body: GoalRequest, request: Request) -> dict:
 
 
 @router.post("/message")
-async def send_message(body: MessageRequest, request: Request) -> dict[str, str]:
-    """Send a message to Tower's Claude Code terminal."""
+async def send_message(body: MessageRequest, request: Request) -> dict[str, object]:
+    """Submit a message to Tower's terminal.
+
+    This endpoint can only prove the low-level tmux key submission completed;
+    it does not prove the provider read, accepted, or acted on the message.
+    """
     tower = _get_tower(request)
 
     try:
@@ -196,7 +201,12 @@ async def send_message(body: MessageRequest, request: Request) -> dict[str, str]
             status_code=409, detail=f"Tower pane unavailable: {exc}"
         ) from exc
 
-    return {"status": "sent"}
+    return delivery_response(
+        None,
+        fallback_state="submitted",
+        message="Message submitted to Tower terminal; provider acknowledgement is not verified",
+        recovery="inspect Tower runtime/session status for delivery confirmation",
+    )
 
 
 @router.post("/complete")

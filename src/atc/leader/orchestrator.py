@@ -317,13 +317,30 @@ class LeaderOrchestrator:
         if assignment is None:
             raise ValueError(f"No Ace assigned to task graph {task_graph_id}")
 
-        await start_ace(
+        result = await start_ace(
             self.conn,
             assignment.ace_session_id,
             instruction=instruction,
             event_bus=self.event_bus,
         )
         assignment.status = "working"
+        if assignment.assignment_id:
+            try:
+                await db_ops.update_task_assignment_status(
+                    self.conn,
+                    assignment.assignment_id,
+                    "working",
+                )
+            except LifecycleTransitionError as exc:
+                self._record_transition_block(exc)
+                raise
+            except ValueError:
+                logger.debug(
+                    "Assignment %s disappeared while instructing task %s",
+                    assignment.assignment_id,
+                    task_graph_id,
+                )
+        return result
 
     async def mark_task_done(self, task_graph_id: str) -> None:
         """Mark a task graph entry as done and clean up its Ace session."""

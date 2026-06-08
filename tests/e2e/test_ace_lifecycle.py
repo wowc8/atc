@@ -111,7 +111,10 @@ class TestAceLifecycle:
             json={"instruction": "echo hello"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "started"
+        data = resp.json()
+        assert data["status"] == "delivered"
+        assert data["delivery_state"] == "delivered"
+        assert data["delivery"]["reason_code"] == "delivery_unverified"
 
         # Message
         resp = client.post(
@@ -119,7 +122,10 @@ class TestAceLifecycle:
             json={"message": "do something"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "sent"
+        data = resp.json()
+        assert data["status"] == "submitted"
+        assert data["delivery_state"] == "submitted"
+        assert "provider acknowledgement" in data["message"]
 
         # Stop
         resp = client.post(f"/api/aces/{session_id}/stop")
