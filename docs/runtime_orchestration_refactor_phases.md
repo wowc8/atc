@@ -1,12 +1,12 @@
 # ATC Runtime/Orchestration Hardening Refactor Phases
 
-**Status:** In progress / planning-to-implementation handoff
-**Last updated:** 2026-06-07 03:47 UTC
+**Status:** Complete — Phases 0–8 implemented, merged, and post-validated
+**Last updated:** 2026-06-09
 **Source:** `projects/atc.md` refactor plan plus Matthew's Tower → Leader → Ace hierarchy clarification
 
 ## Purpose
 
-This document turns the ATC Runtime/Orchestration Hardening refactor into implementable phases. The refactor target is the runtime/orchestration layer above tmux: instruction truth, session lifecycle ownership, recovery, and role-correct Tower → Leader → Ace coordination.
+This document records the completed ATC Runtime/Orchestration Hardening refactor phases. The refactor targeted the runtime/orchestration layer above tmux: instruction truth, session lifecycle ownership, recovery, and role-correct Tower → Leader → Ace coordination.
 
 The goal is not to replace tmux. The goal is to make the shared tmux-backed runtime boundary truthful, observable, provider-neutral, and safe for Tower, Leader, and Ace workflows.
 
@@ -264,10 +264,25 @@ Playwright evidence should be stored under a timestamped project-local `screensh
 8. **PR H:** API/UX state vocabulary cleanup.
 9. **PR I:** Scenario regression suite and removal of obsolete hacks.
 
-## Immediate next action
+## Completion status
 
-Start with **Phase 0 → Phase 1**:
+The planned Runtime/Orchestration Hardening phase sequence is complete through its final listed phase, **Phase 8**. The phases were implemented and merged through the phase PR sequence, then followed by validation-driven hardening fixes for blocked Ace instructions and Codex stale trust scrollback detection.
 
-1. Run a fresh local ATC validation of Codex-default + global Tower Start.
-2. Map the current delivery/session call paths.
-3. Add the structured delivery trace model and reason-code vocabulary with minimal behavior change.
+| Phase | Completion evidence |
+|---|---|
+| Phase 0 — Baseline validation and docs alignment | Implemented and merged in PR #258 |
+| Phase 1 — Delivery trace events and result vocabulary | Implemented and merged in PR #260 |
+| Phase 2 — Shared hardened session runner extraction | Implemented and merged in PR #261 |
+| Phase 3 — Lifecycle state machines and transition guards | Implemented and merged in PR #262 |
+| Phase 4 — Dialog/interruption pipeline | Implemented and merged in PR #263 |
+| Phase 5 — Migrate Tower/Leader/Ace operations to the runner | Implemented and merged in PR #264, with follow-up PR #265 |
+| Phase 6 — Reconcile and repair believed-vs-actual state | Implemented and merged in PR #266 |
+| Phase 7 — API/UX cleanup and operator truth surface | Implemented and merged in PR #268, with follow-up PR #269 |
+| Phase 8 — Scenario regression suite and cleanup | Implemented and merged in PR #270 |
+
+Post-phase validation follow-ups:
+
+- PR #271 preserved blocked runtime-interrupt assignments for operator resolution instead of destroying the Ace/task path.
+- PR #272 fixed Codex stale trust scrollback so resolved trust prompts do not continue blocking ready Codex sessions.
+
+Future runtime/orchestration work should be treated as new follow-up maintenance or a new scoped plan, not as restarting Phase 0 or Phase 1.
