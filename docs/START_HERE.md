@@ -16,11 +16,13 @@ Minimum reading order for any non-trivial change:
 
 Examples:
 - provider/runtime work:
+  - `docs/service_model.md`
   - `docs/runtime_orchestration_refactor_phases.md`
   - `docs/provider_runtime_refactor_plan.md`
   - `docs/provider_cli_wrapper_spec.md`
   - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`
 - API or architecture work:
+  - `docs/service_model.md`
   - `docs/ARCHITECTURE.md`
   - `docs/API.md`
 - agent role/boundary work:
@@ -56,6 +58,8 @@ These docs exist to:
 - make future agents faster and less likely to damage the codebase
 
 ## Document index
+- `docs/service_model.md`
+  - visual service/class relationship map for fast AI-agent architecture onboarding
 - `docs/CODEBASE_MAP.md`
   - high-level current-state code organization and ownership map
 - `docs/HARD_RULES.md`

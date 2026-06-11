@@ -4,6 +4,8 @@
 
 ## Overview
 
+For a faster visual map of the current services/classes and how they connect, start with [`docs/service_model.md`](service_model.md). It includes a rendered diagram image at [`docs/assets/atc-service-model.png`](assets/atc-service-model.png).
+
 ATC is a hierarchical AI orchestration platform with a four-tier chain of command:
 
 ```
