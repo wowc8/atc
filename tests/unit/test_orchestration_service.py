@@ -262,7 +262,7 @@ async def test_send_instruction_reuses_idempotent_response(db_conn) -> None:
         second = await service.send_instruction(
             SendInstructionRequest(
                 session_id=session.id,
-                instruction="Do the thing again",
+                instruction="Do the thing",
                 idempotency_key="send-idempotent",
             )
         )
@@ -272,6 +272,41 @@ async def test_send_instruction_reuses_idempotent_response(db_conn) -> None:
     assert second.request_status == "submitted"
     assert second.delivery_state == "submitted"
     mock_send.assert_awaited_once_with(db_conn, session.id, "Do the thing")
+
+
+@pytest.mark.asyncio
+async def test_send_instruction_idempotency_conflicts_on_different_request(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, "ATC")
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type="ace",
+        name="ace-1",
+        status="working",
+    )
+    service = OrchestrationService(db_conn)
+    with patch(
+        "atc.orchestration.service._send_session_instruction",
+        new=AsyncMock(return_value=_delivery_result()),
+    ):
+        await service.send_instruction(
+            SendInstructionRequest(
+                session_id=session.id,
+                instruction="Do the thing",
+                idempotency_key="send-conflict",
+            )
+        )
+
+    with pytest.raises(OrchestrationException) as exc:
+        await service.send_instruction(
+            SendInstructionRequest(
+                session_id=session.id,
+                instruction="Do a different thing",
+                idempotency_key="send-conflict",
+            )
+        )
+
+    assert exc.value.code.value == "IDEMPOTENCY_CONFLICT"
 
 
 @pytest.mark.asyncio

@@ -378,6 +378,18 @@ class OrchestrationService:
                         f"{existing.operation_type}"
                     ),
                 )
+            existing_request = json.loads(existing.request_payload)
+            if (
+                existing_request.get("session_id") != request.session_id
+                or existing_request.get("instruction") != request.instruction
+            ):
+                raise OrchestrationException(
+                    OrchestrationErrorCode.IDEMPOTENCY_CONFLICT,
+                    (
+                        f"Operation id {request.idempotency_key} already used for "
+                        "a different instruction request"
+                    ),
+                )
             if existing.response_payload:
                 payload = json.loads(existing.response_payload)
                 return self._operation_response_from_payload(payload)

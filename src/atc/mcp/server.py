@@ -99,6 +99,16 @@ class MCPServer:
                 "inputSchema": {
                     "type": "object",
                     "required": ["project_id", "goal", "idempotency_key"],
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "goal": {"type": "string"},
+                        "provider": {"type": "string"},
+                        "parent_session_id": {"type": "string"},
+                        "idempotency_key": {"type": "string"},
+                        "reuse_existing_idle": {"type": "boolean", "default": True},
+                        "require_clean_scope": {"type": "boolean", "default": False},
+                        "context": {"type": "object"},
+                    },
                 },
             },
             {
@@ -110,6 +120,16 @@ class MCPServer:
                 "inputSchema": {
                     "type": "object",
                     "required": ["project_id", "instruction", "idempotency_key"],
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "instruction": {"type": "string"},
+                        "idempotency_key": {"type": "string"},
+                        "task_id": {"type": "string"},
+                        "parent_session_id": {"type": "string"},
+                        "provider": {"type": "string"},
+                        "host": {"type": "string"},
+                        "context": {"type": "object"},
+                    },
                 },
             },
             {
@@ -121,17 +141,42 @@ class MCPServer:
                 "inputSchema": {
                     "type": "object",
                     "required": ["session_id", "instruction", "idempotency_key"],
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "instruction": {"type": "string"},
+                        "idempotency_key": {"type": "string"},
+                        "await_delivery": {"type": "boolean", "default": True},
+                    },
                 },
             },
             {
                 "name": "wait_for_session",
                 "description": "Wait for a session to reach target orchestration statuses",
-                "inputSchema": {"type": "object", "required": ["session_id", "target_statuses"]},
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["session_id", "target_statuses"],
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "target_statuses": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "timeout_ms": {"type": "integer", "default": 120000},
+                    },
+                },
             },
             {
                 "name": "cancel_session",
                 "description": "Cancel or stop an orchestration session",
-                "inputSchema": {"type": "object", "required": ["session_id"]},
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["session_id"],
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "force": {"type": "boolean", "default": False},
+                        "reason": {"type": "string"},
+                    },
+                },
             },
         ]
 

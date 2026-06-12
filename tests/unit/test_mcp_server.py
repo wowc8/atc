@@ -34,6 +34,28 @@ async def test_list_tools_includes_orchestration_surface() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mutating_tool_schemas_expose_required_properties() -> None:
+    service = AsyncMock()
+    server = MCPServer(service)
+    tools = {tool["name"]: tool for tool in server.list_tools()}
+    for name in [
+        "spawn_leader",
+        "spawn_ace",
+        "send_instruction",
+        "wait_for_session",
+        "cancel_session",
+    ]:
+        schema = tools[name]["inputSchema"]
+        properties = schema["properties"]
+        assert all(field in properties for field in schema["required"])
+    assert (
+        tools["send_instruction"]["inputSchema"]["properties"]["await_delivery"]["default"]
+        is True
+    )
+    assert tools["cancel_session"]["inputSchema"]["properties"]["force"]["default"] is False
+
+
+@pytest.mark.asyncio
 async def test_call_tool_delegates_spawn_leader() -> None:
     summary = SessionSummary(
         id="leader-1",
