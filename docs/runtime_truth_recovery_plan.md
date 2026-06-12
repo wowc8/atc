@@ -1,7 +1,7 @@
 # Runtime Truth and Recovery Plan
 
-**Status:** Phases 1-4 implemented; Phase 5 next  
-**Last updated:** 2026-06-12 12:33 UTC  
+**Status:** Phases 1-5 implemented; Phase 6 next  
+**Last updated:** 2026-06-12 13:22 UTC  
 **Scope:** Provider-neutral runtime truth, delivery verification, health, and recovery for ATC Tower → Leader → Ace orchestration  
 **Primary design constraint:** Provider-specific terminal behavior, including Codex update prompts and starter screens, must remain encapsulated inside provider adapters/classifiers. Tower, Leader, Ace, task graph, API, CLI, and UI layers may only depend on provider-neutral runtime truth.
 
@@ -328,6 +328,8 @@ runtime evidence. Full repair commands remain Phase 5/6 work.
 - UI evidence shows task state and runtime state separately.
 
 ## Phase 5 — Health commands and inspect-first recovery CLI
+
+**Implementation status:** Implemented in PR #291. Added provider-neutral `RuntimeHealth` and recovery planning service, REST endpoints for Leader/Ace health and recovery dry-run/apply plans, CLI wrappers, project-owned Ace scoping guards, and tests for health shape, cross-project Ace safety, and inspect-first recovery semantics.
 
 **Goal:** Add human/operator commands that summarize runtime truth and offer safe recovery paths.
 
