@@ -25,6 +25,11 @@ from typing import TYPE_CHECKING, Any
 
 from atc.config import load_settings
 from atc.leader.context_package import build_context_package
+from atc.leader.kickoff import (
+    build_leader_kickoff_message,
+    persist_leader_kickoff_payload,
+    verify_leader_kickoff_delivery,
+)
 from atc.leader.leader import send_leader_message, start_leader, stop_leader
 from atc.runtime.models import RoleKind, RuntimeDeliveryResult
 from atc.session.state_machine import SessionStatus
@@ -379,14 +384,19 @@ class TowerController:
                 },
             )
 
-            # Send kickoff and start background verification loop
+            # Send kickoff and derive a provider-neutral startup verification verdict.
             kickoff_delivery = await self._send_leader_kickoff(leader_session_id, goal)
-            asyncio.create_task(self._verify_leader_started(project_id, leader_session_id, goal))
+            verification = verify_leader_kickoff_delivery(kickoff_delivery)
+            kickoff_payload_persisted = await self._leader_kickoff_payload_persisted(project_id)
+            if verification.kickoff_verified:
+                asyncio.create_task(
+                    self._verify_leader_started(project_id, leader_session_id, goal)
+                )
 
-            # Notify Tower's own Claude session so it knows a Leader is running
-            # and can begin monitoring.  Best-effort — don't fail the whole goal
-            # submission if Tower's terminal isn't ready yet.
-            if self._current_session_id:
+            # Notify Tower's own Claude session only after the kickoff has verified
+            # enough runtime truth for normal monitoring. Blocked/unverified startup
+            # stays surfaced as startup state instead of triggering a monitoring loop.
+            if self._current_session_id and verification.kickoff_verified:
                 asyncio.create_task(
                     self._notify_tower_goal_started(project_id, leader_session_id, goal)
                 )
@@ -403,6 +413,8 @@ class TowerController:
                     "context_package": context_package,
                     "provider": kickoff_delivery.provider_name,
                     "delivery": kickoff_delivery.as_dict(),
+                    **verification.as_dict(),
+                    "kickoff_payload_persisted": kickoff_payload_persisted,
                     "recovery": (
                         "inspect Leader runtime/session status before assuming "
                         "kickoff delivery"
@@ -411,7 +423,9 @@ class TowerController:
 
             return {
                 "status": "queued",
-                "delivery_state": "queued",
+                "delivery_state": verification.kickoff_state,
+                **verification.as_dict(),
+                "kickoff_payload_persisted": kickoff_payload_persisted,
                 "message": (
                     "Goal queued; Leader session was created and kickoff verification "
                     "is still pending"
@@ -606,6 +620,19 @@ class TowerController:
             logger.exception("Failed to respawn leader for project %s", project_id)
             return None
 
+    async def _leader_kickoff_payload_persisted(self, project_id: str) -> bool:
+        leader = await db_ops.get_leader_by_project(self._db, project_id)
+        if leader is None or not leader.context:
+            return False
+        if isinstance(leader.context, dict):
+            context = leader.context
+        else:
+            try:
+                context = json.loads(leader.context)
+            except json.JSONDecodeError:
+                return False
+        return isinstance(context, dict) and bool(context.get("leader_kickoff_payload"))
+
     async def _send_leader_kickoff(
         self, session_id: str, goal: str
     ) -> RuntimeDeliveryResult | None:
@@ -632,34 +659,23 @@ class TowerController:
             )
             context_rows = await cursor.fetchall()
 
-            lines = [
-                f"# Mission Brief — {project_name}",
-                "",
-                "## Goal",
-                goal,
-                "",
-            ]
-            if description:
-                lines += ["## Project Description", description, ""]
-            if repo_path:
-                lines += ["## Repository", f"Local path: {repo_path}", ""]
-            if github_repo:
-                lines += [f"GitHub: {github_repo}", ""]
-            if context_rows:
-                lines += ["## Project Context", ""]
-                for key, val in context_rows:
-                    if key not in ("goal", "project_description", "repo_path", "github_repo"):
-                        lines += [f"**{key}:** {val}", ""]
-            lines += [
-                "## Your Instructions",
-                "1. Decompose the goal into well-scoped tasks using the API.",
-                "2. Spawn Aces for each ready task.",
-                "3. Monitor progress and drive to completion.",
-                "4. Report back to Tower when done.",
-                "",
-                "Begin NOW. Do not ask for clarification — start decomposing.",
-            ]
-            kickoff_msg = "\n".join(lines)
+            kickoff_msg = build_leader_kickoff_message(
+                project_id=self._current_project_id,
+                project_name=project_name,
+                goal=goal,
+                description=description,
+                repo_path=repo_path,
+                github_repo=github_repo,
+                context_rows=context_rows,
+            )
+            await persist_leader_kickoff_payload(
+                self._db,
+                project_id=self._current_project_id,
+                goal=goal,
+                message=kickoff_msg,
+                source="tower-submit-goal",
+                auto_kickoff=True,
+            )
 
             try:
                 delivery = await send_leader_message(

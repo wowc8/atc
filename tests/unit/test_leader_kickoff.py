@@ -1,0 +1,139 @@
+"""Tests for Leader kickoff payload persistence and verification."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from atc.leader.kickoff import (
+    build_leader_kickoff_message,
+    persist_leader_kickoff_payload,
+    verify_leader_kickoff_delivery,
+)
+from atc.runtime.models import (
+    DeliveryState,
+    RoleKind,
+    RuntimeDeliveryResult,
+    RuntimeState,
+)
+from atc.state.db import (
+    _SCHEMA_SQL,
+    create_leader,
+    create_project,
+    get_connection,
+    run_migrations,
+)
+
+
+@pytest.fixture
+async def db():
+    await run_migrations(":memory:")
+    async with get_connection(":memory:") as conn:
+        await conn.executescript(_SCHEMA_SQL)
+        await conn.commit()
+        yield conn
+
+
+@pytest.mark.asyncio
+async def test_persist_leader_kickoff_payload_is_recoverable(db) -> None:
+    project = await create_project(db, "kickoff-proj")
+    await create_leader(db, project.id, goal="old goal")
+    message = build_leader_kickoff_message(
+        project_id=project.id,
+        project_name=project.name,
+        goal="Build runtime truth",
+        description="phase 3",
+        api_style="explicit-api",
+    )
+
+    payload = await persist_leader_kickoff_payload(
+        db,
+        project_id=project.id,
+        goal="Build runtime truth",
+        message=message,
+        source="test",
+    )
+
+    cursor = await db.execute(
+        "SELECT context, goal FROM leaders WHERE project_id = ?", (project.id,)
+    )
+    context_json, goal = await cursor.fetchone()
+    context = json.loads(context_json)
+    assert goal == "Build runtime truth"
+    assert payload.goal == "Build runtime truth"
+    assert context["leader_original_goal"] == "Build runtime truth"
+    assert context["leader_kickoff_payload"]["message"] == message
+    assert context["leader_kickoff_payload"]["source"] == "test"
+    assert f"/api/projects/{project.id}/leader/decompose" in message
+    assert "/api/projects/{project_id}" not in message
+
+
+def test_verify_leader_kickoff_accepts_active_delivery() -> None:
+    result = RuntimeDeliveryResult(
+        session_id="leader-1",
+        provider_name="codex",
+        role=RoleKind.LEADER,
+        status="confirmed",
+        stage="agent_output_observed",
+        verdict="confirmed",
+        reason_code="agent_output",
+        runtime_state=RuntimeState.ACTIVE,
+        delivery_state=DeliveryState.ACCEPTED_ACTIVE,
+    )
+
+    verification = verify_leader_kickoff_delivery(result)
+
+    assert verification.kickoff_verified is True
+    assert verification.kickoff_state == "accepted_active"
+    assert verification.runtime_created is True
+    assert verification.payload_written is True
+    assert verification.submit_sent is True
+    assert verification.provider_accepted is True
+    assert verification.leader_began_work is True
+
+
+def test_verify_leader_kickoff_distinguishes_pending_submission() -> None:
+    result = RuntimeDeliveryResult(
+        session_id="leader-1",
+        provider_name="codex",
+        role=RoleKind.LEADER,
+        status="accepted",
+        stage="submit_attempted",
+        verdict="accepted",
+        reason_code="submit_sent",
+        runtime_state=RuntimeState.READY,
+        delivery_state=DeliveryState.SUBMIT_SENT,
+    )
+
+    verification = verify_leader_kickoff_delivery(result)
+
+    assert verification.kickoff_verified is False
+    assert verification.kickoff_state == "submitted_pending_acceptance"
+    assert verification.payload_written is True
+    assert verification.submit_sent is True
+    assert verification.provider_accepted is False
+    assert verification.leader_began_work is False
+
+
+def test_verify_leader_kickoff_reports_blocker() -> None:
+    from atc.runtime.models import BlockerReason
+
+    result = RuntimeDeliveryResult(
+        session_id="leader-1",
+        provider_name="codex",
+        role=RoleKind.LEADER,
+        status="blocked",
+        stage="blocked",
+        verdict="blocked",
+        reason_code="runtime_update_required",
+        runtime_state=RuntimeState.BLOCKED,
+        delivery_state=DeliveryState.BLOCKED,
+        blocker_reason=BlockerReason.RUNTIME_UPDATE_REQUIRED,
+    )
+
+    verification = verify_leader_kickoff_delivery(result)
+
+    assert verification.kickoff_verified is False
+    assert verification.kickoff_state == "blocked"
+    assert verification.blocker_reason == "runtime_update_required"

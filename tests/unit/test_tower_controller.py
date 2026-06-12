@@ -120,7 +120,10 @@ class TestSubmitGoal:
             result = await tower.submit_goal(project.id, "Build feature X")
 
         assert result["status"] == "queued"
-        assert result["delivery_state"] == "queued"
+        assert result["delivery_state"] == "queued_unverified"
+        assert result["kickoff_verified"] is False
+        assert result["kickoff_state"] == "queued_unverified"
+        assert result["kickoff_payload_persisted"] is False
         assert "not proof" in result["recovery"]
         assert result["project_id"] == project.id
         assert result["leader_session_id"] == "leader-sess-123"
