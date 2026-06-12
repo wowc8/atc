@@ -34,6 +34,7 @@ from atc.state.db import (
     create_session,
     create_task_graph,
     get_connection,
+    get_session,
     run_migrations,
     update_task_assignment_dispatch,
 )
@@ -229,6 +230,103 @@ async def test_update_prompt_recovery_is_capability_and_policy_gated(db) -> None
 
 
 @pytest.mark.asyncio
+async def test_provider_blocker_reason_flows_from_inspection_to_recovery_plan(db) -> None:
+    project = await create_project(db, "provider-blocker-proj")
+    leader = await create_leader(db, project.id, goal="Recover update")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader-update",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%12", "atc", session.id),
+    )
+    await db.execute("UPDATE leaders SET session_id = ? WHERE id = ?", (session.id, leader.id))
+    await db.commit()
+
+    health = await leader_health(
+        db,
+        project.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=session.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.PROVIDER_PROMPT,
+                summary="Codex runtime update prompt visible",
+                details={
+                    "blocker_reason": BlockerReason.RUNTIME_UPDATE_REQUIRED.value,
+                    "recovery_capabilities": {
+                        "can_detect_update_prompt": True,
+                        "can_accept_update_prompt": False,
+                        "requires_fresh_session_after_update": True,
+                    },
+                },
+            )
+        ),
+    )
+
+    assert health.current_blocker == BlockerReason.RUNTIME_UPDATE_REQUIRED.value
+    plan = build_recovery_plan(health, mode="dry_run")
+    assert plan.actions[1]["action"] == "provider_update_required"
+    assert plan.safe_to_apply is False
+
+
+@pytest.mark.asyncio
+async def test_restart_policy_must_match_missing_vs_stale_reason(db) -> None:
+    project = await create_project(db, "restart-policy-proj")
+
+    missing = RuntimeHealth(
+        role="leader",
+        project_id=project.id,
+        runtime_exists=False,
+        pane_attached=False,
+        provider="codex",
+        runtime_state=RuntimeState.MISSING.value,
+        current_blocker=BlockerReason.PANE_MISSING.value,
+    )
+    stale = RuntimeHealth(
+        role="leader",
+        project_id=project.id,
+        runtime_exists=True,
+        pane_attached=True,
+        provider="codex",
+        runtime_state=RuntimeState.STALE.value,
+        current_blocker=BlockerReason.STALE_AFTER_UPDATE.value,
+    )
+
+    assert (
+        build_recovery_plan(missing, mode="apply", policy="restart_stale_runtime").refused_reason
+        == "apply_requires_explicit_policy"
+    )
+    assert (
+        build_recovery_plan(
+            missing,
+            mode="apply",
+            policy="auto_accept_updates_and_restart",
+        ).refused_reason
+        == "apply_requires_explicit_policy"
+    )
+    assert (
+        build_recovery_plan(stale, mode="apply", policy="restart_missing_pane").refused_reason
+        == "apply_requires_explicit_policy"
+    )
+    assert (
+        build_recovery_plan(missing, mode="apply", policy="restart_missing_pane").refused_reason
+        is None
+    )
+    assert (
+        build_recovery_plan(stale, mode="apply", policy="restart_stale_runtime").refused_reason
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_stale_leader_restart_apply_uses_persisted_goal(db, monkeypatch) -> None:
     project = await create_project(db, "stale-restart-proj")
     await create_leader(db, project.id, goal="Recover from stale runtime")
@@ -280,6 +378,109 @@ async def test_stale_leader_restart_apply_uses_persisted_goal(db, monkeypatch) -
         "started": {"project_id": project.id, "goal": "Recover from stale runtime"},
     }
     assert plan.actions[-1]["action"] == "restart_leader"
+
+
+@pytest.mark.asyncio
+async def test_stale_leader_restart_tolerates_missing_pane_stop_failure(db, monkeypatch) -> None:
+    project = await create_project(db, "stop-failure-proj")
+    leader = await create_leader(db, project.id, goal="Recover despite missing pane")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader-stale",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%missing", "atc", session.id),
+    )
+    await db.execute("UPDATE leaders SET session_id = ? WHERE id = ?", (session.id, leader.id))
+    await db.commit()
+
+    async def fake_stop(conn, project_id, *, event_bus=None):
+        raise RuntimeError("no such pane: %missing")
+
+    async def fake_start(conn, project_id, *, goal=None, event_bus=None, context_package=None):
+        return "replacement-session"
+
+    async def fake_health(conn, project_id, *, runtime_service=None):
+        return RuntimeHealth(
+            role="leader",
+            project_id=project_id,
+            runtime_exists=True,
+            pane_attached=True,
+            provider="codex",
+            session_id="replacement-session",
+            runtime_state=RuntimeState.READY.value,
+        )
+
+    import atc.runtime.health as health_module
+    from atc.leader import leader as leader_ops
+
+    monkeypatch.setattr(leader_ops, "stop_leader", fake_stop)
+    monkeypatch.setattr(leader_ops, "start_leader", fake_start)
+    monkeypatch.setattr(health_module, "leader_health", fake_health)
+
+    plan = await apply_recovery_plan(
+        db,
+        RuntimeHealth(
+            role="leader",
+            project_id=project.id,
+            runtime_exists=True,
+            pane_attached=True,
+            provider="codex",
+            session_id=session.id,
+            runtime_state=RuntimeState.STALE.value,
+            current_blocker=BlockerReason.STALE_AFTER_UPDATE.value,
+        ),
+        policy="restart_stale_runtime",
+    )
+
+    stale_session = await get_session(db, session.id)
+    assert plan.refused_reason is None
+    assert any(action["action"] == "stop_stale_leader" for action in plan.actions)
+    assert stale_session is not None
+    assert stale_session.status == "disconnected"
+    assert plan.actions[-1]["session_id"] == "replacement-session"
+
+
+@pytest.mark.asyncio
+async def test_stale_leader_restart_refuses_non_stale_stop_failure(db, monkeypatch) -> None:
+    project = await create_project(db, "stop-db-failure-proj")
+    await create_leader(db, project.id, goal="Do not split brain")
+    calls = {"started": False}
+
+    async def fake_stop(conn, project_id, *, event_bus=None):
+        raise RuntimeError("database locked")
+
+    async def fake_start(conn, project_id, *, goal=None, event_bus=None, context_package=None):
+        calls["started"] = True
+        return "should-not-start"
+
+    from atc.leader import leader as leader_ops
+
+    monkeypatch.setattr(leader_ops, "stop_leader", fake_stop)
+    monkeypatch.setattr(leader_ops, "start_leader", fake_start)
+
+    plan = await apply_recovery_plan(
+        db,
+        RuntimeHealth(
+            role="leader",
+            project_id=project.id,
+            runtime_exists=True,
+            pane_attached=True,
+            provider="codex",
+            runtime_state=RuntimeState.STALE.value,
+            current_blocker=BlockerReason.STALE_AFTER_UPDATE.value,
+        ),
+        policy="restart_stale_runtime",
+    )
+
+    assert plan.refused_reason == "stop_leader_failed"
+    assert calls["started"] is False
+    assert plan.actions[-1]["action"] == "stop_leader"
 
 
 @pytest.mark.asyncio
