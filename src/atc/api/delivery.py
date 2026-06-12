@@ -34,6 +34,13 @@ class DeliveryStatusResponse(BaseModel):
     leader_session_id: str | None = None
     provider: str | None = None
     delivery: dict[str, Any] | None = None
+    runtime_state: str | None = None
+    truth_delivery_state: str | None = None
+    blocker_reason: str | None = None
+    last_activity_at: str | None = None
+    last_inspected_at: str | None = None
+    provider_diagnostics: dict[str, Any] | None = None
+    recovery_recommendation: dict[str, Any] | None = None
     recovery: str | None = None
 
 
@@ -72,6 +79,15 @@ def delivery_response(
         leader_session_id=leader_session_id,
         provider=result.provider_name,
         delivery=result.as_dict(),
+        runtime_state=result.runtime_state.value if result.runtime_state else None,
+        truth_delivery_state=result.delivery_state.value if result.delivery_state else None,
+        blocker_reason=result.blocker_reason.value if result.blocker_reason else None,
+        last_activity_at=result.last_activity_at,
+        last_inspected_at=result.last_inspected_at,
+        provider_diagnostics=result.provider_diagnostics or None,
+        recovery_recommendation=result.recovery_recommendation.as_dict()
+        if result.recovery_recommendation
+        else None,
         recovery=recovery if not result.ok else None,
     ).model_dump(exclude_none=True)
 
