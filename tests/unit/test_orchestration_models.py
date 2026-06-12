@@ -140,8 +140,9 @@ def test_session_summary_accepts_raw_and_normalized_fields() -> None:
 
 
 def test_operation_accepted_response_minimal() -> None:
-    model = OperationAcceptedResponse(request_status="accepted", operation_id="op_123")
+    model = OperationAcceptedResponse(request_status="queued", operation_id="op_123")
     assert model.operation_id == "op_123"
+    assert model.delivery_state == "queued"
 
 
 def test_session_event_shape() -> None:

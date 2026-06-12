@@ -445,15 +445,16 @@ async def start_leader(
         response["kickoff_payload_persisted"] = kickoff_payload is not None
         return response
     return {
-        "status": "started",
-        "delivery_state": "started",
+        "status": "queued",
+        "delivery_state": "queued",
         "session_id": session_id,
         "leader_session_id": session_id,
         "project_id": project_id,
         "kickoff_verified": False,
         "kickoff_state": "not_requested",
         "kickoff_payload_persisted": kickoff_payload is not None,
-        "message": "Leader session started; no kickoff delivery was requested",
+        "message": "Leader session created; no kickoff delivery was requested or verified",
+        "recovery": "inspect Leader health before assuming the Leader acted on the goal",
     }
 
 
