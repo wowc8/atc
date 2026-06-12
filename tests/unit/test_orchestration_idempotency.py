@@ -54,6 +54,7 @@ async def test_spawn_leader_reuses_persisted_operation(db_conn) -> None:
     )
     response_json = {
         "request_status": "accepted",
+        "delivery_state": "accepted",
         "operation_id": "goal-1",
         "session": summary.model_dump(),
     }
@@ -92,6 +93,7 @@ async def test_spawn_ace_reuses_persisted_operation(db_conn) -> None:
     )
     response_json = {
         "request_status": "accepted",
+        "delivery_state": "accepted",
         "operation_id": "assign-1",
         "session": summary.model_dump(),
     }

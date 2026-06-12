@@ -45,10 +45,10 @@ class OrchestrationService:
         """Validate stored operation payloads while accepting legacy optimistic status."""
 
         normalized = dict(payload)
-        if normalized.get("request_status") == "accepted":
-            normalized["request_status"] = normalized.get("delivery_state") or "queued"
         if normalized.get("delivery_state") == "accepted":
             normalized["delivery_state"] = "queued"
+        if normalized.get("request_status") == "accepted":
+            normalized["request_status"] = normalized.get("delivery_state") or "queued"
         return OperationAcceptedResponse.model_validate(normalized)
 
     async def list_operations(

@@ -42,7 +42,11 @@ async def spawn_ace(body: SpawnAceRequest, request: Request) -> OperationAccepte
         raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None
 
 
-@router.post("/sessions/{session_id}/instruction", response_model=OperationAcceptedResponse, status_code=202)
+@router.post(
+    "/sessions/{session_id}/instruction",
+    response_model=OperationAcceptedResponse,
+    status_code=202,
+)
 async def send_instruction(
     session_id: str,
     body: SendInstructionRequest,
