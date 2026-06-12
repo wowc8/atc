@@ -1,7 +1,7 @@
 # Runtime Truth and Recovery Plan
 
-**Status:** Phases 1-6 implemented; Phase 7 next
-**Last updated:** 2026-06-12 13:52 UTC
+**Status:** Phases 1-7 implemented; Phase 8 next
+**Last updated:** 2026-06-12 14:34 UTC
 **Scope:** Provider-neutral runtime truth, delivery verification, health, and recovery for ATC Tower → Leader → Ace orchestration  
 **Primary design constraint:** Provider-specific terminal behavior, including Codex update prompts and starter screens, must remain encapsulated inside provider adapters/classifiers. Tower, Leader, Ace, task graph, API, CLI, and UI layers may only depend on provider-neutral runtime truth.
 
@@ -428,6 +428,16 @@ ATC does not need three independent communication systems. It needs one canonica
 - **`atc-mcp`:** optional external adapter for MCP-capable clients; it should bridge into `OrchestrationService`, not define separate orchestration behavior.
 
 ### Work
+
+**Implemented in Phase 7:**
+
+- Aligned orchestration response semantics around truthful front-door states: `queued`, `submitted`, `confirmed`, `blocked`, and `failed`.
+- Changed orchestration operation defaults from optimistic `accepted` to `queued`.
+- Made Leader spawn via orchestration report `queued` with recovery guidance instead of implying the Leader acted on the goal.
+- Made Ace spawn and send-instruction surfaces report `submitted`, `blocked`, or `failed` based on provider-neutral delivery results, without claiming provider acknowledgement.
+- Kept REST as the canonical contract while exposing the same structured response fields through CLI JSON output and MCP tool payloads.
+- Updated MCP tool descriptions so external clients understand `queued`/`submitted` are not provider acceptance.
+- Added/updated REST/MCP/orchestration tests for truthful delivery states and response shape.
 
 1. Document the canonical control path:
    - core services own runtime/orchestration/recovery behavior;

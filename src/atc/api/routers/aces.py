@@ -66,11 +66,7 @@ class RecoveryRequest(BaseModel):
 
 async def _require_project_ace(db, project_id: str, session_id: str):
     session = await db_ops.get_session(db, session_id)
-    if (
-        session is None
-        or session.project_id != project_id
-        or session.session_type != "ace"
-    ):
+    if session is None or session.project_id != project_id or session.session_type != "ace":
         raise HTTPException(status_code=404, detail="Ace session not found")
     return session
 
@@ -225,9 +221,9 @@ async def start_ace(session_id: str, body: StartAceRequest, request: Request) ->
         raise SessionStaleError(str(e)) from None
     return delivery_response(
         result,
-        fallback_state="started" if body.instruction is None else "submitted",
+        fallback_state="queued" if body.instruction is None else "submitted",
         message=(
-            "Ace session started; no instruction delivery was requested"
+            "Ace session queued/started; no instruction delivery was requested or verified"
             if body.instruction is None
             else "Ace instruction submitted; provider acknowledgement is not verified"
         ),

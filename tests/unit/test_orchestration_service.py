@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,6 +23,7 @@ from atc.orchestration.models import (
     WaitForSessionRequest,
 )
 from atc.orchestration.service import OrchestrationService
+from atc.runtime.models import RoleKind, RuntimeDeliveryResult
 from atc.state import db as db_ops
 from atc.tower.controller import TowerBusyError, TowerState
 
@@ -35,6 +39,18 @@ class _FakeTowerController:
         if self._exc:
             raise self._exc
         return self._result
+
+
+def _delivery_result(*, ok: bool = True, status: str = "accepted") -> RuntimeDeliveryResult:
+    return RuntimeDeliveryResult(
+        session_id="session-123",
+        provider_name="codex",
+        role=RoleKind.ACE,
+        status=status,
+        stage="submit_attempted",
+        verdict="accepted" if ok else "failed",
+        reason_code="submit_sent" if ok else "submit_failed",
+    )
 
 
 @pytest_asyncio.fixture()
@@ -150,41 +166,49 @@ async def test_spawn_leader_maps_busy_error(db_conn) -> None:
 
 @pytest.mark.asyncio
 async def test_spawn_ace_creates_session_and_assigns_task(db_conn) -> None:
-    project = await db_ops.create_project(db_conn, 'ATC', repo_path='/tmp/atc-repo')
-    task = await db_ops.create_task_graph(db_conn, project.id, 'Task 1')
-    fake_session_id = 'session-123'
+    project = await db_ops.create_project(db_conn, "ATC", repo_path="/tmp/atc-repo")
+    task = await db_ops.create_task_graph(db_conn, project.id, "Task 1")
+    fake_session_id = "session-123"
     fake_summary = SessionSummary(
         id=fake_session_id,
         role=OrchestrationRole.ACE,
-        raw_session_type='ace',
+        raw_session_type="ace",
         project_id=project.id,
         status=OrchestrationStatus.READY,
-        raw_status='idle',
-        name='ace-Task 1',
-        created_at='now',
-        updated_at='now',
+        raw_status="idle",
+        name="ace-Task 1",
+        created_at="now",
+        updated_at="now",
     )
-    with patch('atc.orchestration.service.ace_ops.create_ace', new=AsyncMock(return_value=fake_session_id)), \
-         patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=True)), \
-         patch.object(OrchestrationService, 'get_session', new=AsyncMock(return_value=fake_summary)):
+    with (
+        patch(
+            "atc.orchestration.service.ace_ops.create_ace",
+            new=AsyncMock(return_value=fake_session_id),
+        ),
+        patch(
+            "atc.orchestration.service._send_session_instruction",
+            new=AsyncMock(return_value=_delivery_result()),
+        ),
+        patch.object(OrchestrationService, "get_session", new=AsyncMock(return_value=fake_summary)),
+    ):
         service = OrchestrationService(db_conn)
         response = await service.spawn_ace(
             SpawnAceRequest(
                 project_id=project.id,
                 task_id=task.id,
-                instruction='Start work',
-                idempotency_key='assign-1',
-                context={'task_title': 'Task 1'},
+                instruction="Start work",
+                idempotency_key="assign-1",
+                context={"task_title": "Task 1"},
             )
         )
-    assignment = await db_ops.get_task_assignment(db_conn, 'assign-1')
-    assert response.operation_id == 'assign-1'
+    assignment = await db_ops.get_task_assignment(db_conn, "assign-1")
+    assert response.operation_id == "assign-1"
     assert assignment is not None
     assert assignment.ace_session_id == fake_session_id
 
 
 @pytest.mark.asyncio
-async def test_send_instruction_returns_accepted_response(db_conn) -> None:
+async def test_send_instruction_returns_submitted_response(db_conn) -> None:
     project = await db_ops.create_project(db_conn, "ATC")
     session = await db_ops.create_session(
         db_conn,
@@ -194,19 +218,23 @@ async def test_send_instruction_returns_accepted_response(db_conn) -> None:
         status="working",
     )
     service = OrchestrationService(db_conn)
-    with patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=True)) as mock_send:
+    with patch(
+        "atc.orchestration.service._send_session_instruction",
+        new=AsyncMock(return_value=_delivery_result()),
+    ) as mock_send:
         response = await service.send_instruction(
             SendInstructionRequest(
                 session_id=session.id,
-                instruction='Do the thing',
-                idempotency_key='send-1',
+                instruction="Do the thing",
+                idempotency_key="send-1",
             )
         )
-    assert response.request_status == 'accepted'
-    assert response.operation_id == 'send-1'
+    assert response.request_status == "submitted"
+    assert response.delivery_state == "submitted"
+    assert response.operation_id == "send-1"
     assert response.session is not None
     assert response.session.id == session.id
-    mock_send.assert_awaited_once_with(db_conn, session.id, 'Do the thing')
+    mock_send.assert_awaited_once_with(db_conn, session.id, "Do the thing")
 
 
 @pytest.mark.asyncio
@@ -220,34 +248,37 @@ async def test_send_instruction_maps_rejected_delivery(db_conn) -> None:
         status="working",
     )
     service = OrchestrationService(db_conn)
-    with patch('atc.orchestration.service._send_session_instruction', new=AsyncMock(return_value=False)):
-        with pytest.raises(OrchestrationException) as exc:
-            await service.send_instruction(
-                SendInstructionRequest(
-                    session_id=session.id,
-                    instruction='Do the thing',
-                    idempotency_key='send-2',
-                )
+    with patch(
+        "atc.orchestration.service._send_session_instruction",
+        new=AsyncMock(return_value=_delivery_result(ok=False, status="failed")),
+    ):
+        response = await service.send_instruction(
+            SendInstructionRequest(
+                session_id=session.id,
+                instruction="Do the thing",
+                idempotency_key="send-2",
             )
-    assert exc.value.code.value == 'SESSION_NOT_READY'
-    assert exc.value.retryable is True
+        )
+    assert response.request_status == "failed"
+    assert response.delivery_state == "failed"
+    assert response.recovery == "inspect session health and delivery traces before retrying"
 
 
 @pytest.mark.asyncio
 async def test_wait_for_session_returns_when_status_matches(db_conn) -> None:
-    project = await db_ops.create_project(db_conn, 'ATC')
+    project = await db_ops.create_project(db_conn, "ATC")
     session = await db_ops.create_session(
         db_conn,
         project_id=project.id,
-        session_type='ace',
-        name='ace-1',
-        status='connecting',
+        session_type="ace",
+        name="ace-1",
+        status="connecting",
     )
     service = OrchestrationService(db_conn)
 
     async def flip_status() -> None:
         await asyncio.sleep(0.05)
-        await db_ops.update_session_status(db_conn, session.id, 'idle')
+        await db_ops.update_session_status(db_conn, session.id, "idle")
 
     task = asyncio.create_task(flip_status())
     summary = await service.wait_for_session(
@@ -264,13 +295,13 @@ async def test_wait_for_session_returns_when_status_matches(db_conn) -> None:
 
 @pytest.mark.asyncio
 async def test_wait_for_session_times_out(db_conn) -> None:
-    project = await db_ops.create_project(db_conn, 'ATC')
+    project = await db_ops.create_project(db_conn, "ATC")
     session = await db_ops.create_session(
         db_conn,
         project_id=project.id,
-        session_type='ace',
-        name='ace-1',
-        status='connecting',
+        session_type="ace",
+        name="ace-1",
+        status="connecting",
     )
     service = OrchestrationService(db_conn)
     with pytest.raises(OrchestrationException) as exc:
@@ -281,19 +312,19 @@ async def test_wait_for_session_times_out(db_conn) -> None:
                 timeout_ms=10,
             )
         )
-    assert exc.value.code.value == 'SESSION_NOT_READY'
+    assert exc.value.code.value == "SESSION_NOT_READY"
     assert exc.value.retryable is True
 
 
 @pytest.mark.asyncio
 async def test_cancel_ace_soft_stop_returns_summary(db_conn) -> None:
-    project = await db_ops.create_project(db_conn, 'ATC')
+    project = await db_ops.create_project(db_conn, "ATC")
     session = await db_ops.create_session(
         db_conn,
         project_id=project.id,
-        session_type='ace',
-        name='ace-1',
-        status='working',
+        session_type="ace",
+        name="ace-1",
+        status="working",
     )
     service = OrchestrationService(db_conn)
     summary = await service.cancel_session(CancelSessionRequest(session_id=session.id, force=False))
@@ -303,13 +334,13 @@ async def test_cancel_ace_soft_stop_returns_summary(db_conn) -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_ace_force_destroy_returns_none(db_conn) -> None:
-    project = await db_ops.create_project(db_conn, 'ATC')
+    project = await db_ops.create_project(db_conn, "ATC")
     session = await db_ops.create_session(
         db_conn,
         project_id=project.id,
-        session_type='ace',
-        name='ace-1',
-        status='working',
+        session_type="ace",
+        name="ace-1",
+        status="working",
     )
     service = OrchestrationService(db_conn)
     result = await service.cancel_session(CancelSessionRequest(session_id=session.id, force=True))
@@ -319,14 +350,14 @@ async def test_cancel_ace_force_destroy_returns_none(db_conn) -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_leader_unlinks_session(db_conn) -> None:
-    project = await db_ops.create_project(db_conn, 'ATC')
-    leader = await db_ops.create_leader(db_conn, project.id, goal='Ship it')
+    project = await db_ops.create_project(db_conn, "ATC")
+    leader = await db_ops.create_leader(db_conn, project.id, goal="Ship it")
     session = await db_ops.create_session(
         db_conn,
         project_id=project.id,
-        session_type='manager',
-        name='leader-ATC',
-        status='working',
+        session_type="manager",
+        name="leader-ATC",
+        status="working",
     )
     await db_conn.execute(
         "UPDATE leaders SET session_id = ?, status = 'managing' WHERE id = ?",

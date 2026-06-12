@@ -1776,7 +1776,7 @@ async def create_orchestration_operation(
     *,
     session_id: str | None = None,
     response_payload: str | None = None,
-    status: str = "accepted",
+    status: str = "queued",
 ) -> OrchestrationOperation:
     now = _now()
     op = OrchestrationOperation(

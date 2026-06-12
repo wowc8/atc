@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
 from atc.orchestration.errors import OrchestrationException
 from atc.orchestration.models import (
@@ -14,7 +14,9 @@ from atc.orchestration.models import (
     SpawnLeaderRequest,
     WaitForSessionRequest,
 )
-from atc.orchestration.service import OrchestrationService
+
+if TYPE_CHECKING:
+    from atc.orchestration.service import OrchestrationService
 
 
 class MCPServer:
@@ -36,33 +38,124 @@ class MCPServer:
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [
-            {"name": "list_sessions", "description": "List normalized orchestration sessions", "inputSchema": {"type": "object", "properties": {"project_id": {"type": "string"}, "role": {"type": "string"}, "active_only": {"type": "boolean"}, "limit": {"type": "integer"}}}},
-            {"name": "get_session", "description": "Fetch a normalized orchestration session", "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}}}},
-            {"name": "list_operations", "description": "List orchestration operations/history", "inputSchema": {"type": "object", "properties": {"operation_type": {"type": "string"}, "session_id": {"type": "string"}, "limit": {"type": "integer"}}}},
-            {"name": "get_operation", "description": "Fetch a single orchestration operation", "inputSchema": {"type": "object", "required": ["operation_id"], "properties": {"operation_id": {"type": "string"}}}},
-            {"name": "list_session_events", "description": "List app events for a session", "inputSchema": {"type": "object", "required": ["session_id"], "properties": {"session_id": {"type": "string"}, "limit": {"type": "integer"}}}},
-            {"name": "spawn_leader", "description": "Spawn a leader through Tower orchestration", "inputSchema": {"type": "object", "required": ["project_id", "goal", "idempotency_key"]}},
-            {"name": "spawn_ace", "description": "Spawn an ace through orchestration", "inputSchema": {"type": "object", "required": ["project_id", "instruction", "idempotency_key"]}},
-            {"name": "send_instruction", "description": "Send an instruction to an orchestration session", "inputSchema": {"type": "object", "required": ["session_id", "instruction", "idempotency_key"]}},
-            {"name": "wait_for_session", "description": "Wait for a session to reach target orchestration statuses", "inputSchema": {"type": "object", "required": ["session_id", "target_statuses"]}},
-            {"name": "cancel_session", "description": "Cancel or stop an orchestration session", "inputSchema": {"type": "object", "required": ["session_id"]}},
+            {
+                "name": "list_sessions",
+                "description": "List normalized orchestration sessions",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "role": {"type": "string"},
+                        "active_only": {"type": "boolean"},
+                        "limit": {"type": "integer"},
+                    },
+                },
+            },
+            {
+                "name": "get_session",
+                "description": "Fetch a normalized orchestration session",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["session_id"],
+                    "properties": {"session_id": {"type": "string"}},
+                },
+            },
+            {
+                "name": "list_operations",
+                "description": "List orchestration operations/history",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "operation_type": {"type": "string"},
+                        "session_id": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                },
+            },
+            {
+                "name": "get_operation",
+                "description": "Fetch a single orchestration operation",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["operation_id"],
+                    "properties": {"operation_id": {"type": "string"}},
+                },
+            },
+            {
+                "name": "list_session_events",
+                "description": "List app events for a session",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["session_id"],
+                    "properties": {"session_id": {"type": "string"}, "limit": {"type": "integer"}},
+                },
+            },
+            {
+                "name": "spawn_leader",
+                "description": (
+                    "Spawn a leader through Tower orchestration; "
+                    "queued is not proof the Leader acted"
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["project_id", "goal", "idempotency_key"],
+                },
+            },
+            {
+                "name": "spawn_ace",
+                "description": (
+                    "Spawn an ace through orchestration and report "
+                    "queued/submitted/blocked/failed delivery state"
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["project_id", "instruction", "idempotency_key"],
+                },
+            },
+            {
+                "name": "send_instruction",
+                "description": (
+                    "Send an instruction and report submitted/blocked/failed "
+                    "delivery state without claiming provider acceptance"
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["session_id", "instruction", "idempotency_key"],
+                },
+            },
+            {
+                "name": "wait_for_session",
+                "description": "Wait for a session to reach target orchestration statuses",
+                "inputSchema": {"type": "object", "required": ["session_id", "target_statuses"]},
+            },
+            {
+                "name": "cancel_session",
+                "description": "Cancel or stop an orchestration session",
+                "inputSchema": {"type": "object", "required": ["session_id"]},
+            },
         ]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         if name == "list_sessions":
-            result = await self._service.list_sessions(ListSessionsRequest.model_validate(arguments))
+            result = await self._service.list_sessions(
+                ListSessionsRequest.model_validate(arguments)
+            )
             return [item.model_dump(mode="json") for item in result]
         if name == "get_session":
             result = await self._service.get_session(arguments["session_id"])
             return result.model_dump(mode="json")
         if name == "list_operations":
-            result = await self._service.list_operations(ListOperationsRequest.model_validate(arguments))
+            result = await self._service.list_operations(
+                ListOperationsRequest.model_validate(arguments)
+            )
             return [item.model_dump(mode="json") for item in result]
         if name == "get_operation":
             result = await self._service.get_operation(arguments["operation_id"])
             return result.model_dump(mode="json")
         if name == "list_session_events":
-            result = await self._service.list_session_events(arguments["session_id"], limit=arguments.get("limit"))
+            result = await self._service.list_session_events(
+                arguments["session_id"], limit=arguments.get("limit")
+            )
             return [item.model_dump(mode="json") for item in result]
         if name == "spawn_leader":
             result = await self._service.spawn_leader(SpawnLeaderRequest.model_validate(arguments))
@@ -71,19 +164,27 @@ class MCPServer:
             result = await self._service.spawn_ace(SpawnAceRequest.model_validate(arguments))
             return result.model_dump(mode="json")
         if name == "send_instruction":
-            result = await self._service.send_instruction(SendInstructionRequest.model_validate(arguments))
+            result = await self._service.send_instruction(
+                SendInstructionRequest.model_validate(arguments)
+            )
             return result.model_dump(mode="json")
         if name == "wait_for_session":
-            result = await self._service.wait_for_session(WaitForSessionRequest.model_validate(arguments))
+            result = await self._service.wait_for_session(
+                WaitForSessionRequest.model_validate(arguments)
+            )
             return result.model_dump(mode="json")
         if name == "cancel_session":
-            result = await self._service.cancel_session(CancelSessionRequest.model_validate(arguments))
+            result = await self._service.cancel_session(
+                CancelSessionRequest.model_validate(arguments)
+            )
             return None if result is None else result.model_dump(mode="json")
         raise ValueError(f"Unknown MCP tool: {name}")
 
 
 class MCPStdioServer:
-    def __init__(self, server: MCPServer, *, stdin: TextIO | None = None, stdout: TextIO | None = None) -> None:
+    def __init__(
+        self, server: MCPServer, *, stdin: TextIO | None = None, stdout: TextIO | None = None
+    ) -> None:
         self._server = server
         self._stdin = stdin or sys.stdin
         self._stdout = stdout or sys.stdout
@@ -92,8 +193,14 @@ class MCPStdioServer:
     def _success_response(self, request_id: Any, result: Any) -> dict[str, Any]:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
-    def _error_response(self, request_id: Any, code: int, message: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+    def _error_response(
+        self, request_id: Any, code: int, message: str, data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": code, "message": message},
+        }
         if data is not None:
             payload["error"]["data"] = data
         return payload
@@ -124,7 +231,9 @@ class MCPStdioServer:
                 name = params.get("name")
                 arguments = params.get("arguments") or {}
                 if not name:
-                    return self._error_response(request_id, -32602, "tools/call requires params.name")
+                    return self._error_response(
+                        request_id, -32602, "tools/call requires params.name"
+                    )
                 result = await self._server.call_tool(name, arguments)
                 return self._success_response(request_id, {"content": result})
             return self._error_response(request_id, -32601, f"Unknown MCP method: {method}")
@@ -133,7 +242,11 @@ class MCPStdioServer:
                 request_id,
                 -32001,
                 exc.message,
-                {"code": str(exc.code.value).lower(), "retryable": exc.retryable, "details": exc.details},
+                {
+                    "code": str(exc.code.value).lower(),
+                    "retryable": exc.retryable,
+                    "details": exc.details,
+                },
             )
         except ValueError as exc:
             return self._error_response(request_id, -32602, str(exc))

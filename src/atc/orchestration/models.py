@@ -47,15 +47,18 @@ def normalize_role(raw_session_type: str) -> OrchestrationRole:
     try:
         return _ROLE_MAP[raw_session_type]
     except KeyError as exc:
-        raise ValueError(f"Unknown session type for orchestration role mapping: {raw_session_type}") from exc
-
+        raise ValueError(
+            f"Unknown session type for orchestration role mapping: {raw_session_type}"
+        ) from exc
 
 
 def normalize_status(raw_status: str) -> OrchestrationStatus:
     try:
         return _STATUS_MAP[raw_status]
     except KeyError as exc:
-        raise ValueError(f"Unknown session status for orchestration status mapping: {raw_status}") from exc
+        raise ValueError(
+            f"Unknown session status for orchestration status mapping: {raw_status}"
+        ) from exc
 
 
 class SpawnLeaderRequest(BaseModel):
@@ -132,9 +135,13 @@ class SessionSummary(BaseModel):
 
 
 class OperationAcceptedResponse(BaseModel):
-    request_status: Literal["accepted"]
+    request_status: Literal["queued", "submitted", "confirmed", "blocked", "failed"]
     operation_id: str
     session: SessionSummary | None = None
+    delivery_state: Literal["queued", "submitted", "confirmed", "blocked", "failed"] = "queued"
+    message: str | None = None
+    recovery: str | None = None
+    delivery: dict[str, Any] | None = None
 
 
 class SessionEvent(BaseModel):
