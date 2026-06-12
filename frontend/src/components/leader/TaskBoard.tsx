@@ -12,10 +12,11 @@ interface TaskBoardProps {
 
 type ViewMode = "kanban" | "table";
 
-const COLUMNS = ["todo", "in_progress", "done"] as const;
+const COLUMNS = ["todo", "assigned", "in_progress", "done"] as const;
 
 const COLUMN_LABELS: Record<string, string> = {
   todo: "Todo",
+  assigned: "Assigned",
   in_progress: "In Progress",
   done: "Done",
 };
@@ -157,7 +158,8 @@ function TableView({ taskGraphs }: ViewProps) {
         <thead>
           <tr>
             <th>Title</th>
-            <th>Status</th>
+            <th>Task State</th>
+            <th>Runtime Truth</th>
             <th>Assignee</th>
           </tr>
         </thead>
@@ -173,7 +175,10 @@ function TableView({ taskGraphs }: ViewProps) {
                 )}
               </td>
               <td>
-                <StatusBadge status={task.status} size="sm" />
+                <StatusBadge status={task.task_state ?? task.status} size="sm" />
+              </td>
+              <td>
+                <RuntimeTruth task={task} />
               </td>
               <td>
                 {task.assigned_ace_id ? (
@@ -193,6 +198,35 @@ function TableView({ taskGraphs }: ViewProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Runtime truth summary
+// ---------------------------------------------------------------------------
+
+function RuntimeTruth({ task, compact = false }: { task: TaskGraph; compact?: boolean }) {
+  const runtimeState = task.runtime_truth?.runtime_state ?? task.runtime_state ?? "unknown";
+  const deliveryState = task.runtime_truth?.delivery_state ?? task.delivery_state ?? "not_started";
+  const blocker = task.runtime_truth?.blocker_reason ?? task.blocker_reason;
+  const verified = task.runtime_truth?.dispatch_verified ?? task.dispatch_verified ?? false;
+  const title = [
+    `Task state: ${task.task_state ?? task.status}`,
+    `Runtime: ${runtimeState}`,
+    `Delivery: ${deliveryState}`,
+    `Dispatch verified: ${verified ? "yes" : "no"}`,
+    blocker ? `Blocker: ${blocker}` : null,
+  ].filter(Boolean).join("\n");
+
+  return (
+    <span className="task-board__runtime-truth" title={title} data-testid="runtime-truth">
+      <StatusBadge status={runtimeState} size="sm" />
+      {!compact && <StatusBadge status={deliveryState} size="sm" />}
+      <span className={verified ? "task-board__truth-verified" : "task-board__truth-unverified"}>
+        {verified ? "verified" : "unverified"}
+      </span>
+      {blocker && <span className="task-board__truth-blocker">{blocker}</span>}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Task Card (Kanban)
 // ---------------------------------------------------------------------------
 
@@ -201,7 +235,8 @@ function TaskCard({ task }: { task: TaskGraph }) {
     <div className="task-board__card" data-testid="task-card">
       <div className="task-board__card-title">{task.title}</div>
       <div className="task-board__card-meta">
-        <StatusBadge status={task.status} size="sm" />
+        <StatusBadge status={task.task_state ?? task.status} size="sm" />
+        <RuntimeTruth task={task} compact />
         {task.assigned_ace_id && (
           <span className="task-board__assignee">
             {task.assigned_ace_id.slice(0, 8)}

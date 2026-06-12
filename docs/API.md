@@ -30,15 +30,31 @@ POST   /api/projects/{id}/leader/stop         → stop Leader session
 POST   /api/projects/{id}/leader/message      → send message to Leader
 ```
 
-## Tasks
+## Tasks / Task Graphs
 
 ```
-GET    /api/projects/{id}/tasks               → task list (filterable by status)
-POST   /api/projects/{id}/tasks               → create task
-PUT    /api/tasks/{id}                        → update task
-DELETE /api/tasks/{id}                        → cancel task
-POST   /api/tasks/{id}/assign                 → assign to ace session
+GET    /api/projects/{id}/task-graphs         → task graph list with task/runtime/delivery truth
+POST   /api/projects/{id}/task-graphs         → create task graph entry
+GET    /api/task-graphs/{id}                  → task graph detail with runtime truth
+PATCH  /api/task-graphs/{id}                  → update task graph metadata
+PATCH  /api/task-graphs/{id}/status           → transition product task state
+POST   /api/task-graphs/{id}/assign           → assign to Ace session
+GET    /api/task-graphs/{id}/assignments      → assignment delivery/runtime records
+PATCH  /api/task-assignments/{assignment_id}/status → transition assignment state
 ```
+
+Task graph responses keep `status` as a legacy product task-state field, but also expose explicit truth fields:
+
+- `task_state`: product task lifecycle (`todo`, `assigned`, `in_progress`, `done`, ...).
+- `runtime_state`: provider-neutral runtime truth for the assigned Ace (`idle`, `starting`, `active`, `blocked`, `complete`, `failed`, ...).
+- `delivery_state`: provider-neutral instruction/dispatch truth (`not_started`, `queued_unverified`, `submitted_pending_acceptance`, `accepted_active`, `blocked`, ...).
+- `dispatch_verified`: whether ATC has evidence that the Ace accepted/started the dispatch.
+- `blocker_reason`: structured blocker code when present.
+- `runtime_truth`: nested summary containing the same task/runtime/delivery split plus evidence identifiers.
+
+`GET /api/tower/progress` keeps the legacy `todo`/`in_progress`/`done` task counters and adds separate `task_states`, `runtime_states`, `delivery_states`, `blocked`, and `dispatch_unverified` summaries. The progress endpoint therefore reports product progress and runtime truth as separate dimensions instead of collapsing assignment intent into "working".
+
+A task in `assigned` state is ownership intent only. UI/API consumers must not treat it as active Ace work unless `delivery_state`/`runtime_state` provide that evidence.
 
 ## Aces
 

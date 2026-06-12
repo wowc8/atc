@@ -35,7 +35,7 @@
 /* Kanban grid */
 .task-board__grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
 }
 
@@ -76,7 +76,40 @@
 .task-board__card-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.task-board__runtime-truth {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.task-board__truth-verified,
+.task-board__truth-unverified,
+.task-board__truth-blocker {
+  font-size: var(--text-xs);
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.task-board__truth-verified {
+  color: var(--color-status-green);
+  background: color-mix(in srgb, var(--color-status-green) 12%, transparent);
+}
+
+.task-board__truth-unverified {
+  color: var(--color-status-amber);
+  background: color-mix(in srgb, var(--color-status-amber) 12%, transparent);
+}
+
+.task-board__truth-blocker {
+  color: var(--color-status-red);
+  background: color-mix(in srgb, var(--color-status-red) 12%, transparent);
 }
 
 .task-board__assignee {

@@ -84,12 +84,31 @@ export interface Task {
   updated_at: string;
 }
 
+export interface RuntimeTruthSummary {
+  task_state: string;
+  runtime_state: string;
+  delivery_state: string;
+  assignment_status: string | null;
+  dispatch_verified: boolean;
+  blocker_reason: string | null;
+  last_activity_at: string | null;
+  evidence: Record<string, unknown>;
+}
+
 export interface TaskGraph {
   id: string;
   project_id: string;
   title: string;
   description: string | null;
-  status: "todo" | "in_progress" | "done";
+  status: "todo" | "assigned" | "in_progress" | "done" | "failed";
+  task_state?: string;
+  runtime_state?: string;
+  delivery_state?: string;
+  assignment_status?: string | null;
+  dispatch_verified?: boolean;
+  blocker_reason?: string | null;
+  last_activity_at?: string | null;
+  runtime_truth?: RuntimeTruthSummary;
   assigned_ace_id: string | null;
   dependencies: string[] | null;
   created_at: string;
@@ -152,6 +171,11 @@ export interface TowerProgress {
   todo: number;
   progress_pct: number;
   all_done: boolean;
+  task_states?: Record<string, number>;
+  runtime_states?: Record<string, number>;
+  delivery_states?: Record<string, number>;
+  blocked?: number;
+  dispatch_unverified?: number;
 }
 
 export interface FailureLog {

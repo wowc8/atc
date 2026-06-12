@@ -22,6 +22,23 @@ const sampleTasks: TaskGraph[] = [
     title: "Task One",
     description: "First task",
     status: "todo",
+    task_state: "todo",
+    runtime_state: "idle",
+    delivery_state: "not_started",
+    assignment_status: null,
+    dispatch_verified: false,
+    blocker_reason: null,
+    last_activity_at: null,
+    runtime_truth: {
+      task_state: "todo",
+      runtime_state: "idle",
+      delivery_state: "not_started",
+      assignment_status: null,
+      dispatch_verified: false,
+      blocker_reason: null,
+      last_activity_at: null,
+      evidence: {},
+    },
     assigned_ace_id: "ace-abcdef12",
     dependencies: null,
     created_at: "2026-01-01T00:00:00Z",
@@ -32,7 +49,24 @@ const sampleTasks: TaskGraph[] = [
     project_id: "p1",
     title: "Task Two",
     description: null,
-    status: "in_progress",
+    status: "assigned",
+    task_state: "assigned",
+    runtime_state: "starting",
+    delivery_state: "queued_unverified",
+    assignment_status: "assigned",
+    dispatch_verified: false,
+    blocker_reason: null,
+    last_activity_at: null,
+    runtime_truth: {
+      task_state: "assigned",
+      runtime_state: "starting",
+      delivery_state: "queued_unverified",
+      assignment_status: "assigned",
+      dispatch_verified: false,
+      blocker_reason: null,
+      last_activity_at: null,
+      evidence: { assignment_id: "assignment-t2" },
+    },
     assigned_ace_id: null,
     dependencies: ["t1"],
     created_at: "2026-01-01T00:00:00Z",
@@ -44,6 +78,23 @@ const sampleTasks: TaskGraph[] = [
     title: "Task Three",
     description: "Done task",
     status: "done",
+    task_state: "done",
+    runtime_state: "complete",
+    delivery_state: "accepted_active",
+    assignment_status: "done",
+    dispatch_verified: true,
+    blocker_reason: null,
+    last_activity_at: "2026-01-01T00:01:00Z",
+    runtime_truth: {
+      task_state: "done",
+      runtime_state: "complete",
+      delivery_state: "accepted_active",
+      assignment_status: "done",
+      dispatch_verified: true,
+      blocker_reason: null,
+      last_activity_at: "2026-01-01T00:01:00Z",
+      evidence: { assignment_id: "assignment-t3" },
+    },
     assigned_ace_id: null,
     dependencies: null,
     created_at: "2026-01-01T00:00:00Z",
@@ -124,6 +175,19 @@ describe("TaskBoard", () => {
       />,
     );
     expect(screen.getByText("First task")).toBeInTheDocument();
+  });
+
+  it("shows runtime truth separately from task state", () => {
+    render(
+      <TaskBoard
+        projectId="p1"
+        taskGraphs={sampleTasks}
+        onRefresh={mockRefresh}
+      />,
+    );
+    expect(screen.getAllByText("assigned").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("starting").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("unverified").length).toBeGreaterThan(0);
   });
 
   it("toggles to table view", async () => {
@@ -244,7 +308,8 @@ describe("TaskBoard", () => {
     const headings = within(kanban).getAllByRole("heading", { level: 4 });
     const headingTexts = headings.map((h) => h.textContent);
     expect(headingTexts).toContain("Todo1");
-    expect(headingTexts).toContain("In Progress1");
+    expect(headingTexts).toContain("Assigned1");
+    expect(headingTexts).toContain("In Progress0");
     expect(headingTexts).toContain("Done1");
   });
 });

@@ -396,6 +396,11 @@ export function AppProvider({ children }: AppProviderProps) {
             todo: (data.todo as number) ?? 0,
             progress_pct: (data.progress_pct as number) ?? 0,
             all_done: (data.all_done as boolean) ?? false,
+            task_states: (data.task_states as Record<string, number>) ?? {},
+            runtime_states: (data.runtime_states as Record<string, number>) ?? {},
+            delivery_states: (data.delivery_states as Record<string, number>) ?? {},
+            blocked: (data.blocked as number) ?? 0,
+            dispatch_unverified: (data.dispatch_unverified as number) ?? 0,
           },
         });
       } else if (data.type === "leader_activity") {

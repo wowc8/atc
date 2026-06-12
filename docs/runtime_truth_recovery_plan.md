@@ -1,7 +1,7 @@
 # Runtime Truth and Recovery Plan
 
-**Status:** Phases 1-8 implemented; Phase 9 next
-**Last updated:** 2026-06-12 16:10 UTC
+**Status:** Phases 1-9 implemented
+**Last updated:** 2026-06-12 21:15 UTC
 **Scope:** Provider-neutral runtime truth, delivery verification, health, and recovery for ATC Tower → Leader → Ace orchestration  
 **Primary design constraint:** Provider-specific terminal behavior, including Codex update prompts and starter screens, must remain encapsulated inside provider adapters/classifiers. Tower, Leader, Ace, task graph, API, CLI, and UI layers may only depend on provider-neutral runtime truth.
 
@@ -549,6 +549,15 @@ ATC does not need three independent communication systems. It needs one canonica
 - API tests for response shape and backwards-compatible fields.
 - Playwright screenshots showing healthy, blocked, and uncertain states.
 - Baseline smoke path verifies no regression in dashboard/project/Tower/Leader/Ace flows.
+
+### Implementation status
+
+Implemented in Phase 9:
+
+- Task graph API responses expose additive provider-neutral `task_state`, `runtime_state`, `delivery_state`, `assignment_status`, `dispatch_verified`, `blocker_reason`, `last_activity_at`, and nested `runtime_truth` fields while preserving legacy `status` compatibility.
+- Tower progress keeps legacy task lifecycle counters and adds `task_states`, `runtime_states`, `delivery_states`, `blocked`, and `dispatch_unverified` summaries.
+- Leader Task Board UI separates task state from runtime truth, adds an `Assigned` column, and surfaces verified/unverified/blocker evidence without provider-specific prompt matching.
+- API docs describe task/planning state vs runtime/delivery truth and mark legacy optimistic status semantics explicitly.
 
 ## Required full-loop validation for every phase
 
