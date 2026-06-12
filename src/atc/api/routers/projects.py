@@ -17,9 +17,14 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from atc.api.delivery import delivery_response, queued_response
+from atc.api.delivery import delivery_response
 from atc.core.errors import CreationFailedError
 from atc.leader import leader as leader_ops
+from atc.leader.kickoff import (
+    build_leader_kickoff_message,
+    persist_leader_kickoff_payload,
+    verify_leader_kickoff_delivery,
+)
 from atc.runtime.models import RuntimeDeliveryResult
 from atc.state import db as db_ops
 
@@ -372,104 +377,76 @@ async def start_leader(
                 except Exception:
                     pass
 
-    # Auto-kickoff: send mission brief to the leader pane so it starts working.
-    # This mirrors what TowerController._send_leader_kickoff() does, but runs
-    # directly from the API for standalone (non-Tower) usage.
-    if body.goal and body.auto_kickoff:
-        import asyncio as _asyncio
+    kickoff_delivery = None
+    kickoff_payload = None
 
+    # Auto-kickoff: send mission brief to the leader pane so it starts working.
+    # Phase 3 performs this synchronously enough to return a truthful kickoff
+    # delivery verdict instead of only optimistic queued state.
+    if body.goal:
         from atc.leader.leader import send_leader_message as _send_leader_msg
 
-        async def _kickoff() -> None:
-            import logging as _logging
-
-            _log = _logging.getLogger(__name__)
-            # Build kickoff message
-            cursor = await db.execute(
-                "SELECT name, description, repo_path, github_repo FROM projects WHERE id = ?",
-                (project_id,),
-            )
-            row = await cursor.fetchone()
-            project_name = row[0] if row else "Unknown"
-            description = row[1] if row else None
-            repo_path = row[2] if row else None
-            lines = [
-                f"# Mission Brief — {project_name}",
-                "",
-                "## Goal",
-                body.goal,
-                "",
-            ]
-            if description:
-                lines += ["## Project Description", description, ""]
-            if repo_path:
-                lines += ["## Repository", f"Local path: {repo_path}", ""]
-            lines += [
-                "## Your Instructions",
-                "You are the project Leader, not the implementer.",
-                "Do NOT write product files yourself.",
-                "Operate through the ATC orchestration API only.",
-                "",
-                "1. First decompose the goal into well-scoped tasks via POST "
-                "/api/projects/{project_id}/leader/decompose.",
-                "2. Then spawn Aces for ready tasks via POST "
-                "/api/projects/{project_id}/leader/spawn-aces.",
-                "3. Then instruct spawned Aces via POST "
-                "/api/projects/{project_id}/leader/instruct.",
-                "4. Monitor progress via GET /api/projects/{project_id}/leader/progress.",
-                "5. Drive the project to completion by delegating, not by coding directly.",
-                "",
-                f"Project ID: {project_id}",
-                "Begin NOW by decomposing, not by exploring the workspace.",
-            ]
-            kickoff_msg = "\n".join(lines)
-
-            # Retry loop: wait for the leader pane to be ready before sending.
-            # The pane needs time to start Claude Code and clear startup dialogs.
-            # send_leader_message internally calls wait_for_prompt, so we just
-            # need to retry on ValueError (pane dead/not ready) for up to 60s.
-            deadline = _asyncio.get_event_loop().time() + 60
-            attempt = 0
-            while _asyncio.get_event_loop().time() < deadline:
-                attempt += 1
-                await _asyncio.sleep(5)  # wait for pane to initialise
-                try:
-                    await _send_leader_msg(db, project_id, kickoff_msg, event_bus=event_bus)
-                    _log.info(
-                        "Auto-kickoff sent to leader for project %s (attempt %d)",
-                        project_id,
-                        attempt,
-                    )
-                    return
-                except ValueError as exc:
-                    _log.debug(
-                        "Auto-kickoff attempt %d for project %s: %s", attempt, project_id, exc
-                    )
-                    # Pane not ready yet — retry
-                except Exception:
-                    _log.exception(
-                        "Auto-kickoff failed for project %s on attempt %d", project_id, attempt
-                    )
-                    return  # non-retryable error
-            _log.warning(
-                "Auto-kickoff timed out for project %s after %d attempts", project_id, attempt
-            )
-
-        _asyncio.ensure_future(_kickoff())
+        cursor = await db.execute(
+            "SELECT name, description, repo_path, github_repo FROM projects WHERE id = ?",
+            (project_id,),
+        )
+        row = await cursor.fetchone()
+        project_name = row[0] if row else "Unknown"
+        description = row[1] if row else None
+        repo_path = row[2] if row else None
+        github_repo = row[3] if row else None
+        kickoff_msg = build_leader_kickoff_message(
+            project_id=project_id,
+            project_name=project_name,
+            goal=body.goal,
+            description=description,
+            repo_path=repo_path,
+            github_repo=github_repo,
+            api_style="explicit-api",
+        )
+        kickoff_payload = await persist_leader_kickoff_payload(
+            db,
+            project_id=project_id,
+            goal=body.goal,
+            message=kickoff_msg,
+            source="leader-start-api",
+            auto_kickoff=body.auto_kickoff,
+        )
+        if body.auto_kickoff:
+            try:
+                kickoff_delivery = await _send_leader_msg(
+                    db, project_id, kickoff_msg, event_bus=event_bus
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from None
+            except RuntimeError as exc:
+                raise HTTPException(
+                    status_code=409, detail=f"Leader pane unavailable: {exc}"
+                ) from None
 
     if body.goal and body.auto_kickoff:
-        return queued_response(
-            message="Leader session started; auto-kickoff queued and awaiting runtime verification",
+        response = delivery_response(
+            kickoff_delivery,
+            fallback_state="queued",
+            message="Leader session started; kickoff delivery is awaiting provider verification",
             project_id=project_id,
             leader_session_id=session_id,
             session_id=session_id,
+            recovery="inspect Leader runtime/session status before normal monitoring",
         )
+        verification = verify_leader_kickoff_delivery(kickoff_delivery)
+        response.update(verification.as_dict())
+        response["kickoff_payload_persisted"] = kickoff_payload is not None
+        return response
     return {
         "status": "started",
         "delivery_state": "started",
         "session_id": session_id,
         "leader_session_id": session_id,
         "project_id": project_id,
+        "kickoff_verified": False,
+        "kickoff_state": "not_requested",
+        "kickoff_payload_persisted": kickoff_payload is not None,
         "message": "Leader session started; no kickoff delivery was requested",
     }
 
