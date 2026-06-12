@@ -1,7 +1,7 @@
 # Runtime Truth and Recovery Plan
 
-**Status:** Phases 1-5 implemented; Phase 6 next  
-**Last updated:** 2026-06-12 13:22 UTC  
+**Status:** Phases 1-6 implemented; Phase 7 next
+**Last updated:** 2026-06-12 13:52 UTC
 **Scope:** Provider-neutral runtime truth, delivery verification, health, and recovery for ATC Tower → Leader → Ace orchestration  
 **Primary design constraint:** Provider-specific terminal behavior, including Codex update prompts and starter screens, must remain encapsulated inside provider adapters/classifiers. Tower, Leader, Ace, task graph, API, CLI, and UI layers may only depend on provider-neutral runtime truth.
 
@@ -374,6 +374,15 @@ runtime evidence. Full repair commands remain Phase 5/6 work.
 ## Phase 6 — Update/stale-session recovery implementation
 
 **Goal:** Implement provider-policy-driven recovery for runtime update prompts and stale post-update sessions while keeping mechanics provider-owned.
+
+**Implemented in PR #292:**
+
+- Added provider-capability-aware recovery planning for runtime update prompts.
+- Added explicit recovery policies (`inspect_first`, `restart_missing_pane`, `restart_stale_runtime`, `auto_accept_updates_and_restart`) instead of optimistic apply behavior.
+- Kept provider update mechanics encapsulated: update prompt acceptance is refused until a provider adapter exposes a safe mutating capability.
+- Added stale/missing Leader apply recovery that restarts from persisted Leader goal.
+- Kept Ace recovery Leader-owned: direct Ace apply is refused so dispatch/re-dispatch stays under Leader task ownership.
+- Added tests covering update prompt policy gating, provider capability checks, stale Leader goal reuse, and existing health/recovery regressions.
 
 ### Work
 

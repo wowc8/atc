@@ -12,8 +12,20 @@ from atc.api.routers.aces import RecoveryRequest as AceRecoveryRequest
 from atc.api.routers.aces import get_ace_health, recover_ace
 from atc.api.routers.projects import RecoveryRequest as LeaderRecoveryRequest
 from atc.api.routers.projects import get_leader_health, recover_leader
-from atc.runtime.health import ace_health, build_recovery_plan, leader_health
-from atc.runtime.models import ReadinessState, RuntimeBlockReason, RuntimeInspection
+from atc.runtime.health import (
+    RuntimeHealth,
+    ace_health,
+    apply_recovery_plan,
+    build_recovery_plan,
+    leader_health,
+)
+from atc.runtime.models import (
+    BlockerReason,
+    ReadinessState,
+    RuntimeBlockReason,
+    RuntimeInspection,
+    RuntimeState,
+)
 from atc.state.db import (
     _SCHEMA_SQL,
     assign_task,
@@ -171,6 +183,103 @@ async def test_recovery_dry_run_and_apply_refusal(db) -> None:
     explicit_apply = build_recovery_plan(health, mode="apply", policy="restart_missing_pane")
     assert explicit_apply.safe_to_apply is True
     assert explicit_apply.refused_reason is None
+
+
+@pytest.mark.asyncio
+async def test_update_prompt_recovery_is_capability_and_policy_gated(db) -> None:
+    project = await create_project(db, "update-policy-proj")
+    health = RuntimeHealth(
+        role="leader",
+        project_id=project.id,
+        runtime_exists=True,
+        pane_attached=True,
+        provider="codex",
+        session_id="leader-session",
+        runtime_state=RuntimeState.BLOCKED.value,
+        current_blocker=BlockerReason.RUNTIME_UPDATE_REQUIRED.value,
+        provider_diagnostics={
+            "details": {
+                "recovery_capabilities": {
+                    "can_detect_update_prompt": True,
+                    "can_accept_update_prompt": True,
+                    "requires_fresh_session_after_update": True,
+                }
+            }
+        },
+    )
+
+    dry_run = build_recovery_plan(health, mode="dry_run")
+    assert dry_run.safe_to_apply is True
+    assert [a["action"] for a in dry_run.actions] == [
+        "inspect_runtime",
+        "provider_update_required",
+        "accept_provider_update",
+        "restart_required",
+    ]
+
+    apply_without_policy = build_recovery_plan(health, mode="apply")
+    assert apply_without_policy.refused_reason == "apply_requires_update_policy"
+
+    apply_with_policy = await apply_recovery_plan(
+        db,
+        health,
+        policy="auto_accept_updates_and_restart",
+    )
+    assert apply_with_policy.refused_reason == "provider_update_apply_not_implemented"
+
+
+@pytest.mark.asyncio
+async def test_stale_leader_restart_apply_uses_persisted_goal(db, monkeypatch) -> None:
+    project = await create_project(db, "stale-restart-proj")
+    await create_leader(db, project.id, goal="Recover from stale runtime")
+    calls = {}
+
+    async def fake_stop(conn, project_id, *, event_bus=None):
+        calls["stopped"] = project_id
+
+    async def fake_start(conn, project_id, *, goal=None, event_bus=None, context_package=None):
+        calls["started"] = {"project_id": project_id, "goal": goal}
+        return "new-leader-session"
+
+    async def fake_health(conn, project_id, *, runtime_service=None):
+        return RuntimeHealth(
+            role="leader",
+            project_id=project_id,
+            runtime_exists=True,
+            pane_attached=True,
+            provider="codex",
+            session_id="new-leader-session",
+            runtime_state=RuntimeState.READY.value,
+        )
+
+    import atc.runtime.health as health_module
+    from atc.leader import leader as leader_ops
+
+    monkeypatch.setattr(leader_ops, "stop_leader", fake_stop)
+    monkeypatch.setattr(leader_ops, "start_leader", fake_start)
+    monkeypatch.setattr(health_module, "leader_health", fake_health)
+
+    plan = await apply_recovery_plan(
+        db,
+        RuntimeHealth(
+            role="leader",
+            project_id=project.id,
+            runtime_exists=False,
+            pane_attached=False,
+            provider="codex",
+            runtime_state=RuntimeState.MISSING.value,
+            current_blocker=BlockerReason.PANE_MISSING.value,
+            kickoff_state={"original_goal_available": True},
+        ),
+        policy="restart_missing_pane",
+    )
+
+    assert plan.refused_reason is None
+    assert calls == {
+        "stopped": project.id,
+        "started": {"project_id": project.id, "goal": "Recover from stale runtime"},
+    }
+    assert plan.actions[-1]["action"] == "restart_leader"
 
 
 @pytest.mark.asyncio

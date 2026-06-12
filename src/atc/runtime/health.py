@@ -367,14 +367,36 @@ async def ace_health(
     )
 
 
+def _provider_capabilities(health: RuntimeHealth) -> dict[str, Any]:
+    details = health.provider_diagnostics.get("details")
+    if isinstance(details, dict):
+        capabilities = details.get("recovery_capabilities")
+        if isinstance(capabilities, dict):
+            return capabilities
+    return {}
+
+
+def _recovery_policy_allows(policy: str, action: str) -> bool:
+    if policy in {"block_only", "notify_operator", "inspect_first"}:
+        return False
+    if action == "restart" and policy in {
+        "restart_missing_pane",
+        "restart_stale_runtime",
+        "auto_accept_updates_and_restart",
+    }:
+        return True
+    return action == "accept_update" and policy == "auto_accept_updates_and_restart"
+
+
 def build_recovery_plan(
     health: RuntimeHealth,
     *,
     mode: RecoveryMode = "dry_run",
     policy: str = "inspect_first",
 ) -> RecoveryPlan:
-    """Return an inspect-first recovery plan without provider-specific mechanics."""
+    """Return provider-policy recovery plan without provider-specific mechanics."""
 
+    capabilities = _provider_capabilities(health)
     actions: list[dict[str, Any]] = [
         {
             "action": "inspect_runtime",
@@ -383,30 +405,68 @@ def build_recovery_plan(
             "blocker_reason": health.current_blocker,
         }
     ]
+    safe = False
+    refused = None
+    message = "Runtime appears healthy; no recovery action planned."
+
+    restartable = health.current_blocker in {
+        BlockerReason.PANE_MISSING.value,
+        BlockerReason.STALE_AFTER_UPDATE.value,
+    } or health.runtime_state in {RuntimeState.MISSING.value, RuntimeState.STALE.value}
+    update_required = health.current_blocker == BlockerReason.RUNTIME_UPDATE_REQUIRED.value
+
     if not health.current_blocker and health.runtime_state in {
         RuntimeState.READY.value,
         RuntimeState.ACTIVE.value,
     }:
         actions.append({"action": "none", "reason": "runtime_healthy"})
-        safe = False
-        message = "Runtime appears healthy; no recovery action planned."
-    elif health.current_blocker == BlockerReason.PANE_MISSING.value:
-        actions.append({"action": "restart_required", "safe": True})
-        safe = True
-        message = (
-            "Runtime pane is missing; restart/re-dispatch can be planned from persisted state."
+    elif update_required:
+        can_accept = bool(capabilities.get("can_accept_update_prompt"))
+        fresh_required = bool(capabilities.get("requires_fresh_session_after_update"))
+        actions.append(
+            {
+                "action": "provider_update_required",
+                "safe": can_accept,
+                "policy_required": "auto_accept_updates_and_restart",
+                "provider_can_accept_update_prompt": can_accept,
+                "requires_fresh_session_after_update": fresh_required,
+            }
         )
+        if can_accept:
+            actions.append({"action": "accept_provider_update", "safe": True})
+            if fresh_required:
+                actions.append({"action": "restart_required", "safe": True})
+            safe = True
+            message = "Provider update can be accepted under explicit update-and-restart policy."
+        else:
+            message = (
+                "Provider update prompt detected; provider does not advertise safe auto-accept."
+            )
+    elif restartable:
+        actions.append(
+            {
+                "action": "restart_required",
+                "safe": True,
+                "uses_persisted_payload": health.kickoff_state.get("original_goal_available")
+                if health.role == "leader"
+                else bool(health.ace_dispatch.get("assignment_id")),
+            }
+        )
+        safe = True
+        message = "Runtime is stale/missing; restart can be planned from persisted state."
     else:
         actions.append({"action": "operator_intervention_required", "safe": False})
-        safe = False
         message = (
             "Recovery requires operator/provider policy; apply refused by inspect-first contract."
         )
 
-    refused = None
     if mode == "apply" and not safe:
         refused = "unsafe_or_unneeded_recovery"
-    elif mode == "apply" and policy == "inspect_first":
+    elif (
+        mode == "apply" and update_required and not _recovery_policy_allows(policy, "accept_update")
+    ):
+        refused = "apply_requires_update_policy"
+    elif mode == "apply" and restartable and not _recovery_policy_allows(policy, "restart"):
         refused = "apply_requires_explicit_policy"
 
     if refused:
@@ -422,3 +482,74 @@ def build_recovery_plan(
         message=message,
         refused_reason=refused,
     )
+
+
+async def apply_recovery_plan(
+    conn: aiosqlite.Connection,
+    health: RuntimeHealth,
+    *,
+    policy: str,
+    event_bus: Any | None = None,
+) -> RecoveryPlan:
+    """Apply safe provider-neutral recovery actions.
+
+    Provider-specific update acceptance remains in provider adapters. This first
+    mutating slice restarts stale/missing Leader runtimes from persisted kickoff
+    state and refuses provider-update prompts unless the provider advertises safe
+    update acceptance.
+    """
+
+    plan = build_recovery_plan(health, mode="apply", policy=policy)
+    if plan.refused_reason:
+        return plan
+
+    if health.current_blocker == BlockerReason.RUNTIME_UPDATE_REQUIRED.value:
+        # Phase 6 wires policy/capability semantics. Actual keypress/update
+        # mechanics must be provider-owned, so refuse if no provider-owned
+        # capability/action has been integrated yet.
+        plan.refused_reason = "provider_update_apply_not_implemented"
+        plan.message = (
+            "Apply refused: provider update handling must be executed by a "
+            "provider adapter capability before ATC restarts the runtime."
+        )
+        return plan
+
+    if health.role == "leader" and any(
+        action.get("action") == "restart_required" for action in plan.actions
+    ):
+        from atc.leader import leader as leader_ops
+
+        leader = await db_ops.get_leader_by_project(conn, health.project_id)
+        context = leader.context if leader and isinstance(leader.context, dict) else {}
+        goal = context.get("leader_original_goal") or (leader.goal if leader else None) or ""
+        if not goal:
+            plan.refused_reason = "missing_persisted_goal"
+            plan.message = "Apply refused: persisted Leader goal is unavailable."
+            return plan
+        await leader_ops.stop_leader(conn, health.project_id, event_bus=event_bus)
+        session_id = await leader_ops.start_leader(
+            conn, health.project_id, goal=goal, event_bus=event_bus
+        )
+        plan.actions.append(
+            {
+                "action": "restart_leader",
+                "status": "applied",
+                "session_id": session_id,
+                "goal_restored": True,
+            }
+        )
+        plan.message = "Leader runtime restarted from persisted goal."
+        plan.health = (await leader_health(conn, health.project_id)).as_dict()
+        return plan
+
+    if health.role == "ace" and any(
+        action.get("action") == "restart_required" for action in plan.actions
+    ):
+        plan.refused_reason = "leader_owned_ace_recovery_required"
+        plan.message = (
+            "Apply refused: Ace restart/re-dispatch must be initiated by the "
+            "Leader-owned task assignment flow."
+        )
+        return plan
+
+    return plan

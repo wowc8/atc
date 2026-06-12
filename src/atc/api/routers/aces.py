@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from atc.api.delivery import delivery_response
 from atc.core.errors import CreationFailedError, SessionNotFoundError, SessionStaleError
-from atc.runtime.health import ace_health, build_recovery_plan
+from atc.runtime.health import ace_health, apply_recovery_plan, build_recovery_plan
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
 from atc.state import db as db_ops
@@ -199,10 +199,10 @@ async def recover_ace(
         raise HTTPException(status_code=404, detail="Project not found")
     await _require_project_ace(db, project_id, session_id)
     health = await ace_health(db, project_id, session_id)
-    plan = build_recovery_plan(
-        health,
-        mode="dry_run" if body.dry_run else "apply",
-        policy=body.policy,
+    plan = (
+        build_recovery_plan(health, mode="dry_run", policy=body.policy)
+        if body.dry_run
+        else await apply_recovery_plan(db, health, policy=body.policy)
     )
     if plan.refused_reason:
         raise HTTPException(status_code=409, detail=plan.as_dict())

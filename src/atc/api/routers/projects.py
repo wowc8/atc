@@ -25,7 +25,7 @@ from atc.leader.kickoff import (
     persist_leader_kickoff_payload,
     verify_leader_kickoff_delivery,
 )
-from atc.runtime.health import build_recovery_plan, leader_health
+from atc.runtime.health import apply_recovery_plan, build_recovery_plan, leader_health
 from atc.runtime.models import RuntimeDeliveryResult
 from atc.state import db as db_ops
 
@@ -513,10 +513,15 @@ async def recover_leader(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     health = await leader_health(db, project_id)
-    plan = build_recovery_plan(
-        health,
-        mode="dry_run" if body.dry_run else "apply",
-        policy=body.policy,
+    plan = (
+        build_recovery_plan(health, mode="dry_run", policy=body.policy)
+        if body.dry_run
+        else await apply_recovery_plan(
+            db,
+            health,
+            policy=body.policy,
+            event_bus=await _get_event_bus(request),
+        )
     )
     if plan.refused_reason:
         raise HTTPException(status_code=409, detail=plan.as_dict())
