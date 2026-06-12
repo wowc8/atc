@@ -32,7 +32,7 @@ from atc.leader.kickoff import (
 )
 from atc.leader.leader import send_leader_message, start_leader, stop_leader
 from atc.runtime.health import leader_health
-from atc.runtime.models import RoleKind, RuntimeDeliveryResult
+from atc.runtime.models import DeliveryState, RoleKind, RuntimeDeliveryResult, RuntimeState
 from atc.session.state_machine import SessionStatus
 from atc.state import db as db_ops
 from atc.tower.monitoring import decide_tower_monitoring_cadence
@@ -542,35 +542,83 @@ class TowerController:
     async def get_progress(self) -> dict[str, Any]:
         """Query the current Leader's task graph progress.
 
-        Returns a dict with task counts and completion percentage.
-        If no goal is active, returns an empty progress summary.
+        The legacy counters remain task-lifecycle counts. Runtime and delivery
+        truth are surfaced separately so callers do not infer active Ace work
+        from assignment intent alone.
         """
+        empty = {
+            "project_id": self._current_project_id,
+            "total": 0,
+            "done": 0,
+            "in_progress": 0,
+            "todo": 0,
+            "progress_pct": 0,
+            "all_done": False,
+            "task_states": {},
+            "runtime_states": {},
+            "delivery_states": {},
+            "blocked": 0,
+            "dispatch_unverified": 0,
+        }
         if not self._current_project_id or self._state != TowerState.MANAGING:
-            return {
-                "project_id": self._current_project_id,
-                "total": 0,
-                "done": 0,
-                "in_progress": 0,
-                "todo": 0,
-                "progress_pct": 0,
-                "all_done": False,
-            }
+            return empty
 
-        cursor = await self._db.execute(
-            "SELECT status, COUNT(*) as cnt FROM task_graphs WHERE project_id = ? GROUP BY status",
-            (self._current_project_id,),
+        task_graphs = await db_ops.list_task_graphs(
+            self._db, project_id=self._current_project_id
         )
-        rows = await cursor.fetchall()
+        assignments = await db_ops.list_task_assignments(self._db)
+        active_assignments = {
+            assignment.task_graph_id: assignment
+            for assignment in assignments
+            if assignment.status in {"assigned", "working"}
+        }
 
-        counts: dict[str, int] = {}
-        total = 0
-        for row in rows:
-            counts[row[0]] = row[1]
-            total += row[1]
+        task_states: dict[str, int] = {}
+        runtime_states: dict[str, int] = {}
+        delivery_states: dict[str, int] = {}
+        blocked = 0
+        dispatch_unverified = 0
 
-        done = counts.get("done", 0)
-        in_progress = counts.get("in_progress", 0)
-        todo = counts.get("todo", 0)
+        for task_graph in task_graphs:
+            task_states[task_graph.status] = task_states.get(task_graph.status, 0) + 1
+            assignment = active_assignments.get(task_graph.id)
+            delivery_state = (
+                assignment.dispatch_delivery_state
+                if assignment is not None
+                else DeliveryState.NOT_STARTED.value
+            )
+            delivery_states[delivery_state] = delivery_states.get(delivery_state, 0) + 1
+
+            dispatch_verified = bool(assignment.dispatch_verified) if assignment else False
+            blocker_reason = assignment.blocker_reason if assignment else None
+            if blocker_reason or delivery_state == DeliveryState.BLOCKED.value:
+                runtime_state = RuntimeState.BLOCKED.value
+                blocked += 1
+            elif task_graph.status == "done":
+                runtime_state = RuntimeState.COMPLETE.value
+            elif delivery_state == DeliveryState.ACCEPTED_ACTIVE.value and dispatch_verified:
+                runtime_state = RuntimeState.ACTIVE.value
+            elif delivery_state in {
+                DeliveryState.QUEUED_UNVERIFIED.value,
+                DeliveryState.RUNTIME_CREATED.value,
+                DeliveryState.PROMPT_VISIBLE.value,
+                DeliveryState.PAYLOAD_WRITTEN.value,
+                DeliveryState.SUBMIT_SENT.value,
+                DeliveryState.SUBMITTED_PENDING_ACCEPTANCE.value,
+            }:
+                runtime_state = RuntimeState.STARTING.value
+                if not dispatch_verified:
+                    dispatch_unverified += 1
+            elif delivery_state == DeliveryState.FAILED.value:
+                runtime_state = RuntimeState.FAILED.value
+            else:
+                runtime_state = RuntimeState.IDLE.value
+            runtime_states[runtime_state] = runtime_states.get(runtime_state, 0) + 1
+
+        total = len(task_graphs)
+        done = task_states.get("done", 0)
+        in_progress = task_states.get("in_progress", 0)
+        todo = task_states.get("todo", 0)
         progress_pct = int((done / total) * 100) if total > 0 else 0
         all_done = total > 0 and done == total
 
@@ -582,6 +630,11 @@ class TowerController:
             "todo": todo,
             "progress_pct": progress_pct,
             "all_done": all_done,
+            "task_states": task_states,
+            "runtime_states": runtime_states,
+            "delivery_states": delivery_states,
+            "blocked": blocked,
+            "dispatch_unverified": dispatch_unverified,
         }
 
         # Broadcast progress to frontend

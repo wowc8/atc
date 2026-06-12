@@ -14,8 +14,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from atc.runtime.models import DeliveryState, RuntimeState
 from atc.state import db as db_ops
 from atc.state.transitions import LifecycleTransitionError
 
@@ -47,12 +48,38 @@ class StatusTransitionRequest(BaseModel):
     status: str
 
 
+class RuntimeTruthSummary(BaseModel):
+    """Provider-neutral runtime/delivery truth for a task graph row.
+
+    ``task_state`` is the product task lifecycle. ``runtime_state`` and
+    ``delivery_state`` describe what ATC has verified about the assigned Ace
+    runtime/instruction delivery.
+    """
+
+    task_state: str
+    runtime_state: str
+    delivery_state: str
+    assignment_status: str | None = None
+    dispatch_verified: bool = False
+    blocker_reason: str | None = None
+    last_activity_at: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
 class TaskGraphResponse(BaseModel):
     id: str
     project_id: str
     title: str
     description: str | None = None
     status: str
+    task_state: str
+    runtime_state: str = RuntimeState.IDLE.value
+    delivery_state: str = DeliveryState.NOT_STARTED.value
+    assignment_status: str | None = None
+    dispatch_verified: bool = False
+    blocker_reason: str | None = None
+    last_activity_at: str | None = None
+    runtime_truth: RuntimeTruthSummary
     assigned_ace_id: str | None = None
     dependencies: list[str] | None = None
     created_at: str
@@ -73,13 +100,85 @@ def _transition_error_detail(exc: LifecycleTransitionError) -> dict[str, object]
     return exc.to_detail()
 
 
-def _to_response(tg: Any) -> TaskGraphResponse:
+def _runtime_truth_for_task(tg: Any, assignment: Any | None = None) -> RuntimeTruthSummary:
+    task_state = tg.status
+    delivery_state = (
+        assignment.dispatch_delivery_state
+        if assignment is not None
+        else DeliveryState.NOT_STARTED.value
+    )
+    blocker_reason = assignment.blocker_reason if assignment is not None else None
+    dispatch_verified = bool(assignment.dispatch_verified) if assignment is not None else False
+
+    if blocker_reason or delivery_state == DeliveryState.BLOCKED.value:
+        runtime_state = RuntimeState.BLOCKED.value
+    elif task_state == "done":
+        runtime_state = RuntimeState.COMPLETE.value
+    elif delivery_state == DeliveryState.ACCEPTED_ACTIVE.value and dispatch_verified:
+        runtime_state = RuntimeState.ACTIVE.value
+    elif delivery_state in {
+        DeliveryState.QUEUED_UNVERIFIED.value,
+        DeliveryState.RUNTIME_CREATED.value,
+        DeliveryState.PROMPT_VISIBLE.value,
+        DeliveryState.PAYLOAD_WRITTEN.value,
+        DeliveryState.SUBMIT_SENT.value,
+        DeliveryState.SUBMITTED_PENDING_ACCEPTANCE.value,
+    }:
+        runtime_state = RuntimeState.STARTING.value
+    elif delivery_state == DeliveryState.FAILED.value:
+        runtime_state = RuntimeState.FAILED.value
+    else:
+        runtime_state = RuntimeState.IDLE.value
+
+    return RuntimeTruthSummary(
+        task_state=task_state,
+        runtime_state=runtime_state,
+        delivery_state=delivery_state,
+        assignment_status=assignment.status if assignment is not None else None,
+        dispatch_verified=dispatch_verified,
+        blocker_reason=blocker_reason,
+        last_activity_at=assignment.last_activity_at if assignment is not None else None,
+        evidence={
+            "assignment_id": assignment.assignment_id if assignment is not None else None,
+            "ace_session_id": assignment.ace_session_id if assignment is not None else None,
+            "assigned_task_id": assignment.assigned_task_id if assignment is not None else None,
+        },
+    )
+
+
+def _active_assignment_for_task(
+    assignments: list[Any], task_graph_id: str
+) -> Any | None:
+    active = [
+        assignment
+        for assignment in assignments
+        if assignment.task_graph_id == task_graph_id
+        and assignment.status in {"assigned", "working"}
+    ]
+    if active:
+        return active[0]
+    historical = [
+        assignment for assignment in assignments if assignment.task_graph_id == task_graph_id
+    ]
+    return historical[0] if historical else None
+
+
+def _to_response(tg: Any, assignment: Any | None = None) -> TaskGraphResponse:
+    truth = _runtime_truth_for_task(tg, assignment)
     return TaskGraphResponse(
         id=tg.id,
         project_id=tg.project_id,
         title=tg.title,
         description=tg.description,
         status=tg.status,
+        task_state=truth.task_state,
+        runtime_state=truth.runtime_state,
+        delivery_state=truth.delivery_state,
+        assignment_status=truth.assignment_status,
+        dispatch_verified=truth.dispatch_verified,
+        blocker_reason=truth.blocker_reason,
+        last_activity_at=truth.last_activity_at,
+        runtime_truth=truth,
         assigned_ace_id=tg.assigned_ace_id,
         dependencies=tg.dependencies,
         created_at=tg.created_at,
@@ -105,7 +204,8 @@ async def list_task_graphs(
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
     items = await db_ops.list_task_graphs(db, project_id=project_id)
-    return [_to_response(tg) for tg in items]
+    assignments = await db_ops.list_task_assignments(db)
+    return [_to_response(tg, _active_assignment_for_task(assignments, tg.id)) for tg in items]
 
 
 @router.post(
@@ -134,7 +234,8 @@ async def create_task_graph(
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
-    return _to_response(tg)
+    assignments = await db_ops.list_task_assignments(db, task_graph_id=tg.id)
+    return _to_response(tg, _active_assignment_for_task(assignments, tg.id))
 
 
 @router.get(
@@ -152,7 +253,8 @@ async def get_task_graph(
             status_code=404,
             detail=f"TaskGraph {task_graph_id} not found",
         )
-    return _to_response(tg)
+    assignments = await db_ops.list_task_assignments(db, task_graph_id=tg.id)
+    return _to_response(tg, _active_assignment_for_task(assignments, tg.id))
 
 
 @router.patch(
@@ -183,7 +285,8 @@ async def update_task_graph(
             status_code=404,
             detail=f"TaskGraph {task_graph_id} not found",
         )
-    return _to_response(tg)
+    assignments = await db_ops.list_task_assignments(db, task_graph_id=tg.id)
+    return _to_response(tg, _active_assignment_for_task(assignments, tg.id))
 
 
 @router.patch(
@@ -207,7 +310,8 @@ async def transition_task_graph_status(
             status_code=404,
             detail=f"TaskGraph {task_graph_id} not found",
         )
-    return _to_response(tg)
+    assignments = await db_ops.list_task_assignments(db, task_graph_id=tg.id)
+    return _to_response(tg, _active_assignment_for_task(assignments, tg.id))
 
 
 @router.delete("/task-graphs/{task_graph_id}", status_code=204)
@@ -240,6 +344,11 @@ class TaskAssignmentResponse(BaseModel):
     ace_session_id: str
     assignment_id: str
     status: str
+    dispatch_delivery_state: str
+    dispatch_verified: bool
+    assigned_task_id: str | None = None
+    blocker_reason: str | None = None
+    last_activity_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -255,6 +364,11 @@ def _to_assignment_response(a: Any) -> TaskAssignmentResponse:
         ace_session_id=a.ace_session_id,
         assignment_id=a.assignment_id,
         status=a.status,
+        dispatch_delivery_state=a.dispatch_delivery_state,
+        dispatch_verified=a.dispatch_verified,
+        assigned_task_id=a.assigned_task_id,
+        blocker_reason=a.blocker_reason,
+        last_activity_at=a.last_activity_at,
         created_at=a.created_at,
         updated_at=a.updated_at,
     )

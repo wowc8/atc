@@ -14,7 +14,7 @@ Routes:
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from atc.api.delivery import delivery_response
 from atc.tower.controller import TowerBusyError, TowerController
@@ -64,6 +64,11 @@ class TowerProgressResponse(BaseModel):
     todo: int
     progress_pct: int
     all_done: bool
+    task_states: dict[str, int] = Field(default_factory=dict)
+    runtime_states: dict[str, int] = Field(default_factory=dict)
+    delivery_states: dict[str, int] = Field(default_factory=dict)
+    blocked: int = 0
+    dispatch_unverified: int = 0
 
 
 class MemoryEntry(BaseModel):

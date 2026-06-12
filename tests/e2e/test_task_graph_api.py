@@ -296,10 +296,21 @@ class TestIdempotentAssignment:
         assert data["ace_session_id"] == "ace-1"
         assert data["assignment_id"] == "key-1"
         assert data["status"] == "assigned"
+        assert data["dispatch_delivery_state"] == "queued_unverified"
+        assert data["dispatch_verified"] is False
 
-        # Task should now be 'assigned'
+        # Task state remains separate from runtime/delivery truth: assigned means
+        # ownership intent, not proven Ace execution.
         tg_resp = client.get(f"/api/task-graphs/{tg_id}")
-        assert tg_resp.json()["status"] == "assigned"
+        task = tg_resp.json()
+        assert task["status"] == "assigned"  # legacy field
+        assert task["task_state"] == "assigned"
+        assert task["runtime_state"] == "starting"
+        assert task["delivery_state"] == "queued_unverified"
+        assert task["dispatch_verified"] is False
+        assert task["runtime_truth"]["task_state"] == "assigned"
+        assert task["runtime_truth"]["delivery_state"] == "queued_unverified"
+        assert task["runtime_truth"]["evidence"]["assignment_id"] == "key-1"
 
     def test_duplicate_assignment_is_noop(self, client: TestClient) -> None:
         project_id = _create_project(client)
