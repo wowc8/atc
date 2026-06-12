@@ -2,14 +2,8 @@
 
 from __future__ import annotations
 
-import re
-
 from atc.providers.base import ProviderRuntime
-from atc.runtime.interrupts import (
-    RuntimeInterruptSpec,
-    detect_runtime_interrupt,
-    interrupt_prompt_state,
-)
+from atc.providers.codex.classifier import CODEX_PROMPT_RE, CodexRuntimeClassifier
 from atc.runtime.models import (
     InstructionRequest,
     ReadinessResult,
@@ -38,36 +32,6 @@ from atc.runtime.tracing import (
     DeliveryVerdict,
 )
 
-_CODEX_PROMPT_RE = re.compile(r"(^|\n)\s*(❯|>)\s*$|(^|\n)\s*›\s+(?!\d+\.)", re.MULTILINE)
-_AUTH_TRIGGERS = (
-    "login",
-    "sign in",
-    "authentication",
-    "api key",
-)
-_TRUST_TRIGGERS = (
-    "trust this folder",
-    "do you trust",
-    "trust the contents",
-)
-_PERMISSION_TRIGGERS = (
-    "allow command",
-    "allow this command",
-    "approve command",
-    "permission",
-)
-_PROVIDER_ERROR_TRIGGERS = (
-    "failed to start provider",
-    "failed to start codex",
-    "failed to start claude",
-)
-_INTERRUPT_SPEC = RuntimeInterruptSpec(
-    trust_triggers=_TRUST_TRIGGERS,
-    permission_triggers=_PERMISSION_TRIGGERS,
-    login_triggers=_AUTH_TRIGGERS,
-    provider_error_triggers=_PROVIDER_ERROR_TRIGGERS,
-)
-
 
 class CodexRuntime(ProviderRuntime):
     """Minimal first-pass Codex runtime on the new contract."""
@@ -82,6 +46,7 @@ class CodexRuntime(ProviderRuntime):
     ) -> None:
         self.tmux_session = tmux_session
         self.codex_command = codex_command
+        self.classifier = CodexRuntimeClassifier()
 
     async def prepare_workspace(self, request: StartRoleRequest) -> None:
         if request.working_dir:
@@ -131,7 +96,7 @@ class CodexRuntime(ProviderRuntime):
         runner = TmuxSessionRunner(
             tmux_session=self.tmux_session,
             provider_name=self.provider_name,
-            prompt_state_for_excerpt=self._prompt_state_for_excerpt,
+            prompt_state_for_excerpt=self.classifier.prompt_state_for_excerpt,
             terminal_verdict_for_observation=self._terminal_verdict_for_observation,
             interrupt_detector=self._detect_interrupt,
         )
@@ -182,31 +147,32 @@ class CodexRuntime(ProviderRuntime):
         handle: RuntimeSessionHandle,
     ) -> RuntimeInspection:
         if not handle.tmux_pane or not await pane_exists(handle.tmux_pane):
+            classification = self.classifier.classify_excerpt("", pane_missing=True)
             return RuntimeInspection(
                 session_id=handle.session_id,
                 provider_name=self.provider_name,
                 alive=False,
-                readiness=ReadinessState.STOPPED,
-                summary="Pane missing",
+                readiness=classification.readiness,
+                block_reason=classification.block_reason,
+                summary=classification.summary,
+                details=classification.as_details(),
             )
 
         excerpt = await capture_pane_text(handle.tmux_pane, lines=40)
-        interrupt = self._detect_interrupt(excerpt)
-        readiness, block_reason = self._classify_readiness(excerpt)
-        summary = (
-            interrupt.summary if interrupt else self._summary_for_state(readiness, block_reason)
-        )
+        classification = self.classifier.classify_excerpt(excerpt)
         inspection = RuntimeInspection(
             session_id=handle.session_id,
             provider_name=self.provider_name,
             alive=True,
-            readiness=readiness,
-            block_reason=block_reason,
-            summary=summary,
+            readiness=classification.readiness,
+            block_reason=classification.block_reason,
+            summary=classification.summary,
             last_output_excerpt=excerpt,
+            details=classification.as_details(),
         )
-        if interrupt is not None:
-            inspection.details.update(interrupt.to_trace_details())
+        inspection.details["recovery_capabilities"] = (
+            self.classifier.recovery_capabilities().as_dict()
+        )
         inspection.details["provider_runtime_hint"] = self._runtime_hint_for_inspection(inspection)
         inspection.details["provider_runtime_action"] = self._runtime_action_for_inspection(
             inspection
@@ -319,45 +285,8 @@ class CodexRuntime(ProviderRuntime):
             return "respawn"
         return "inspect"
 
-    def _classify_readiness(self, excerpt: str) -> tuple[ReadinessState, RuntimeBlockReason | None]:
-        if _CODEX_PROMPT_RE.search(excerpt):
-            return ReadinessState.READY, None
-        interrupt = self._detect_interrupt(excerpt)
-        if interrupt is not None:
-            return interrupt.readiness, interrupt.block_reason
-        return ReadinessState.BUSY, None
-
-    def _prompt_state_for_excerpt(self, excerpt: str) -> str:
-        if _CODEX_PROMPT_RE.search(excerpt):
-            return ReadinessState.READY.value
-        readiness, block_reason = self._classify_readiness(excerpt)
-        interrupt = self._detect_interrupt(excerpt)
-        fallback = f"{readiness.value}:{block_reason.value}" if block_reason else readiness.value
-        return interrupt_prompt_state(interrupt, fallback)
-
-    @staticmethod
-    def _detect_interrupt(excerpt: str):
-        lower = excerpt.lower()
-        last_interrupt = max(
-            lower.rfind(trigger)
-            for trigger in (
-                *_TRUST_TRIGGERS,
-                *_PERMISSION_TRIGGERS,
-                *_AUTH_TRIGGERS,
-                *_PROVIDER_ERROR_TRIGGERS,
-            )
-        )
-        last_ready = max(
-            lower.rfind(marker)
-            for marker in (
-                "\n› ",
-                "gpt-5.5 default",
-                "gpt-5 default",
-            )
-        )
-        if last_interrupt >= 0 and last_ready > last_interrupt:
-            return None
-        return detect_runtime_interrupt(excerpt, _INTERRUPT_SPEC)
+    def _detect_interrupt(self, excerpt: str):
+        return self.classifier.detect_interrupt(excerpt)
 
     @staticmethod
     def _delivery_action_from_metadata(metadata: dict[str, object]) -> DeliveryAction:
@@ -398,7 +327,7 @@ class CodexRuntime(ProviderRuntime):
                 verdict=DeliveryVerdict.BLOCKED,
                 reason_code=DeliveryReasonCode.PERMISSION_REQUIRED,
             )
-        if _CODEX_PROMPT_RE.search(output):
+        if CODEX_PROMPT_RE.search(output):
             return RunnerTerminalVerdict(
                 stage=DeliveryStage.PROMPT_CLEARED,
                 verdict=DeliveryVerdict.ACCEPTED,
