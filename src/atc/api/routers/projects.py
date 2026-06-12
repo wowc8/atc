@@ -25,6 +25,7 @@ from atc.leader.kickoff import (
     persist_leader_kickoff_payload,
     verify_leader_kickoff_delivery,
 )
+from atc.runtime.health import build_recovery_plan, leader_health
 from atc.runtime.models import RuntimeDeliveryResult
 from atc.state import db as db_ops
 
@@ -71,6 +72,11 @@ class LeaderStartRequest(BaseModel):
 
 class LeaderMessageRequest(BaseModel):
     message: str
+
+
+class RecoveryRequest(BaseModel):
+    dry_run: bool = True
+    policy: str = "inspect_first"
 
 
 async def _get_db(request: Request):  # noqa: ANN202
@@ -480,6 +486,41 @@ async def send_leader_message(
         project_id=project_id,
         recovery="inspect Leader runtime/session status for delivery confirmation",
     )
+
+
+@router.get("/{project_id}/leader/health")
+async def get_leader_health(project_id: str, request: Request) -> dict[str, object]:
+    """Return provider-neutral Leader runtime health for operator/Tower use."""
+
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    health = await leader_health(db, project_id)
+    return health.as_dict()
+
+
+@router.post("/{project_id}/leader/recover")
+async def recover_leader(
+    project_id: str,
+    body: RecoveryRequest,
+    request: Request,
+) -> dict[str, object]:
+    """Inspect-first Leader recovery plan; mutation is policy-gated."""
+
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    health = await leader_health(db, project_id)
+    plan = build_recovery_plan(
+        health,
+        mode="dry_run" if body.dry_run else "apply",
+        policy=body.policy,
+    )
+    if plan.refused_reason:
+        raise HTTPException(status_code=409, detail=plan.as_dict())
+    return plan.as_dict()
 
 
 # ---------------------------------------------------------------------------

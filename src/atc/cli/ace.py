@@ -35,7 +35,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
         help="New status",
     )
     status_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     status_parser.set_defaults(handler=_handle_status)
 
@@ -43,7 +45,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     done_parser = ace_sub.add_parser("done", help="Mark session as done (idle)")
     done_parser.add_argument("session_id", help="Session UUID")
     done_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     done_parser.set_defaults(handler=_handle_done)
 
@@ -51,10 +55,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     blocked_parser = ace_sub.add_parser("blocked", help="Report session is blocked")
     blocked_parser.add_argument("session_id", help="Session UUID")
     blocked_parser.add_argument(
-        "--reason", default="", help="Reason for being blocked",
+        "--reason",
+        default="",
+        help="Reason for being blocked",
     )
     blocked_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     blocked_parser.set_defaults(handler=_handle_blocked)
 
@@ -63,7 +71,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     notify_parser.add_argument("session_id", help="Session UUID")
     notify_parser.add_argument("message", help="Notification message")
     notify_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     notify_parser.set_defaults(handler=_handle_notify)
 
@@ -73,7 +83,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     create_parser.add_argument("--name", required=True, help="Ace session name")
     create_parser.add_argument("--task-id", default=None, help="Task ID to assign")
     create_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     create_parser.set_defaults(handler=_handle_create)
 
@@ -81,9 +93,39 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     list_parser = ace_sub.add_parser("list", help="List ace sessions for a project")
     list_parser.add_argument("--project-id", required=True, help="Project UUID")
     list_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     list_parser.set_defaults(handler=_handle_list)
+
+    # atc ace health --project-id <id> --ace-id <id>
+    health_parser = ace_sub.add_parser("health", help="Inspect Ace runtime/dispatch health")
+    health_parser.add_argument("--project-id", required=True, help="Project UUID")
+    health_parser.add_argument("--ace-id", required=True, help="Ace session UUID")
+    health_parser.add_argument(
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
+    )
+    health_parser.set_defaults(handler=_handle_health)
+
+    # atc ace recover --project-id <id> --ace-id <id> [--dry-run|--apply]
+    recover_parser = ace_sub.add_parser("recover", help="Plan inspect-first Ace recovery")
+    recover_parser.add_argument("--project-id", required=True, help="Project UUID")
+    recover_parser.add_argument("--ace-id", required=True, help="Ace session UUID")
+    recover_parser.add_argument("--policy", default="inspect_first", help="Recovery policy")
+    recover_mode = recover_parser.add_mutually_exclusive_group()
+    recover_mode.add_argument(
+        "--dry-run", action="store_true", default=True, help="Inspect and plan only"
+    )
+    recover_mode.add_argument("--apply", action="store_true", help="Apply only if policy allows")
+    recover_parser.add_argument(
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
+    )
+    recover_parser.set_defaults(handler=_handle_recover)
 
     # atc ace memory <subcommand>
     memory_parser = ace_sub.add_parser("memory", help="Ace short-term memory commands")
@@ -94,10 +136,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     mem_write_parser.add_argument("session_id", help="Session UUID")
     mem_write_parser.add_argument("content", help="Progress snapshot content")
     mem_write_parser.add_argument(
-        "--tool-count", type=int, default=0, help="Current tool call count",
+        "--tool-count",
+        type=int,
+        default=0,
+        help="Current tool call count",
     )
     mem_write_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     mem_write_parser.set_defaults(handler=_handle_memory_write)
 
@@ -105,7 +152,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     mem_get_parser = memory_sub.add_parser("get", help="Get STM progress snapshot")
     mem_get_parser.add_argument("session_id", help="Session UUID")
     mem_get_parser.add_argument(
-        "--api", default=_DEFAULT_API, help="ATC API base URL",
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
     )
     mem_get_parser.set_defaults(handler=_handle_memory_get)
 
@@ -114,12 +163,54 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     ace_parser.set_defaults(handler=lambda _: ace_parser.print_help() or 1)
 
 
+def _api_get_json(url: str) -> int:
+    """GET a JSON endpoint and print the response."""
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode())
+            print(json.dumps(body, indent=2))
+            return 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode() if exc.fp else str(exc)
+        print(f"Error: {exc.code} — {detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Error: cannot reach ATC API — {exc.reason}", file=sys.stderr)
+        return 1
+
+
+def _api_post_json(url: str, payload: dict) -> int:
+    """POST JSON to a URL and print the response."""
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode())
+            print(json.dumps(body, indent=2))
+            return 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode() if exc.fp else str(exc)
+        print(f"Error: {exc.code} — {detail}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"Error: cannot reach ATC API — {exc.reason}", file=sys.stderr)
+        return 1
+
+
 def _api_patch_status(api_base: str, session_id: str, status: str) -> int:
     """PATCH /api/aces/{session_id}/status with the given status."""
     url = f"{api_base}/api/aces/{session_id}/status"
     payload = json.dumps({"status": status}).encode()
     req = urllib.request.Request(
-        url, data=payload, method="PATCH",
+        url,
+        data=payload,
+        method="PATCH",
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -141,7 +232,9 @@ def _api_post_notify(api_base: str, session_id: str, message: str) -> int:
     url = f"{api_base}/api/aces/{session_id}/notify"
     payload = json.dumps({"message": message}).encode()
     req = urllib.request.Request(
-        url, data=payload, method="POST",
+        url,
+        data=payload,
+        method="POST",
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -189,7 +282,9 @@ def _handle_create(args: argparse.Namespace) -> int:
         payload["task_id"] = args.task_id
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
-        url, data=data, method="POST",
+        url,
+        data=data,
+        method="POST",
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -229,12 +324,16 @@ def _handle_memory_write(args: argparse.Namespace) -> int:
     # The memory write goes through the API so the server can persist it.
     # We encode it as a PATCH to the STM endpoint that the memory router exposes.
     url = f"{args.api}/api/memory/ace/{args.session_id}/write"
-    payload = json.dumps({
-        "content": args.content,
-        "tool_call_count": args.tool_count,
-    }).encode()
+    payload = json.dumps(
+        {
+            "content": args.content,
+            "tool_call_count": args.tool_count,
+        }
+    ).encode()
     req = urllib.request.Request(
-        url, data=payload, method="POST",
+        url,
+        data=payload,
+        method="POST",
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -267,3 +366,14 @@ def _handle_memory_get(args: argparse.Namespace) -> int:
     except urllib.error.URLError as exc:
         print(f"Error: cannot reach ATC API at {args.api} — {exc.reason}", file=sys.stderr)
         return 1
+
+
+def _handle_health(args: argparse.Namespace) -> int:
+    return _api_get_json(f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/health")
+
+
+def _handle_recover(args: argparse.Namespace) -> int:
+    return _api_post_json(
+        f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/recover",
+        {"dry_run": not args.apply, "policy": args.policy},
+    )
