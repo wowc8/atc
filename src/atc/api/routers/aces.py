@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from atc.api.delivery import delivery_response
 from atc.core.errors import CreationFailedError, SessionNotFoundError, SessionStaleError
+from atc.runtime.health import ace_health, build_recovery_plan
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
 from atc.state import db as db_ops
@@ -56,6 +57,22 @@ class MessageRequest(BaseModel):
 
 class NotifyRequest(BaseModel):
     message: str
+
+
+class RecoveryRequest(BaseModel):
+    dry_run: bool = True
+    policy: str = "inspect_first"
+
+
+async def _require_project_ace(db, project_id: str, session_id: str):
+    session = await db_ops.get_session(db, session_id)
+    if (
+        session is None
+        or session.project_id != project_id
+        or session.session_type != "ace"
+    ):
+        raise HTTPException(status_code=404, detail="Ace session not found")
+    return session
 
 
 class SessionResponse(BaseModel):
@@ -148,6 +165,48 @@ async def create_ace(project_id: str, body: CreateAceRequest, request: Request) 
     if session is None:
         raise CreationFailedError(f"Session creation failed for project {project_id}")
     return _session_to_response(session)
+
+
+@router.get("/projects/{project_id}/aces/{session_id}/health")
+async def get_ace_health(
+    project_id: str,
+    session_id: str,
+    request: Request,
+) -> dict[str, object]:
+    """Return provider-neutral Ace runtime/dispatch health."""
+
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await _require_project_ace(db, project_id, session_id)
+    health = await ace_health(db, project_id, session_id)
+    return health.as_dict()
+
+
+@router.post("/projects/{project_id}/aces/{session_id}/recover")
+async def recover_ace(
+    project_id: str,
+    session_id: str,
+    body: RecoveryRequest,
+    request: Request,
+) -> dict[str, object]:
+    """Inspect-first Ace recovery plan; mutation is policy-gated."""
+
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await _require_project_ace(db, project_id, session_id)
+    health = await ace_health(db, project_id, session_id)
+    plan = build_recovery_plan(
+        health,
+        mode="dry_run" if body.dry_run else "apply",
+        policy=body.policy,
+    )
+    if plan.refused_reason:
+        raise HTTPException(status_code=409, detail=plan.as_dict())
+    return plan.as_dict()
 
 
 @router.post("/aces/{session_id}/start")
