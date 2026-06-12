@@ -401,7 +401,51 @@ Default behavior should be conservative: inspect, classify, surface blocker, and
 - Recovery evidence shows old session stale, fresh session started, kickoff/dispatch resent, and verification passed or blocked.
 - Search confirms Codex update prompt matching is limited to Codex provider code/tests.
 
-## Phase 7 — Monitoring cadence and responsibility enforcement
+## Phase 7 — Front-door contract consistency
+
+**Goal:** Keep REST API, `atc` CLI, and `atc-mcp` as thin, purpose-specific, non-equal adapters over the same orchestration/runtime truth contract.
+
+ATC does not need three independent communication systems. It needs one canonical service contract with three front doors that serve different audiences:
+
+- **REST API:** canonical product/backend interface for UI, system integrations, health, recovery, progress, task graph, and session state.
+- **`atc` CLI:** agent/operator convenience wrapper for terminal contexts, status reporting, done/blocked updates, health/recovery commands, and scripted workflows.
+- **`atc-mcp`:** optional external adapter for MCP-capable clients; it should bridge into `OrchestrationService`, not define separate orchestration behavior.
+
+### Work
+
+1. Document the canonical control path:
+   - core services own runtime/orchestration/recovery behavior;
+   - REST, CLI, and MCP are adapters;
+   - no adapter owns provider-specific recovery logic or independent task/session semantics.
+2. Align all three surfaces around the same provider-neutral fields:
+   - `runtime_state`
+   - `delivery_state` / `truth_delivery_state`
+   - `blocker_reason`
+   - `last_activity_at`
+   - `last_inspected_at`
+   - `provider_diagnostics`
+   - `recovery_recommendation`
+3. Standardize response wording so no front door reports optimistic success when truth is only queued/unverified.
+4. Prefer `atc` CLI in agent-facing role instructions where it improves consistency and ergonomics, while keeping REST as the product API and MCP as an optional external bridge.
+5. Add contract tests that compare REST/CLI/MCP output shape for equivalent operations.
+6. Ensure health and recovery commands are implemented once in services and exposed through all applicable adapters.
+
+### Acceptance criteria
+
+- REST, CLI, and MCP expose consistent runtime truth for the same session/operation.
+- CLI/MCP wrappers do not fork recovery logic or provider-specific prompt handling.
+- Agent-facing docs clearly state when to use CLI versus REST and do not imply separate sources of truth.
+- MCP remains optional; Tower/Leader/Ace execution does not depend on MCP unless explicitly configured.
+- Tests cover adapter parity for health, delivery status, blocker reporting, and recovery dry-run output.
+
+### Validation
+
+- REST/API tests verify canonical response shape.
+- CLI tests verify equivalent output and exit behavior for healthy, blocked, and unverified states.
+- MCP tool tests verify equivalent structured payloads for session health/delivery/recovery operations.
+- Docs/search verification confirms provider-specific Codex handling remains in provider adapters/classifiers, not in REST/CLI/MCP front doors.
+
+## Phase 8 — Monitoring cadence and responsibility enforcement
 
 **Goal:** Make Tower quieter and make Leader responsible for normal Ace monitoring once Leader health is verified.
 
@@ -434,7 +478,7 @@ Default behavior should be conservative: inspect, classify, surface blocker, and
 - Scenario test showing Tower startup verification then backoff.
 - Evidence that Ace inspection is skipped while Leader is healthy and active.
 
-## Phase 8 — API/UI truth surfacing and docs cleanup
+## Phase 9 — API/UI truth surfacing and docs cleanup
 
 **Goal:** Surface the truth model in the API/UI without overwhelming operators, and remove/rename optimistic wording.
 
