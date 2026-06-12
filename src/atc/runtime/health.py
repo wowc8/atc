@@ -76,6 +76,11 @@ class RecoveryPlan:
 
 
 def _blocker_from_inspection(inspection: RuntimeInspection) -> str | None:
+    provider_blocker = inspection.details.get("blocker_reason")
+    if isinstance(provider_blocker, str):
+        valid_blockers = {reason.value for reason in BlockerReason}
+        if provider_blocker in valid_blockers:
+            return provider_blocker
     if inspection.readiness is ReadinessState.BLOCKED:
         reason = inspection.block_reason.value if inspection.block_reason else "runtime_blocked"
         mapping = {
@@ -376,16 +381,42 @@ def _provider_capabilities(health: RuntimeHealth) -> dict[str, Any]:
     return {}
 
 
-def _recovery_policy_allows(policy: str, action: str) -> bool:
+def _restart_policy_required(health: RuntimeHealth) -> str:
+    if health.current_blocker == BlockerReason.STALE_AFTER_UPDATE.value:
+        return "restart_stale_runtime"
+    if health.runtime_state == RuntimeState.STALE.value:
+        return "restart_stale_runtime"
+    return "restart_missing_pane"
+
+
+def _recovery_policy_allows(
+    policy: str,
+    action: str,
+    *,
+    required_policy: str | None = None,
+) -> bool:
     if policy in {"block_only", "notify_operator", "inspect_first"}:
         return False
-    if action == "restart" and policy in {
-        "restart_missing_pane",
-        "restart_stale_runtime",
-        "auto_accept_updates_and_restart",
-    }:
-        return True
+    if action == "restart":
+        return policy == required_policy or (
+            policy == "auto_accept_updates_and_restart"
+            and required_policy == "restart_stale_runtime"
+        )
     return action == "accept_update" and policy == "auto_accept_updates_and_restart"
+
+
+def _is_stale_runtime_stop_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    stale_markers = (
+        "no such pane",
+        "can't find pane",
+        "can't find window",
+        "can't find session",
+        "pane unavailable",
+        "session missing",
+        "session not found",
+    )
+    return isinstance(exc, RuntimeError) and any(marker in text for marker in stale_markers)
 
 
 def build_recovery_plan(
@@ -414,6 +445,7 @@ def build_recovery_plan(
         BlockerReason.STALE_AFTER_UPDATE.value,
     } or health.runtime_state in {RuntimeState.MISSING.value, RuntimeState.STALE.value}
     update_required = health.current_blocker == BlockerReason.RUNTIME_UPDATE_REQUIRED.value
+    required_restart_policy = _restart_policy_required(health) if restartable else None
 
     if not health.current_blocker and health.runtime_state in {
         RuntimeState.READY.value,
@@ -447,6 +479,7 @@ def build_recovery_plan(
             {
                 "action": "restart_required",
                 "safe": True,
+                "policy_required": required_restart_policy,
                 "uses_persisted_payload": health.kickoff_state.get("original_goal_available")
                 if health.role == "leader"
                 else bool(health.ace_dispatch.get("assignment_id")),
@@ -466,7 +499,15 @@ def build_recovery_plan(
         mode == "apply" and update_required and not _recovery_policy_allows(policy, "accept_update")
     ):
         refused = "apply_requires_update_policy"
-    elif mode == "apply" and restartable and not _recovery_policy_allows(policy, "restart"):
+    elif (
+        mode == "apply"
+        and restartable
+        and not _recovery_policy_allows(
+            policy,
+            "restart",
+            required_policy=required_restart_policy,
+        )
+    ):
         refused = "apply_requires_explicit_policy"
 
     if refused:
@@ -526,7 +567,43 @@ async def apply_recovery_plan(
             plan.refused_reason = "missing_persisted_goal"
             plan.message = "Apply refused: persisted Leader goal is unavailable."
             return plan
-        await leader_ops.stop_leader(conn, health.project_id, event_bus=event_bus)
+        try:
+            await leader_ops.stop_leader(conn, health.project_id, event_bus=event_bus)
+        except Exception as exc:
+            if not _is_stale_runtime_stop_error(exc):
+                plan.refused_reason = "stop_leader_failed"
+                plan.message = (
+                    "Apply refused: stopping the current Leader failed for a non-stale-pane reason."
+                )
+                plan.actions.append(
+                    {
+                        "action": "stop_leader",
+                        "status": "failed",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                )
+                return plan
+            plan.actions.append(
+                {
+                    "action": "stop_stale_leader",
+                    "status": "degraded",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            if leader and leader.session_id:
+                await db_ops.update_session_status(
+                    conn,
+                    leader.session_id,
+                    "disconnected",
+                )
+                await conn.execute(
+                    "UPDATE leaders SET session_id = NULL, status = 'idle',"
+                    " updated_at = datetime('now') WHERE id = ?",
+                    (leader.id,),
+                )
+                await conn.commit()
         session_id = await leader_ops.start_leader(
             conn, health.project_id, goal=goal, event_bus=event_bus
         )
