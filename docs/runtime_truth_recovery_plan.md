@@ -1,7 +1,7 @@
 # Runtime Truth and Recovery Plan
 
-**Status:** Planned / ready for Phase 1 implementation  
-**Last updated:** 2026-06-12 02:44 UTC  
+**Status:** Phases 1-4 implemented; Phase 5 next  
+**Last updated:** 2026-06-12 12:33 UTC  
 **Scope:** Provider-neutral runtime truth, delivery verification, health, and recovery for ATC Tower → Leader → Ace orchestration  
 **Primary design constraint:** Provider-specific terminal behavior, including Codex update prompts and starter screens, must remain encapsulated inside provider adapters/classifiers. Tower, Leader, Ace, task graph, API, CLI, and UI layers may only depend on provider-neutral runtime truth.
 
@@ -287,6 +287,11 @@ Default behavior should be conservative: inspect, classify, surface blocker, and
 - Playwright/API evidence shows Tower waiting for verified Leader kickoff before backing off.
 
 ## Phase 4 — Ace dispatch verification and repair contract
+
+**Implementation status:** Complete in PR #290. ATC now persists Ace assignment
+dispatch truth separately from assignment/task graph lifecycle and only promotes
+task work to `working`/`in_progress` after provider-neutral accepted/active
+runtime evidence. Full repair commands remain Phase 5/6 work.
 
 **Goal:** A task is not truly `working` until its assigned Ace runtime received, submitted, and accepted the task assignment or is explicitly blocked with a reason.
 
