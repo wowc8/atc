@@ -25,6 +25,7 @@ from atc.agents.factory import get_launch_command
 from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.leader.dispatch import verify_ace_dispatch_delivery
+from atc.runtime.health import ace_health
 from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
 from atc.state.transitions import LifecycleTransitionError
@@ -625,6 +626,63 @@ class LeaderOrchestrator:
         status["blocked_transition_errors"] = list(self.blocked_transition_errors)
 
         return status
+
+    async def monitor_ace_assignments(self, *, detailed: bool = False) -> list[dict[str, Any]]:
+        """Leader-owned Ace monitoring summary.
+
+        Tower should normally consume Leader/project health summaries and avoid
+        direct Ace pane inspection. This method keeps Ace health inspection and
+        blocked-dispatch reporting inside the Leader-owned task flow.
+        """
+
+        summaries: list[dict[str, Any]] = []
+        for assignment in self.assignments.values():
+            if assignment.status not in {"assigned", "working"}:
+                continue
+            health = await ace_health(self.conn, self.project_id, assignment.ace_session_id)
+            data = health.as_dict()
+            dispatch = data.get("ace_dispatch") or {}
+
+            assignment.dispatch_delivery_state = dispatch.get(
+                "dispatch_delivery_state",
+                assignment.dispatch_delivery_state,
+            )
+            assignment.dispatch_verified = bool(
+                dispatch.get("dispatch_verified", assignment.dispatch_verified)
+            )
+            assignment.blocker_reason = data.get("current_blocker") or dispatch.get(
+                "blocker_reason"
+            )
+            assignment.last_activity_at = (
+                data.get("last_activity_at") or assignment.last_activity_at
+            )
+
+            summary = {
+                "task_graph_id": assignment.task_graph_id,
+                "ace_session_id": assignment.ace_session_id,
+                "status": assignment.status,
+                "runtime_state": data.get("runtime_state"),
+                "dispatch_delivery_state": assignment.dispatch_delivery_state,
+                "dispatch_verified": assignment.dispatch_verified,
+                "blocker_reason": assignment.blocker_reason,
+                "last_activity_at": assignment.last_activity_at,
+                "leader_owned": True,
+            }
+            if detailed:
+                summary["health"] = data
+            summaries.append(summary)
+
+            if assignment.blocker_reason and self.event_bus:
+                await self.event_bus.publish(
+                    "leader_ace_blocked",
+                    {
+                        "leader_id": self.leader_id,
+                        "project_id": self.project_id,
+                        **summary,
+                    },
+                )
+
+        return summaries
 
     async def cleanup(self) -> None:
         """Destroy all active Ace sessions (called on Leader shutdown)."""

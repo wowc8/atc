@@ -48,6 +48,19 @@ class CodexRuntime(ProviderRuntime):
         self.codex_command = codex_command
         self.classifier = CodexRuntimeClassifier()
 
+    def _prompt_state_for_excerpt(self, excerpt: str) -> str:
+        """Compatibility wrapper for older scenario tests."""
+
+        return self.classifier.prompt_state_for_excerpt(excerpt)
+
+    def _classify_readiness(
+        self, excerpt: str
+    ) -> tuple[ReadinessState, RuntimeBlockReason | None]:
+        """Compatibility wrapper around the provider-neutral classifier."""
+
+        classification = self.classifier.classify_excerpt(excerpt)
+        return classification.readiness, classification.block_reason
+
     async def prepare_workspace(self, request: StartRoleRequest) -> None:
         if request.working_dir:
             from os import makedirs

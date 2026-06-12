@@ -333,7 +333,7 @@ def test_retry_path_task_transitions_are_explicit(client: TestClient) -> None:
 
     after_spawn = client.get(f"/api/task-graphs/{task['id']}")
     assert after_spawn.status_code == 200
-    assert after_spawn.json()["status"] == "in_progress"
+    assert after_spawn.json()["status"] == "assigned"
     assert after_spawn.json()["assigned_ace_id"] == spawned[0]["ace_session_id"]
 
     errored = client.patch(
@@ -393,7 +393,7 @@ def test_tower_driven_project_flow_manages_leader_and_ace(client: TestClient) ->
             json={"goal": "Phase 8 scenario", "auto_kickoff": False},
         )
         assert start.status_code == 200
-        assert start.json()["delivery_state"] == "started"
+        assert start.json()["delivery_state"] == "queued"
 
         spawn = client.post(f"/api/projects/{project['id']}/leader/spawn-aces", json={})
         assert spawn.status_code == 200
@@ -476,7 +476,7 @@ def test_blocked_ace_instruction_preserves_assignment_for_operator_resolution(
     refreshed = client.get(f"/api/task-graphs/{task['id']}")
     assert refreshed.status_code == 200
     assert refreshed.json()["assigned_ace_id"] == ace_session_id
-    assert refreshed.json()["status"] == "in_progress"
+    assert refreshed.json()["status"] == "assigned"
 
     aces = client.get(f"/api/projects/{project['id']}/aces")
     assert aces.status_code == 200

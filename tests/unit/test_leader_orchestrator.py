@@ -888,3 +888,61 @@ class TestSessionMonitoring:
         # Should not trigger failure
         assert tg.id in orchestrator.assignments
         assert orchestrator.assignments[tg.id].status == "working"
+
+@pytest.mark.asyncio
+async def test_monitor_ace_assignments_is_leader_owned_and_publishes_blockers(
+    orchestrator: LeaderOrchestrator,
+    event_bus: EventBus,
+) -> None:
+    events: list[dict] = []
+    event_bus.subscribe("leader_ace_blocked", lambda data: events.append(data))
+    orchestrator.assignments["task-1"] = AceAssignment(
+        ace_session_id="ace-1",
+        task_graph_id="task-1",
+        task_title="Blocked task",
+        assignment_id="assign-1",
+        status="working",
+    )
+
+    from atc.runtime.health import RuntimeHealth
+
+    health = RuntimeHealth(
+        role="ace",
+        project_id=orchestrator.project_id,
+        runtime_exists=True,
+        pane_attached=True,
+        provider="codex",
+        session_id="ace-1",
+        runtime_state="blocked",
+        current_blocker="ace_dispatch_failed",
+        last_activity_at="2026-06-12T12:05:00+00:00",
+        ace_dispatch={
+            "dispatch_delivery_state": "blocked",
+            "dispatch_verified": False,
+            "blocker_reason": "ace_dispatch_failed",
+        },
+    )
+
+    with patch(
+        "atc.leader.orchestrator.ace_health",
+        new=AsyncMock(return_value=health),
+    ) as health_mock:
+        summaries = await orchestrator.monitor_ace_assignments(detailed=True)
+
+    health_mock.assert_awaited_once_with(orchestrator.conn, orchestrator.project_id, "ace-1")
+    assert summaries == [
+        {
+            "task_graph_id": "task-1",
+            "ace_session_id": "ace-1",
+            "status": "working",
+            "runtime_state": "blocked",
+            "dispatch_delivery_state": "blocked",
+            "dispatch_verified": False,
+            "blocker_reason": "ace_dispatch_failed",
+            "last_activity_at": "2026-06-12T12:05:00+00:00",
+            "leader_owned": True,
+            "health": health.as_dict(),
+        }
+    ]
+    assert orchestrator.assignments["task-1"].blocker_reason == "ace_dispatch_failed"
+    assert events and events[0]["leader_owned"] is True
