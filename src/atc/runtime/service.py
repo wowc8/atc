@@ -8,14 +8,19 @@ from typing import TYPE_CHECKING
 from atc.providers.registry import create_provider_runtime, runtime_kwargs_for_provider
 from atc.runtime.errors import RuntimeInvocationError
 from atc.runtime.models import (
+    BlockerReason,
+    DeliveryState,
     InstructionRequest,
     ReadinessResult,
     ReadinessState,
+    RecoveryRecommendation,
+    RecoveryState,
     RoleKind,
     RuntimeBlockReason,
     RuntimeDeliveryResult,
     RuntimeInspection,
     RuntimeSessionHandle,
+    RuntimeState,
     RuntimeTransport,
     StartRoleRequest,
     StopRoleRequest,
@@ -627,6 +632,23 @@ class RuntimeService:
             else:
                 status = "queued"
         details = latest.get("details", {}) if isinstance(latest, dict) else {}
+        truth = metadata.get("runtime_truth")
+        truth_data = truth if isinstance(truth, dict) else {}
+        recovery = truth_data.get("recovery_recommendation")
+        recovery_data = recovery if isinstance(recovery, dict) else {}
+        recovery_recommendation = None
+        if recovery_data.get("state"):
+            recovery_recommendation = RecoveryRecommendation(
+                state=RecoveryState(str(recovery_data["state"])),
+                command=str(recovery_data["command"])
+                if recovery_data.get("command") is not None
+                else None,
+                safety=str(recovery_data.get("safety") or "inspect_first"),
+                message=str(recovery_data["message"])
+                if recovery_data.get("message") is not None
+                else None,
+                requires_operator=bool(recovery_data.get("requires_operator", False)),
+            )
         return RuntimeDeliveryResult(
             session_id=handle.session_id,
             provider_name=handle.provider_name,
@@ -642,6 +664,25 @@ class RuntimeService:
             else None,
             message=message,
             details=details if isinstance(details, dict) else {},
+            runtime_state=RuntimeState(str(truth_data["runtime_state"]))
+            if truth_data.get("runtime_state")
+            else None,
+            delivery_state=DeliveryState(str(truth_data["delivery_state"]))
+            if truth_data.get("delivery_state")
+            else None,
+            blocker_reason=BlockerReason(str(truth_data["blocker_reason"]))
+            if truth_data.get("blocker_reason")
+            else None,
+            last_activity_at=str(truth_data["last_activity_at"])
+            if truth_data.get("last_activity_at")
+            else None,
+            last_inspected_at=str(truth_data["last_inspected_at"])
+            if truth_data.get("last_inspected_at")
+            else None,
+            provider_diagnostics=truth_data.get("provider_diagnostics", {})
+            if isinstance(truth_data.get("provider_diagnostics"), dict)
+            else {},
+            recovery_recommendation=recovery_recommendation,
         )
 
     @staticmethod
