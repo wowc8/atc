@@ -115,6 +115,49 @@ async def test_spawn_ace_reuses_persisted_operation(db_conn) -> None:
 
 
 @pytest.mark.asyncio
+async def test_operation_history_normalizes_legacy_accepted_payload(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, "ATC")
+    summary = SessionSummary(
+        id="ace-1",
+        role=OrchestrationRole.ACE,
+        raw_session_type="ace",
+        project_id=project.id,
+        status=OrchestrationStatus.READY,
+        raw_status="idle",
+        name="ace-1",
+        created_at="now",
+        updated_at="now",
+    )
+    response_json = {
+        "request_status": "accepted",
+        "delivery_state": "accepted",
+        "operation_id": "send-legacy",
+        "session": summary.model_dump(),
+    }
+    await db_ops.create_orchestration_operation(
+        db_conn,
+        "send-legacy",
+        "send_instruction",
+        '{"session_id":"ace-1"}',
+        session_id="ace-1",
+        response_payload=__import__("json").dumps(response_json),
+        status="accepted",
+    )
+
+    service = OrchestrationService(db_conn)
+    record = await service.get_operation("send-legacy")
+    records = await service.list_operations()
+
+    assert record.status == "queued"
+    assert record.response_payload is not None
+    assert record.response_payload["request_status"] == "queued"
+    assert record.response_payload["delivery_state"] == "queued"
+    assert records[0].status == "queued"
+    assert records[0].response_payload is not None
+    assert records[0].response_payload["request_status"] == "queued"
+
+
+@pytest.mark.asyncio
 async def test_idempotency_conflict_across_operation_types(db_conn) -> None:
     project = await db_ops.create_project(db_conn, "ATC")
     await db_ops.create_orchestration_operation(db_conn, "dup-1", "spawn_leader", "{}")

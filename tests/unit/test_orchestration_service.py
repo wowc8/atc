@@ -238,6 +238,43 @@ async def test_send_instruction_returns_submitted_response(db_conn) -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_instruction_reuses_idempotent_response(db_conn) -> None:
+    project = await db_ops.create_project(db_conn, "ATC")
+    session = await db_ops.create_session(
+        db_conn,
+        project_id=project.id,
+        session_type="ace",
+        name="ace-1",
+        status="working",
+    )
+    service = OrchestrationService(db_conn)
+    with patch(
+        "atc.orchestration.service._send_session_instruction",
+        new=AsyncMock(return_value=_delivery_result()),
+    ) as mock_send:
+        first = await service.send_instruction(
+            SendInstructionRequest(
+                session_id=session.id,
+                instruction="Do the thing",
+                idempotency_key="send-idempotent",
+            )
+        )
+        second = await service.send_instruction(
+            SendInstructionRequest(
+                session_id=session.id,
+                instruction="Do the thing again",
+                idempotency_key="send-idempotent",
+            )
+        )
+
+    assert first.operation_id == "send-idempotent"
+    assert second.operation_id == "send-idempotent"
+    assert second.request_status == "submitted"
+    assert second.delivery_state == "submitted"
+    mock_send.assert_awaited_once_with(db_conn, session.id, "Do the thing")
+
+
+@pytest.mark.asyncio
 async def test_send_instruction_maps_rejected_delivery(db_conn) -> None:
     project = await db_ops.create_project(db_conn, "ATC")
     session = await db_ops.create_session(

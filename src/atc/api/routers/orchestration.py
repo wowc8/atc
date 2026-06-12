@@ -7,6 +7,7 @@ from atc.orchestration.models import (
     CancelSessionRequest,
     ListSessionsRequest,
     OperationAcceptedResponse,
+    SendInstructionBody,
     SendInstructionRequest,
     SessionSummary,
     SpawnAceRequest,
@@ -49,12 +50,12 @@ async def spawn_ace(body: SpawnAceRequest, request: Request) -> OperationAccepte
 )
 async def send_instruction(
     session_id: str,
-    body: SendInstructionRequest,
+    body: SendInstructionBody,
     request: Request,
 ) -> OperationAcceptedResponse:
     service = await _get_service(request)
     try:
-        payload = body.model_copy(update={"session_id": session_id})
+        payload = SendInstructionRequest(session_id=session_id, **body.model_dump())
         return await service.send_instruction(payload)
     except OrchestrationException as exc:
         raise HTTPException(status_code=exc.http_status, detail=exc.to_dict()) from None

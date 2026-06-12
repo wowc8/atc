@@ -90,6 +90,12 @@ class SendInstructionRequest(BaseModel):
     await_delivery: bool = True
 
 
+class SendInstructionBody(BaseModel):
+    instruction: str
+    idempotency_key: str
+    await_delivery: bool = True
+
+
 class ListSessionsRequest(BaseModel):
     project_id: str | None = None
     role: OrchestrationRole | None = None

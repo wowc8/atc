@@ -44,12 +44,45 @@ class OrchestrationService:
     ) -> OperationAcceptedResponse:
         """Validate stored operation payloads while accepting legacy optimistic status."""
 
+        normalized = self._normalize_operation_response_payload(payload)
+        return OperationAcceptedResponse.model_validate(normalized)
+
+    def _normalize_operation_response_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return a provider-neutral response payload for legacy operation rows."""
+
         normalized = dict(payload)
         if normalized.get("delivery_state") == "accepted":
             normalized["delivery_state"] = "queued"
         if normalized.get("request_status") == "accepted":
             normalized["request_status"] = normalized.get("delivery_state") or "queued"
-        return OperationAcceptedResponse.model_validate(normalized)
+        return normalized
+
+    def _normalize_operation_status(
+        self, status: str, response_payload: dict[str, Any] | None
+    ) -> str:
+        if status != "accepted":
+            return status
+        if response_payload is None:
+            return "queued"
+        candidate = response_payload.get("request_status") or response_payload.get("delivery_state")
+        return str(candidate or "queued")
+
+    def _operation_record_from_row(self, op: Any) -> OperationRecord:
+        response_payload = (
+            self._normalize_operation_response_payload(json.loads(op.response_payload))
+            if op.response_payload
+            else None
+        )
+        return OperationRecord(
+            operation_id=op.operation_id,
+            operation_type=op.operation_type,
+            session_id=op.session_id,
+            status=self._normalize_operation_status(op.status, response_payload),
+            request_payload=json.loads(op.request_payload),
+            response_payload=response_payload,
+            created_at=op.created_at,
+            updated_at=op.updated_at,
+        )
 
     async def list_operations(
         self, request: ListOperationsRequest | None = None
@@ -61,19 +94,7 @@ class OrchestrationService:
             session_id=request.session_id,
             limit=request.limit,
         )
-        return [
-            OperationRecord(
-                operation_id=op.operation_id,
-                operation_type=op.operation_type,
-                session_id=op.session_id,
-                status=op.status,
-                request_payload=json.loads(op.request_payload),
-                response_payload=(json.loads(op.response_payload) if op.response_payload else None),
-                created_at=op.created_at,
-                updated_at=op.updated_at,
-            )
-            for op in ops
-        ]
+        return [self._operation_record_from_row(op) for op in ops]
 
     async def get_operation(self, operation_id: str) -> OperationRecord:
         op = await db_ops.get_orchestration_operation(self._db, operation_id)
@@ -82,16 +103,7 @@ class OrchestrationService:
                 OrchestrationErrorCode.SESSION_NOT_FOUND,
                 f"Operation {operation_id} not found",
             )
-        return OperationRecord(
-            operation_id=op.operation_id,
-            operation_type=op.operation_type,
-            session_id=op.session_id,
-            status=op.status,
-            request_payload=json.loads(op.request_payload),
-            response_payload=(json.loads(op.response_payload) if op.response_payload else None),
-            created_at=op.created_at,
-            updated_at=op.updated_at,
-        )
+        return self._operation_record_from_row(op)
 
     async def list_session_events(
         self, session_id: str, *, limit: int | None = None
@@ -356,6 +368,28 @@ class OrchestrationService:
                 f"Session {request.session_id} not found",
             )
 
+        existing = await db_ops.get_orchestration_operation(self._db, request.idempotency_key)
+        if existing is not None:
+            if existing.operation_type != "send_instruction":
+                raise OrchestrationException(
+                    OrchestrationErrorCode.IDEMPOTENCY_CONFLICT,
+                    (
+                        f"Operation id {request.idempotency_key} already used for "
+                        f"{existing.operation_type}"
+                    ),
+                )
+            if existing.response_payload:
+                payload = json.loads(existing.response_payload)
+                return self._operation_response_from_payload(payload)
+        else:
+            await db_ops.create_orchestration_operation(
+                self._db,
+                request.idempotency_key,
+                "send_instruction",
+                request.model_dump_json(),
+                session_id=request.session_id,
+            )
+
         try:
             delivered = await _send_session_instruction(
                 self._db,
@@ -377,7 +411,7 @@ class OrchestrationService:
         if not delivered.ok:
             state = "blocked" if delivered.status == "blocked" else "failed"
             summary = await self.get_session(request.session_id)
-            return OperationAcceptedResponse(
+            response = OperationAcceptedResponse(
                 request_status=state,
                 delivery_state=state,
                 operation_id=request.idempotency_key,
@@ -387,9 +421,17 @@ class OrchestrationService:
                 recovery="inspect session health and delivery traces before retrying",
                 delivery=delivered.as_dict(),
             )
+            await db_ops.update_orchestration_operation(
+                self._db,
+                request.idempotency_key,
+                session_id=request.session_id,
+                status=state,
+                response_payload=response.model_dump_json(),
+            )
+            return response
 
         summary = await self.get_session(request.session_id)
-        return OperationAcceptedResponse(
+        response = OperationAcceptedResponse(
             request_status="submitted",
             delivery_state="submitted",
             operation_id=request.idempotency_key,
@@ -398,6 +440,14 @@ class OrchestrationService:
             recovery="inspect session health and delivery traces for confirmation",
             delivery=delivered.as_dict(),
         )
+        await db_ops.update_orchestration_operation(
+            self._db,
+            request.idempotency_key,
+            session_id=request.session_id,
+            status=response.request_status,
+            response_payload=response.model_dump_json(),
+        )
+        return response
 
     async def wait_for_session(self, request: WaitForSessionRequest) -> SessionSummary:
         timeout_s = max(request.timeout_ms, 0) / 1000

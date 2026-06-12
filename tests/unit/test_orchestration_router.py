@@ -186,7 +186,6 @@ async def test_send_instruction_route(app_and_db) -> None:
             response = await client.post(
                 f"/api/orchestration/sessions/{session.id}/instruction",
                 json={
-                    "session_id": "ignored-by-route",
                     "instruction": "Do the thing",
                     "idempotency_key": "send-1",
                 },
