@@ -10,7 +10,10 @@ import re
 
 from atc.providers.classifiers import RecoveryCapabilities, RuntimeClassification
 from atc.runtime.interrupts import (
+    RuntimeInterrupt,
+    RuntimeInterruptDisposition,
     RuntimeInterruptSpec,
+    RuntimeInterruptType,
     detect_runtime_interrupt,
     interrupt_prompt_state,
 )
@@ -22,6 +25,7 @@ from atc.runtime.models import (
     RuntimeBlockReason,
     RuntimeState,
 )
+from atc.runtime.tracing import DeliveryReasonCode
 
 CODEX_PROMPT_RE = re.compile(r"(^|\n)\s*(❯|>)\s*$|(^|\n)\s*›\s+(?!\d+\.)", re.MULTILINE)
 
@@ -64,13 +68,6 @@ _DEFAULT_PROMPT_TRIGGERS = (
     "implement {feature}",
     "explain this codebase",
 )
-_UNSUBMITTED_PROMPT_TRIGGERS = (
-    "implement ",
-    "fix ",
-    "add ",
-    "update ",
-)
-
 _INTERRUPT_SPEC = RuntimeInterruptSpec(
     trust_triggers=_TRUST_TRIGGERS,
     permission_triggers=_PERMISSION_TRIGGERS,
@@ -118,8 +115,10 @@ class CodexRuntimeClassifier:
                 diagnostics=interrupt.to_trace_details(),
             )
 
-        lower = excerpt.lower()
-        if _contains_any(lower, _UPDATE_TRIGGERS):
+        active_region = _active_region(excerpt)
+        active_lower = active_region.lower()
+        prompt_text = _latest_prompt_text(excerpt)
+        if _contains_any(active_lower, _UPDATE_TRIGGERS):
             return RuntimeClassification(
                 runtime_state=RuntimeState.BLOCKED,
                 delivery_state=DeliveryState.BLOCKED,
@@ -133,7 +132,7 @@ class CodexRuntimeClassifier:
                 requires_operator=True,
                 diagnostics={"codex_observation": "update_prompt"},
             )
-        if _contains_any(lower, _POST_UPDATE_STALE_TRIGGERS):
+        if _contains_any(active_lower, _POST_UPDATE_STALE_TRIGGERS):
             return RuntimeClassification(
                 runtime_state=RuntimeState.STALE,
                 delivery_state=DeliveryState.FAILED,
@@ -147,7 +146,7 @@ class CodexRuntimeClassifier:
                 requires_operator=True,
                 diagnostics={"codex_observation": "stale_after_update"},
             )
-        if _contains_any(lower, _DEFAULT_PROMPT_TRIGGERS):
+        if _contains_any(active_lower, _DEFAULT_PROMPT_TRIGGERS):
             return RuntimeClassification(
                 runtime_state=RuntimeState.IDLE_AT_DEFAULT_PROMPT,
                 delivery_state=DeliveryState.PROMPT_VISIBLE,
@@ -159,7 +158,7 @@ class CodexRuntimeClassifier:
                 recovery_state=RecoveryState.NOT_NEEDED,
                 diagnostics={"codex_observation": "default_prompt"},
             )
-        if self._looks_unsubmitted_prompt(excerpt):
+        if prompt_text is not None and prompt_text.strip():
             return RuntimeClassification(
                 runtime_state=RuntimeState.IDLE,
                 delivery_state=DeliveryState.PAYLOAD_WRITTEN,
@@ -241,17 +240,34 @@ class CodexRuntimeClassifier:
             return None
         return detect_runtime_interrupt(excerpt, _INTERRUPT_SPEC)
 
-    def _looks_unsubmitted_prompt(self, excerpt: str) -> bool:
-        lines = [line.strip().lower() for line in excerpt.splitlines() if line.strip()]
-        if not lines:
-            return False
-        latest = lines[-1]
-        if not latest.startswith(("›", ">", "❯")):
-            return False
-        prompt_text = latest.lstrip("›>❯ ").strip()
-        if not prompt_text:
-            return False
-        return _contains_any(prompt_text, _UNSUBMITTED_PROMPT_TRIGGERS)
+    def blocking_interrupt_for_excerpt(self, excerpt: str) -> RuntimeInterrupt | None:
+        classification = self.classify_excerpt(excerpt)
+        if classification.blocker_reason is BlockerReason.RUNTIME_UPDATE_REQUIRED:
+            return RuntimeInterrupt(
+                interrupt_type=RuntimeInterruptType.UNKNOWN_PROMPT_BLOCKER,
+                disposition=RuntimeInterruptDisposition.BLOCKING,
+                reason_code=DeliveryReasonCode.RUNTIME_UPDATE_REQUIRED,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.PROVIDER_PROMPT,
+                summary=classification.summary or "Runtime update required",
+                operator_action="inspect_or_update_runtime",
+                matched_trigger=classification.provider_observation,
+            )
+        if classification.blocker_reason is BlockerReason.PROMPT_NOT_SUBMITTED:
+            return RuntimeInterrupt(
+                interrupt_type=RuntimeInterruptType.UNKNOWN_PROMPT_BLOCKER,
+                disposition=RuntimeInterruptDisposition.BLOCKING,
+                reason_code=DeliveryReasonCode.PROMPT_NOT_SUBMITTED,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.PROVIDER_PROMPT,
+                summary=classification.summary or "Prompt text is visible but not submitted",
+                operator_action="submit_or_clear_prompt",
+                matched_trigger=classification.provider_observation,
+            )
+        interrupt = self.detect_interrupt(excerpt)
+        if interrupt is not None and interrupt.disposition is RuntimeInterruptDisposition.BLOCKING:
+            return interrupt
+        return None
 
 
 def _contains_any(text: str, triggers: tuple[str, ...]) -> bool:
@@ -267,4 +283,30 @@ def _blocker_reason_for_interrupt(reason_code: str) -> BlockerReason:
         return BlockerReason.RUNTIME_PERMISSION_REQUIRED
     if reason_code == "provider_error":
         return BlockerReason.PROVIDER_ERROR
+    if reason_code == "runtime_update_required":
+        return BlockerReason.RUNTIME_UPDATE_REQUIRED
+    if reason_code == "prompt_not_submitted":
+        return BlockerReason.PROMPT_NOT_SUBMITTED
     return BlockerReason.UNKNOWN_PROMPT_BLOCKER
+
+
+def _active_region(excerpt: str) -> str:
+    marker_index = max(
+        excerpt.rfind("\n› "),
+        excerpt.rfind("\n> "),
+        excerpt.rfind("\n❯ "),
+    )
+    if marker_index < 0:
+        return excerpt
+    return excerpt[marker_index:]
+
+
+def _latest_prompt_text(excerpt: str) -> str | None:
+    for line in reversed(excerpt.splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("›", ">", "❯")):
+            return stripped.lstrip("›>❯ ").strip()
+        return None
+    return None

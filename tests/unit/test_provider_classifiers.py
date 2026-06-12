@@ -65,7 +65,7 @@ def test_codex_default_prompt_is_idle_not_active_work() -> None:
 
 
 def test_codex_visible_unsubmitted_prompt_is_not_submitted() -> None:
-    result = _classifier().classify_excerpt("\n› Add runtime health command")
+    result = _classifier().classify_excerpt("\n› Review PR #287")
 
     assert result.runtime_state is RuntimeState.IDLE
     assert result.delivery_state is DeliveryState.PAYLOAD_WRITTEN
@@ -136,3 +136,31 @@ def test_codex_prompt_state_uses_classifier_output() -> None:
     )
     assert classifier.prompt_state_for_excerpt("\n› Add tests") == "prompt_visible:not_submitted"
     assert classifier.prompt_state_for_excerpt("\n› ") == "ready"
+
+
+def test_codex_stale_scrollback_is_ignored_when_latest_prompt_is_ready() -> None:
+    classifier = _classifier()
+
+    update_result = classifier.classify_excerpt(
+        "A new version of Codex is available. Update Codex?\n\n› "
+    )
+    default_result = classifier.classify_excerpt("\n› Implement {feature}\n\n› ")
+
+    assert update_result.runtime_state is RuntimeState.READY
+    assert update_result.blocker_reason is None
+    assert default_result.runtime_state is RuntimeState.READY
+    assert default_result.blocker_reason is None
+
+
+def test_codex_classifier_blocks_delivery_for_update_and_unsubmitted_prompts() -> None:
+    classifier = _classifier()
+
+    update_interrupt = classifier.blocking_interrupt_for_excerpt(
+        "A new version of Codex is available. Update Codex?"
+    )
+    unsubmitted_interrupt = classifier.blocking_interrupt_for_excerpt("\n› Review PR #287")
+
+    assert update_interrupt is not None
+    assert update_interrupt.reason_code.value == "runtime_update_required"
+    assert unsubmitted_interrupt is not None
+    assert unsubmitted_interrupt.reason_code.value == "prompt_not_submitted"

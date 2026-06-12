@@ -76,6 +76,8 @@ class DeliveryReasonCode(StrEnum):
     TRUST_REQUIRED = "trust_required"
     PERMISSION_REQUIRED = "permission_required"
     WELCOME_SCREEN = "welcome_screen"
+    RUNTIME_UPDATE_REQUIRED = "runtime_update_required"
+    PROMPT_NOT_SUBMITTED = "prompt_not_submitted"
     UNKNOWN_PROMPT_BLOCKER = "unknown_prompt_blocker"
     DELIVERY_UNVERIFIED = "delivery_unverified"
     PROVIDER_ERROR = "provider_error"
@@ -298,6 +300,8 @@ def _blocker_reason(reason_code: str) -> BlockerReason | None:
         DeliveryReasonCode.TRUST_REQUIRED.value: BlockerReason.RUNTIME_TRUST_REQUIRED,
         DeliveryReasonCode.PERMISSION_REQUIRED.value: BlockerReason.RUNTIME_PERMISSION_REQUIRED,
         DeliveryReasonCode.WELCOME_SCREEN.value: BlockerReason.DEFAULT_PROMPT_VISIBLE,
+        DeliveryReasonCode.RUNTIME_UPDATE_REQUIRED.value: BlockerReason.RUNTIME_UPDATE_REQUIRED,
+        DeliveryReasonCode.PROMPT_NOT_SUBMITTED.value: BlockerReason.PROMPT_NOT_SUBMITTED,
         DeliveryReasonCode.UNKNOWN_PROMPT_BLOCKER.value: BlockerReason.UNKNOWN_PROMPT_BLOCKER,
         DeliveryReasonCode.PROVIDER_ERROR.value: BlockerReason.PROVIDER_ERROR,
         DeliveryReasonCode.UNKNOWN_ERROR.value: BlockerReason.UNKNOWN_ERROR,

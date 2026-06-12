@@ -98,7 +98,7 @@ class CodexRuntime(ProviderRuntime):
             provider_name=self.provider_name,
             prompt_state_for_excerpt=self.classifier.prompt_state_for_excerpt,
             terminal_verdict_for_observation=self._terminal_verdict_for_observation,
-            interrupt_detector=self._detect_interrupt,
+            interrupt_detector=self.classifier.blocking_interrupt_for_excerpt,
         )
         await runner.deliver_instruction(
             handle=handle,
@@ -326,6 +326,18 @@ class CodexRuntime(ProviderRuntime):
                 stage=DeliveryStage.BLOCKED,
                 verdict=DeliveryVerdict.BLOCKED,
                 reason_code=DeliveryReasonCode.PERMISSION_REQUIRED,
+            )
+        if after_state == "blocked:runtime_update_required":
+            return RunnerTerminalVerdict(
+                stage=DeliveryStage.BLOCKED,
+                verdict=DeliveryVerdict.BLOCKED,
+                reason_code=DeliveryReasonCode.RUNTIME_UPDATE_REQUIRED,
+            )
+        if after_state == "prompt_visible:not_submitted":
+            return RunnerTerminalVerdict(
+                stage=DeliveryStage.BLOCKED,
+                verdict=DeliveryVerdict.BLOCKED,
+                reason_code=DeliveryReasonCode.PROMPT_NOT_SUBMITTED,
             )
         if CODEX_PROMPT_RE.search(output):
             return RunnerTerminalVerdict(
