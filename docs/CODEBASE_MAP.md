@@ -56,6 +56,7 @@ Current/future paths:
 - target refactor direction: `src/atc/runtime/` and `src/atc/providers/`
 
 See:
+- `docs/runtime_truth_recovery_plan.md` — phased provider-neutral runtime truth, delivery verification, health, and recovery plan
 - `docs/provider_runtime_refactor_plan.md`
 - `docs/provider_cli_wrapper_spec.md`
 - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`

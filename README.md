@@ -108,6 +108,7 @@ tests/          → Unit, integration, e2e tests
 - [CLAUDE.md](CLAUDE.md) — AI agent guide (read first)
 - [CODE_STRUCTURE.md](CODE_STRUCTURE.md) — high-level code structure, provider-agnostic architecture, and hygiene rules
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — System architecture
+- [docs/runtime_truth_recovery_plan.md](docs/runtime_truth_recovery_plan.md) — phased plan for provider-neutral runtime truth, delivery verification, health, and recovery
 - [docs/FEATURES.md](docs/FEATURES.md) — Feature guide
 - [docs/API.md](docs/API.md) — REST API + WebSocket reference
 - [docs/PATTERNS.md](docs/PATTERNS.md) — Code patterns

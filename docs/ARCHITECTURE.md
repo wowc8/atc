@@ -39,6 +39,7 @@ Current responsibilities:
 
 Design rule:
 - Orchestration should wrap existing high-level flows where they already exist, not duplicate runtime behavior. For example, `spawn_leader` goes through Tower's submit-goal path, and `send_instruction` goes through the existing provider-owned delivery path.
+- Runtime truth and recovery work must follow the provider-neutral plan in [`docs/runtime_truth_recovery_plan.md`](runtime_truth_recovery_plan.md): product layers depend on `runtime_state`, `delivery_state`, `blocker_reason`, and recovery recommendations, while provider-specific prompt detection/recovery mechanics remain inside provider adapters/classifiers.
 
 | Package | Responsibility |
 |---|---|
