@@ -31,9 +31,11 @@ from atc.leader.kickoff import (
     verify_leader_kickoff_delivery,
 )
 from atc.leader.leader import send_leader_message, start_leader, stop_leader
+from atc.runtime.health import leader_health
 from atc.runtime.models import RoleKind, RuntimeDeliveryResult
 from atc.session.state_machine import SessionStatus
 from atc.state import db as db_ops
+from atc.tower.monitoring import decide_tower_monitoring_cadence
 from atc.tower.session import send_tower_message, start_tower_session, stop_tower_session
 
 if TYPE_CHECKING:
@@ -733,33 +735,76 @@ class TowerController:
     async def _verify_leader_started(self, project_id: str, session_id: str, goal: str) -> None:
         """Background loop: verify the Leader acknowledged and started working.
 
-        Waits ~10s after kickoff, checks for output, and retries the kickoff
-        up to 3 times (30s window each) before giving up and setting ERROR.
+        Tower performs active startup/kickoff verification for roughly two
+        minutes. Once provider-neutral Leader health shows recent activity or
+        task creation, Tower backs off and leaves Ace monitoring/recovery to the
+        Leader-owned task flow.
         """
-        max_retries = 3
-        initial_wait = 10
-        retry_wait = 30
+        startup_elapsed = 0
+        await asyncio.sleep(10)
+        startup_elapsed += 10
 
-        await asyncio.sleep(initial_wait)
-
-        for attempt in range(max_retries):
+        while startup_elapsed <= 120:
             if self._leader_session_id != session_id:
                 # Leader was replaced or cancelled — stop verifying
                 return
 
             if self._leader_output_lines:
                 logger.info(
-                    "Leader session %s is producing output after kickoff (attempt %d)",
+                    "Leader session %s is producing output after kickoff; Tower backing off",
                     session_id,
-                    attempt + 1,
                 )
                 return
 
+            try:
+                health = await leader_health(self._db, project_id)
+                decision = decide_tower_monitoring_cadence(
+                    health.as_dict(),
+                    startup_elapsed_seconds=startup_elapsed,
+                )
+            except Exception:
+                logger.exception("Could not inspect Leader health for project %s", project_id)
+                decision = decide_tower_monitoring_cadence(
+                    {
+                        "runtime_exists": True,
+                        "pane_attached": True,
+                        "runtime_state": "starting",
+                    },
+                    startup_elapsed_seconds=startup_elapsed,
+                )
+
+            if (
+                decision.mode in {"leader_backoff", "leader_health"}
+                and not decision.should_nudge_leader
+            ):
+                logger.info(
+                    "Leader session %s startup verified via runtime health (%s); "
+                    "Tower backing off to Leader/project monitoring cadence",
+                    session_id,
+                    decision.reason,
+                )
+                return
+
+            if decision.inspect_aces:
+                logger.warning(
+                    "Leader session %s requires detailed inspection/recovery (%s)",
+                    session_id,
+                    decision.reason,
+                )
+                if self._state == TowerState.MANAGING:
+                    await self._transition(TowerState.ERROR)
+                return
+
+            if not decision.should_nudge_leader:
+                await asyncio.sleep(decision.next_poll_seconds)
+                startup_elapsed += decision.next_poll_seconds
+                continue
+
             logger.warning(
-                "Leader session %s has no output yet (attempt %d/%d) — sending nudge",
+                "Leader session %s startup not yet verified after %ds (%s) — sending nudge",
                 session_id,
-                attempt + 1,
-                max_retries,
+                startup_elapsed,
+                decision.reason,
             )
             try:
                 delivery = await send_leader_message(
@@ -778,17 +823,16 @@ class TowerController:
                 err_msg = str(exc).lower()
                 if "dead" in err_msg or "error" in err_msg or "disconnected" in err_msg:
                     logger.warning(
-                        "Leader pane dead for session %s — respawning (attempt %d/%d)",
+                        "Leader pane dead for session %s during startup verification — respawning",
                         session_id,
-                        attempt + 1,
-                        max_retries,
                     )
                     new_id = await self._respawn_leader(project_id, goal)
                     if new_id:
                         session_id = new_id
                         await self._send_leader_kickoff(new_id, goal)
-                        # Give new leader time to produce output before next check
-                        await asyncio.sleep(retry_wait)
+                        # Give new leader time to produce output before next check.
+                        await asyncio.sleep(30)
+                        startup_elapsed += 30
                         continue
                     else:
                         logger.error("Leader respawn failed — giving up")
@@ -796,7 +840,8 @@ class TowerController:
                 logger.exception("Failed to send nudge to leader session %s", session_id)
             except Exception:
                 logger.exception("Failed to send nudge to leader session %s", session_id)
-            await asyncio.sleep(retry_wait)
+            await asyncio.sleep(decision.next_poll_seconds)
+            startup_elapsed += decision.next_poll_seconds
 
         # Final check after last retry
         if self._leader_session_id != session_id:
@@ -804,10 +849,9 @@ class TowerController:
 
         if not self._leader_output_lines:
             logger.error(
-                "Leader session %s produced no output after %d kickoff attempts — "
+                "Leader session %s did not verify kickoff within startup window — "
                 "setting tower state to ERROR",
                 session_id,
-                max_retries,
             )
             if self._state == TowerState.MANAGING:
                 await self._transition(TowerState.ERROR)
@@ -843,12 +887,17 @@ class TowerController:
             f"Goal: {goal}\n"
             f"Leader session: {leader_session_id}\n"
             f"Project ID: {project_id}\n\n"
-            f"Begin monitoring. Check progress with:\n"
+            f"Monitor Leader health at low frequency; the Leader owns Ace monitoring/recovery.\n"
+            f"Check project-level progress with:\n"
             f"  curl -s http://127.0.0.1:8420/api/projects/{project_id}/leader/progress\n"
-            "Send nudges if stuck:\n"
+            f"Check provider-neutral Leader health with:\n"
+            f"  atc leader health --project-id {project_id}\n"
+            "Only nudge if Leader health shows no visible activity for 5-10 minutes:\n"
             f"  atc leader message --project-id {project_id} "
             "--message 'Please continue with your goal.'\n"
-            "\nDo NOT write code or create files yourself — delegate to the Leader only."
+            "\nDo NOT inspect Ace panes unless the Leader reports blocked, the Leader runtime "
+            "is missing, progress is flat past threshold, or the operator asks for detail. "
+            "Do NOT write code or create files yourself — delegate to the Leader only."
         )
 
         try:

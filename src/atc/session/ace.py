@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
+from atc.agents.claude_runtime import _DIALOG_TRIGGERS as _CLAUDE_DIALOG_TRIGGERS
 from atc.agents.claude_runtime import accept_startup_dialogs
 from atc.core.app_events import log_event
 from atc.runtime.models import StopRoleRequest
@@ -45,6 +46,10 @@ logger = logging.getLogger(__name__)
 
 # Default tmux session name used for ATC panes
 ATC_TMUX_SESSION = "atc"
+
+# Backward-compatible export for older trust-dialog tests/callers. Claude-specific
+# matching still lives in atc.agents.claude_runtime.
+_DIALOG_TRIGGERS = _CLAUDE_DIALOG_TRIGGERS
 
 
 # ---------------------------------------------------------------------------

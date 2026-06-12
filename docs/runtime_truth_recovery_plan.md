@@ -1,7 +1,7 @@
 # Runtime Truth and Recovery Plan
 
-**Status:** Phases 1-7 implemented; Phase 8 next
-**Last updated:** 2026-06-12 14:34 UTC
+**Status:** Phases 1-8 implemented; Phase 9 next
+**Last updated:** 2026-06-12 16:10 UTC
 **Scope:** Provider-neutral runtime truth, delivery verification, health, and recovery for ATC Tower → Leader → Ace orchestration  
 **Primary design constraint:** Provider-specific terminal behavior, including Codex update prompts and starter screens, must remain encapsulated inside provider adapters/classifiers. Tower, Leader, Ace, task graph, API, CLI, and UI layers may only depend on provider-neutral runtime truth.
 
@@ -503,6 +503,21 @@ ATC does not need three independent communication systems. It needs one canonica
 - Unit/integration tests for cadence policy.
 - Scenario test showing Tower startup verification then backoff.
 - Evidence that Ace inspection is skipped while Leader is healthy and active.
+
+### Phase 8 implementation notes
+
+- `atc.tower.monitoring.decide_tower_monitoring_cadence` centralizes the
+  provider-neutral Tower cadence policy.
+- Tower startup verification actively checks Leader health during the startup
+  window, then backs off once Leader output/activity or task progress proves the
+  Leader is healthy.
+- Tower escalation to Ace detail is limited to explicit blockers, missing Leader
+  runtime, flat project progress past threshold, or operator-requested detail.
+- `LeaderOrchestrator.monitor_ace_assignments` keeps Ace assignment health and
+  blocker reporting inside the Leader-owned task flow.
+- Tests cover healthy Leader backoff without Ace inspection, flat-progress
+  escalation, Leader-owned Ace blocker reporting, and `last_activity_at`-driven
+  decisions.
 
 ## Phase 9 — API/UI truth surfacing and docs cleanup
 

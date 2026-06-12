@@ -167,6 +167,116 @@ async def test_ace_health_reports_blocked_dispatch_separately(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_leader_health_surfaces_ace_blocker_without_tower_ace_inspection(db) -> None:
+    project = await create_project(db, "leader-owned-ace-blocker")
+    leader = await create_leader(db, project.id, goal="Coordinate Aces")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%13", "atc", session.id),
+    )
+    await db.execute("UPDATE leaders SET session_id = ? WHERE id = ?", (session.id, leader.id))
+    task = await create_task_graph(db, project.id, "Blocked task")
+    ace = await create_session(
+        db, project.id, "ace", "ace-blocked", status="waiting", task_id=task.id
+    )
+    assignment, _ = await assign_task(db, task.id, ace.id, f"{leader.id}:{task.id}")
+    await update_task_assignment_dispatch(
+        db,
+        assignment.assignment_id,
+        dispatch_delivery_state="blocked",
+        dispatch_verified=False,
+        blocker_reason="ace_dispatch_failed",
+    )
+    await db.commit()
+
+    health = await leader_health(
+        db,
+        project.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=session.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.READY,
+                summary="ready",
+            )
+        ),
+    )
+
+    assert health.runtime_state == "ready"
+    assert health.ace_dispatch["blocked"] == 1
+    assert health.ace_dispatch["unverified"] == 1
+    assert health.current_blocker == "ace_dispatch_failed"
+    assert health.recovery_recommendation is not None
+    assert health.recovery_recommendation["command"].startswith("atc leader recover")
+
+
+@pytest.mark.asyncio
+async def test_activity_timestamps_prefer_assignment_activity_for_leader_and_ace_health(db) -> None:
+    project = await create_project(db, "activity-timestamps")
+    leader = await create_leader(db, project.id, goal="Track activity")
+    leader_session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ?, updated_at = ? WHERE id = ?",
+        ("%14", "atc", "2026-06-12T12:00:00+00:00", leader_session.id),
+    )
+    await db.execute(
+        "UPDATE leaders SET session_id = ?, context = ? WHERE id = ?",
+        (leader_session.id, json.dumps({"leader_kickoff_payload": {"message": "go"}}), leader.id),
+    )
+    task = await create_task_graph(db, project.id, "Active task")
+    ace = await create_session(
+        db, project.id, "ace", "ace-active", status="working", task_id=task.id
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ?, updated_at = ? WHERE id = ?",
+        ("%15", "atc", "2026-06-12T12:01:00+00:00", ace.id),
+    )
+    assignment, _ = await assign_task(db, task.id, ace.id, f"activity:{task.id}")
+    await update_task_assignment_dispatch(
+        db,
+        assignment.assignment_id,
+        dispatch_delivery_state="accepted_active",
+        dispatch_verified=True,
+    )
+    await db.execute(
+        "UPDATE task_assignments SET last_activity_at = ? WHERE assignment_id = ?",
+        ("2026-06-12T12:05:00+00:00", assignment.assignment_id),
+    )
+    await db.commit()
+
+    runtime_service = FakeRuntimeService(
+        RuntimeInspection(
+            session_id=leader_session.id,
+            provider_name="codex",
+            alive=True,
+            readiness=ReadinessState.BUSY,
+            summary="working",
+        )
+    )
+    leader_data = await leader_health(db, project.id, runtime_service=runtime_service)
+    ace_data = await ace_health(db, project.id, ace.id, runtime_service=runtime_service)
+
+    assert leader_data.last_activity_at == "2026-06-12T12:05:00+00:00"
+    assert ace_data.last_activity_at == "2026-06-12T12:05:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_recovery_dry_run_and_apply_refusal(db) -> None:
     project = await create_project(db, "recover-proj")
     await create_leader(db, project.id, goal="Recover")

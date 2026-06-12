@@ -13,6 +13,7 @@ Routes:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -329,7 +330,7 @@ async def get_leader(project_id: str, request: Request) -> LeaderResponse:
 @router.post("/{project_id}/leader/start")
 async def start_leader(
     project_id: str, body: LeaderStartRequest, request: Request
-) -> dict[str, str]:
+) -> dict[str, Any]:
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
     try:
