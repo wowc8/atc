@@ -24,6 +24,7 @@ from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_
 from atc.agents.factory import get_launch_command
 from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
+from atc.leader.dispatch import verify_ace_dispatch_delivery
 from atc.session.ace import create_ace, destroy_ace, start_ace
 from atc.state import db as db_ops
 from atc.state.transitions import LifecycleTransitionError
@@ -41,6 +42,7 @@ async def _get_global_lock() -> asyncio.Lock:
     if _GLOBAL_LOCK is None:
         _GLOBAL_LOCK = asyncio.Lock()
     return _GLOBAL_LOCK
+
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,6 +63,10 @@ class AceAssignment:
     task_title: str
     assignment_id: str = ""  # idempotency key for assign_task
     status: str = "assigned"  # assigned|working|done|failed
+    dispatch_delivery_state: str = "queued_unverified"
+    dispatch_verified: bool = False
+    blocker_reason: str | None = None
+    last_activity_at: str | None = None
     deployed_root: Path | None = None  # staging dir for cleanup
 
 
@@ -256,24 +262,8 @@ class LeaderOrchestrator:
                 title,
             )
 
-        # Transition the task to in_progress now that the Ace is running.
-        # Retry/idempotent paths can reuse a terminal assignment row whose
-        # task_graph may already have been reset to todo, so bridge through
-        # assigned first when needed instead of tripping the state machine.
-        task_graph = await db_ops.get_task_graph(self.conn, task_graph_id)
-        if task_graph is not None:
-            if task_graph.status == "todo":
-                task_graph = await db_ops.update_task_graph_status(
-                    self.conn,
-                    task_graph_id,
-                    "assigned",
-                )
-            if task_graph is not None and task_graph.status == "assigned":
-                await db_ops.update_task_graph_status(
-                    self.conn,
-                    task_graph_id,
-                    "in_progress",
-                )
+        # The DB assignment transition moves the task graph to assigned.
+        # Do not promote to in_progress until Ace dispatch is verified.
 
         deployed = deploy_ace_files(
             AceDeploySpec(
@@ -324,8 +314,8 @@ class LeaderOrchestrator:
         self,
         task_graph_id: str,
         instruction: str,
-    ) -> None:
-        """Send a work instruction to the Ace assigned to a task graph entry."""
+    ) -> Any:
+        """Send a work instruction and promote work state only after verification."""
         assignment = self.assignments.get(task_graph_id)
         if assignment is None:
             raise ValueError(f"No Ace assigned to task graph {task_graph_id}")
@@ -336,8 +326,36 @@ class LeaderOrchestrator:
             instruction=instruction,
             event_bus=self.event_bus,
         )
-        if not result.ok:
+        verification = verify_ace_dispatch_delivery(result, task_graph_id=task_graph_id)
+        assignment.dispatch_delivery_state = verification.dispatch_delivery_state
+        assignment.dispatch_verified = verification.dispatch_verified
+        assignment.blocker_reason = verification.blocker_reason
+
+        if assignment.assignment_id:
+            persisted_assignment = await db_ops.update_task_assignment_dispatch(
+                self.conn,
+                assignment.assignment_id,
+                dispatch_delivery_state=verification.dispatch_delivery_state,
+                dispatch_verified=verification.dispatch_verified,
+                blocker_reason=verification.blocker_reason,
+                last_activity=verification.ace_began_work,
+            )
+            if persisted_assignment is not None:
+                assignment.last_activity_at = persisted_assignment.last_activity_at
+
+        if not verification.dispatch_verified:
             assignment.status = "assigned"
+            if self.event_bus:
+                await self.event_bus.publish(
+                    "leader_ace_dispatch_unverified",
+                    {
+                        "leader_id": self.leader_id,
+                        "project_id": self.project_id,
+                        "task_graph_id": task_graph_id,
+                        "session_id": assignment.ace_session_id,
+                        **verification.as_dict(),
+                    },
+                )
             return result
 
         assignment.status = "working"
@@ -357,6 +375,29 @@ class LeaderOrchestrator:
                     assignment.assignment_id,
                     task_graph_id,
                 )
+
+        task_graph = await db_ops.get_task_graph(self.conn, task_graph_id)
+        if task_graph is not None:
+            if task_graph.status == "todo":
+                task_graph = await db_ops.update_task_graph_status(
+                    self.conn,
+                    task_graph_id,
+                    "assigned",
+                )
+            if task_graph is not None and task_graph.status == "assigned":
+                await db_ops.update_task_graph_status(self.conn, task_graph_id, "in_progress")
+
+        if self.event_bus:
+            await self.event_bus.publish(
+                "leader_ace_dispatch_verified",
+                {
+                    "leader_id": self.leader_id,
+                    "project_id": self.project_id,
+                    "task_graph_id": task_graph_id,
+                    "session_id": assignment.ace_session_id,
+                    **verification.as_dict(),
+                },
+            )
         return result
 
     async def mark_task_done(self, task_graph_id: str) -> None:
@@ -572,6 +613,10 @@ class LeaderOrchestrator:
                 "ace_session_id": a.ace_session_id,
                 "task_title": a.task_title,
                 "status": a.status,
+                "dispatch_delivery_state": a.dispatch_delivery_state,
+                "dispatch_verified": a.dispatch_verified,
+                "blocker_reason": a.blocker_reason,
+                "last_activity_at": a.last_activity_at,
             }
             for a in self.assignments.values()
         ]

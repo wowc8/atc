@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# We need to reset the module-level orchestrator cache between tests
+from atc.api.routers import leader as leader_module
 from atc.core.events import EventBus
-from atc.leader.decomposer import DecompositionResult, TaskSpec
 from atc.leader.orchestrator import AceAssignment, LeaderOrchestrator
 from atc.state.db import (
     _SCHEMA_SQL,
@@ -18,10 +19,6 @@ from atc.state.db import (
     run_migrations,
     update_task_graph_status,
 )
-from atc.state.models import TaskGraph
-
-# We need to reset the module-level orchestrator cache between tests
-from atc.api.routers import leader as leader_module
 
 
 @pytest.fixture
@@ -43,6 +40,7 @@ def event_bus() -> EventBus:
 def clear_orchestrator_cache():
     """Clear the orchestrator cache and global counter before each test."""
     from atc.leader import orchestrator as orch_mod
+
     leader_module._orchestrators.clear()
     orch_mod._GLOBAL_ACTIVE_ACES = 0
     yield
@@ -83,7 +81,10 @@ def mock_request(db, event_bus):
 @pytest.mark.asyncio
 class TestDecomposeEndpoint:
     async def test_decompose_creates_task_graphs(
-        self, db, project_with_leader, mock_request,
+        self,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import DecomposeRequest, decompose
 
@@ -103,10 +104,13 @@ class TestDecomposeEndpoint:
         mock_request.app.state.tower_controller.get_progress.assert_awaited()
 
     async def test_decompose_no_leader_returns_404(
-        self, db, mock_request,
+        self,
+        db,
+        mock_request,
     ) -> None:
-        from atc.api.routers.leader import DecomposeRequest, decompose
         from fastapi import HTTPException
+
+        from atc.api.routers.leader import DecomposeRequest, decompose
 
         project = await create_project(db, "orphan-proj")
         body = DecomposeRequest(task_specs=[{"title": "Task A"}])
@@ -116,10 +120,14 @@ class TestDecomposeEndpoint:
         assert exc_info.value.status_code == 404
 
     async def test_decompose_empty_specs_returns_422(
-        self, db, project_with_leader, mock_request,
+        self,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
-        from atc.api.routers.leader import DecomposeRequest, decompose
         from fastapi import HTTPException
+
+        from atc.api.routers.leader import DecomposeRequest, decompose
 
         project, _ = project_with_leader
         body = DecomposeRequest(task_specs=[])
@@ -129,7 +137,10 @@ class TestDecomposeEndpoint:
         assert exc_info.value.status_code == 422
 
     async def test_decompose_with_dependencies(
-        self, db, project_with_leader, mock_request,
+        self,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import DecomposeRequest, decompose
 
@@ -157,7 +168,11 @@ class TestDecomposeEndpoint:
 @pytest.mark.asyncio
 class TestSpawnAcesEndpoint:
     async def test_spawn_returns_assignments(
-        self, mock_create: AsyncMock, db, project_with_leader, mock_request,
+        self,
+        mock_create: AsyncMock,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import spawn_aces
 
@@ -171,7 +186,11 @@ class TestSpawnAcesEndpoint:
         mock_request.app.state.tower_controller.get_progress.assert_awaited()
 
     async def test_spawn_with_no_ready_tasks(
-        self, mock_create: AsyncMock, db, project_with_leader, mock_request,
+        self,
+        mock_create: AsyncMock,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import spawn_aces
 
@@ -197,7 +216,10 @@ class TestSpawnAcesEndpoint:
 @pytest.mark.asyncio
 class TestProgressEndpoint:
     async def test_progress_returns_summary(
-        self, db, project_with_leader, mock_request,
+        self,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import get_progress
 
@@ -227,8 +249,12 @@ class TestProgressEndpoint:
 @pytest.mark.asyncio
 class TestTaskLifecycleEndpoints:
     async def test_task_done(
-        self, mock_create: AsyncMock, mock_destroy: AsyncMock,
-        db, project_with_leader, mock_request,
+        self,
+        mock_create: AsyncMock,
+        mock_destroy: AsyncMock,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import TaskDoneRequest, spawn_aces, task_done
 
@@ -245,8 +271,12 @@ class TestTaskLifecycleEndpoints:
         mock_request.app.state.tower_controller.get_progress.assert_awaited()
 
     async def test_task_failed(
-        self, mock_create: AsyncMock, mock_destroy: AsyncMock,
-        db, project_with_leader, mock_request,
+        self,
+        mock_create: AsyncMock,
+        mock_destroy: AsyncMock,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import TaskFailedRequest, spawn_aces, task_failed
 
@@ -272,7 +302,11 @@ class TestTaskLifecycleEndpoints:
 @pytest.mark.asyncio
 class TestCleanupEndpoint:
     async def test_cleanup_removes_orchestrator(
-        self, mock_destroy: AsyncMock, db, project_with_leader, mock_request,
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        project_with_leader,
+        mock_request,
     ) -> None:
         from atc.api.routers.leader import cleanup
 
@@ -286,10 +320,12 @@ class TestCleanupEndpoint:
 
 @pytest.mark.asyncio
 async def test_instruct_returns_delivery_state_and_marks_assignment_working(
-    db, project_with_leader, mock_request,
+    db,
+    project_with_leader,
+    mock_request,
 ) -> None:
     from atc.api.routers.leader import InstructRequest, instruct_ace
-    from atc.runtime.models import RoleKind, RuntimeDeliveryResult
+    from atc.runtime.models import DeliveryState, RoleKind, RuntimeDeliveryResult, RuntimeState
     from atc.state.db import assign_task, create_session, create_task_graph, get_task_assignment
 
     project, leader = project_with_leader
@@ -325,6 +361,8 @@ async def test_instruct_returns_delivery_state_and_marks_assignment_working(
         verdict="confirmed",
         trace_id="trace-phase7",
         message="instruction delivered",
+        runtime_state=RuntimeState.ACTIVE,
+        delivery_state=DeliveryState.ACCEPTED_ACTIVE,
     )
 
     with patch("atc.leader.orchestrator.start_ace", new=AsyncMock(return_value=delivery)):

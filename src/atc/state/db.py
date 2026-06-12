@@ -14,7 +14,6 @@ import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-import re
 from time import sleep
 from typing import TYPE_CHECKING, Any
 
@@ -26,12 +25,12 @@ from atc.state.models import (
     FeatureFlag,
     GitHubPR,
     Leader,
+    OrchestrationOperation,
     Project,
     ProjectBudget,
     QALoopRun,
     Session,
     SessionHeartbeat,
-    OrchestrationOperation,
     TaskAssignment,
     TaskGraph,
     UsageEvent,
@@ -468,13 +467,18 @@ CREATE TABLE IF NOT EXISTS feature_flags (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_flags_key ON feature_flags(key);
 
 CREATE TABLE IF NOT EXISTS task_assignments (
-    id              TEXT PRIMARY KEY,
-    task_graph_id   TEXT NOT NULL REFERENCES task_graphs(id) ON DELETE CASCADE,
-    ace_session_id  TEXT NOT NULL,
-    assignment_id   TEXT NOT NULL UNIQUE,
-    status          TEXT NOT NULL DEFAULT 'assigned',
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
+    id                      TEXT PRIMARY KEY,
+    task_graph_id           TEXT NOT NULL REFERENCES task_graphs(id) ON DELETE CASCADE,
+    ace_session_id          TEXT NOT NULL,
+    assignment_id           TEXT NOT NULL UNIQUE,
+    status                  TEXT NOT NULL DEFAULT 'assigned',
+    dispatch_delivery_state TEXT NOT NULL DEFAULT 'queued_unverified',
+    dispatch_verified       INTEGER NOT NULL DEFAULT 0,
+    last_activity_at        TEXT,
+    assigned_task_id        TEXT,
+    blocker_reason          TEXT,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_assignments_task_graph
@@ -572,7 +576,19 @@ async def run_migrations(db_path: str) -> None:
             await db.execute("ALTER TABLE tower_memory ADD COLUMN embedding BLOB")
             await db.commit()
 
-
+        # --- task_assignments dispatch truth fields ---
+        task_assignment_columns = {
+            "dispatch_delivery_state": "TEXT NOT NULL DEFAULT 'queued_unverified'",
+            "dispatch_verified": "INTEGER NOT NULL DEFAULT 0",
+            "last_activity_at": "TEXT",
+            "assigned_task_id": "TEXT",
+            "blocker_reason": "TEXT",
+        }
+        for column, ddl in task_assignment_columns.items():
+            if not await _has_column(db, "task_assignments", column):
+                logger.info("Migration: adding task_assignments.%s column", column)
+                await db.execute(f"ALTER TABLE task_assignments ADD COLUMN {column} {ddl}")
+                await db.commit()
 
 
 async def _ensure_schema_migrations_table(db: aiosqlite.Connection) -> None:
@@ -610,8 +626,27 @@ async def _apply_file_migrations(db: aiosqlite.Connection) -> None:
             )
             await db.commit()
             continue
-        if path.name == "015_session_provider_scope.sql":
-            if await _has_column(db, "sessions", "provider"):
+        if path.name == "015_session_provider_scope.sql" and await _has_column(
+            db, "sessions", "provider"
+        ):
+            logger.info("Migration skip: %s already applied structurally", path.name)
+            await db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (path.name, _now()),
+            )
+            await db.commit()
+            continue
+        if path.name == "016_task_assignment_dispatch_truth.sql":
+            dispatch_columns = [
+                "dispatch_delivery_state",
+                "dispatch_verified",
+                "last_activity_at",
+                "assigned_task_id",
+                "blocker_reason",
+            ]
+            if all(
+                [await _has_column(db, "task_assignments", column) for column in dispatch_columns]
+            ):
                 logger.info("Migration skip: %s already applied structurally", path.name)
                 await db.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
@@ -935,8 +970,9 @@ async def create_session(
     )
     await db.execute(
         """INSERT INTO sessions
-           (id, project_id, session_type, task_id, name, status, provider, scope_type, scope_id, host,
-            tmux_session, tmux_pane, alternate_on, auto_accept, created_at, updated_at)
+           (id, project_id, session_type, task_id, name, status, provider,
+            scope_type, scope_id, host, tmux_session, tmux_pane, alternate_on,
+            auto_accept, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             session.id,
@@ -1000,7 +1036,9 @@ async def update_session_status(
     """Update session status and updated_at timestamp."""
     if clear_tmux:
         await db.execute(
-            "UPDATE sessions SET status = ?, tmux_session = NULL, tmux_pane = NULL, updated_at = ? WHERE id = ?",
+            """UPDATE sessions
+               SET status = ?, tmux_session = NULL, tmux_pane = NULL, updated_at = ?
+               WHERE id = ?""",
             (status, _now(), session_id),
         )
     else:
@@ -1247,6 +1285,8 @@ _ASSIGNMENT_TRANSITIONS: dict[str, set[str]] = {
 
 def _row_to_task_assignment(row: aiosqlite.Row) -> TaskAssignment:
     d = dict(row)
+    if "dispatch_verified" in d:
+        d["dispatch_verified"] = bool(d["dispatch_verified"])
     return TaskAssignment(**d)
 
 
@@ -1314,12 +1354,26 @@ async def assign_task(
             ace_session_id=ace_session_id,
             assignment_id=existing.assignment_id,
             status="assigned",
+            dispatch_delivery_state="queued_unverified",
+            dispatch_verified=False,
+            assigned_task_id=task_graph_id,
             created_at=existing.created_at,
             updated_at=now,
         )
         await db.execute(
-            "UPDATE task_assignments SET ace_session_id = ?, status = ?, updated_at = ? WHERE assignment_id = ?",
-            (ace_session_id, assignment.status, assignment.updated_at, assignment.assignment_id),
+            """UPDATE task_assignments
+               SET ace_session_id = ?, status = ?, dispatch_delivery_state = ?,
+                   dispatch_verified = 0, last_activity_at = NULL,
+                   assigned_task_id = ?, blocker_reason = NULL, updated_at = ?
+               WHERE assignment_id = ?""",
+            (
+                ace_session_id,
+                assignment.status,
+                assignment.dispatch_delivery_state,
+                task_graph_id,
+                assignment.updated_at,
+                assignment.assignment_id,
+            ),
         )
     else:
         assignment = TaskAssignment(
@@ -1328,20 +1382,28 @@ async def assign_task(
             ace_session_id=ace_session_id,
             assignment_id=assignment_id,
             status="assigned",
+            dispatch_delivery_state="queued_unverified",
+            dispatch_verified=False,
+            assigned_task_id=task_graph_id,
             created_at=now,
             updated_at=now,
         )
 
         await db.execute(
             """INSERT INTO task_assignments
-               (id, task_graph_id, ace_session_id, assignment_id, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (id, task_graph_id, ace_session_id, assignment_id, status,
+                dispatch_delivery_state, dispatch_verified, assigned_task_id,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 assignment.id,
                 assignment.task_graph_id,
                 assignment.ace_session_id,
                 assignment.assignment_id,
                 assignment.status,
+                assignment.dispatch_delivery_state,
+                1 if assignment.dispatch_verified else 0,
+                assignment.assigned_task_id,
                 assignment.created_at,
                 assignment.updated_at,
             ),
@@ -1437,6 +1499,40 @@ async def update_task_assignment_status(
 # ---------------------------------------------------------------------------
 # Heartbeat CRUD
 # ---------------------------------------------------------------------------
+
+
+async def update_task_assignment_dispatch(
+    db: aiosqlite.Connection,
+    assignment_id: str,
+    *,
+    dispatch_delivery_state: str,
+    dispatch_verified: bool,
+    blocker_reason: str | None = None,
+    last_activity: bool = False,
+) -> TaskAssignment | None:
+    """Update provider-neutral runtime truth for an Ace dispatch."""
+
+    existing = await get_task_assignment(db, assignment_id)
+    if existing is None:
+        return None
+    now = _now()
+    last_activity_at = now if last_activity else existing.last_activity_at
+    await db.execute(
+        """UPDATE task_assignments
+           SET dispatch_delivery_state = ?, dispatch_verified = ?,
+               blocker_reason = ?, last_activity_at = ?, updated_at = ?
+           WHERE assignment_id = ?""",
+        (
+            dispatch_delivery_state,
+            1 if dispatch_verified else 0,
+            blocker_reason,
+            last_activity_at,
+            now,
+            assignment_id,
+        ),
+    )
+    await db.commit()
+    return await get_task_assignment(db, assignment_id)
 
 
 async def register_heartbeat(
@@ -1653,8 +1749,6 @@ async def delete_feature_flag(db: aiosqlite.Connection, key: str) -> bool:
     return bool(cursor.rowcount > 0)
 
 
-
-
 def _row_to_orchestration_operation(row: aiosqlite.Row) -> OrchestrationOperation:
     d = dict(row)
     return OrchestrationOperation(**d)
@@ -1697,7 +1791,8 @@ async def create_orchestration_operation(
     )
     await db.execute(
         """INSERT INTO orchestration_operations
-           (operation_id, operation_type, session_id, request_payload, response_payload, status, created_at, updated_at)
+           (operation_id, operation_type, session_id, request_payload,
+            response_payload, status, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             op.operation_id,

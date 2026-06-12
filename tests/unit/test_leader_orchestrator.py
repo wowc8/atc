@@ -9,6 +9,7 @@ import pytest
 
 from atc.core.events import EventBus
 from atc.leader.orchestrator import AceAssignment, LeaderOrchestrator
+from atc.runtime.models import DeliveryState, RoleKind, RuntimeDeliveryResult, RuntimeState
 from atc.state.db import (
     _SCHEMA_SQL,
     create_leader,
@@ -241,7 +242,7 @@ class TestSpawnAces:
         assert len(assignments) == 1
         mock_create.assert_called_once()
 
-    async def test_marks_task_in_progress(
+    async def test_spawn_marks_task_assigned_not_in_progress(
         self,
         mock_create: AsyncMock,
         db,
@@ -253,7 +254,7 @@ class TestSpawnAces:
 
         updated = await get_task_graph(db, tg.id)
         assert updated is not None
-        assert updated.status == "in_progress"
+        assert updated.status == "assigned"
 
     async def test_assigns_ace_to_task_graph(
         self,
@@ -413,6 +414,15 @@ class TestSendInstruction:
             task_title="Task A",
         )
 
+        mock_start.return_value = RuntimeDeliveryResult(
+            session_id=session.id,
+            provider_name="codex",
+            role=RoleKind.ACE,
+            status="confirmed",
+            runtime_state=RuntimeState.ACTIVE,
+            delivery_state=DeliveryState.ACCEPTED_ACTIVE,
+        )
+
         await orchestrator.send_instruction_to_ace(tg.id, "Build the login page")
 
         mock_start.assert_called_once_with(
@@ -422,6 +432,54 @@ class TestSendInstruction:
             event_bus=orchestrator.event_bus,
         )
         assert orchestrator.assignments[tg.id].status == "working"
+        updated = await get_task_graph(db, tg.id)
+        assert updated is not None
+        assert updated.status == "in_progress"
+
+    async def test_unverified_dispatch_does_not_mark_working(
+        self,
+        mock_start: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        tg = await create_task_graph(db, orchestrator.project_id, "Task B")
+        from atc.state import db as db_ops
+
+        session = await db_ops.create_session(
+            db,
+            orchestrator.project_id,
+            "ace",
+            "ace-task-b",
+        )
+        db_assignment, _ = await db_ops.assign_task(
+            db, tg.id, session.id, f"{orchestrator.leader_id}:{tg.id}"
+        )
+        orchestrator.assignments[tg.id] = AceAssignment(
+            ace_session_id=session.id,
+            task_graph_id=tg.id,
+            task_title="Task B",
+            assignment_id=db_assignment.assignment_id,
+        )
+        mock_start.return_value = RuntimeDeliveryResult(
+            session_id=session.id,
+            provider_name="codex",
+            role=RoleKind.ACE,
+            status="accepted",
+            runtime_state=RuntimeState.READY,
+            delivery_state=DeliveryState.SUBMITTED_PENDING_ACCEPTANCE,
+        )
+
+        await orchestrator.send_instruction_to_ace(tg.id, "Build the settings page")
+
+        assert orchestrator.assignments[tg.id].status == "assigned"
+        assert orchestrator.assignments[tg.id].dispatch_verified is False
+        updated = await get_task_graph(db, tg.id)
+        assert updated is not None
+        assert updated.status == "assigned"
+        persisted = await db_ops.get_task_assignment(db, db_assignment.assignment_id)
+        assert persisted is not None
+        assert persisted.dispatch_verified is False
+        assert persisted.dispatch_delivery_state == "submitted_pending_acceptance"
 
     async def test_instruction_to_unknown_task_raises(
         self,
@@ -469,7 +527,7 @@ class TestSpawnRetryAssignmentReuse:
         assert assignment is not None
         refreshed = await db_ops.get_task_graph(db, tg.id)
         assert refreshed is not None
-        assert refreshed.status == "in_progress"
+        assert refreshed.status == "assigned"
         assert refreshed.assigned_ace_id == "ace-new"
 
 

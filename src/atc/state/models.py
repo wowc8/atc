@@ -229,8 +229,8 @@ class TaskGraph:
 class TaskAssignment:
     """Tracks a single assignment of an Ace session to a task graph entry.
 
-    The ``assignment_id`` is a caller-supplied idempotency key.  Inserting
-    a duplicate ``assignment_id`` is a no-op.
+    ``status`` is the assignment lifecycle. Dispatch fields hold runtime truth
+    and prevent ``assigned`` from being confused with active Ace work.
     """
 
     id: str
@@ -238,6 +238,11 @@ class TaskAssignment:
     ace_session_id: str
     assignment_id: str
     status: str = "assigned"  # assigned|working|done|failed
+    dispatch_delivery_state: str = "queued_unverified"
+    dispatch_verified: bool = False
+    last_activity_at: str | None = None
+    assigned_task_id: str | None = None
+    blocker_reason: str | None = None
     created_at: str = ""
     updated_at: str = ""
 
