@@ -125,26 +125,28 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
    - can pre-authorize local ATC API access;
    - can distinguish auth/secret/unknown permission prompts that must not be auto-accepted.
 2. Move any Codex-specific trust/startup prompt detection into the Codex classifier if it is not already there.
-3. Add shared startup handshake sequencing in the runtime service:
+3. Add shared startup handshake sequencing in the runtime service. The happy-path assumption for managed workspaces is that a provider startup/trust prompt may appear, so the handshake should proactively look for it and resolve it before kickoff. If no trust prompt appears, that is also a valid provider-ready path and must be handled explicitly:
    - spawn runtime;
    - wait briefly for TUI draw;
    - inspect via provider classifier;
-   - auto-resolve only safe provider-declared trust prompts for ATC-managed workspaces;
-   - re-inspect;
+   - if a safe provider-declared managed-workspace trust prompt is present, auto-resolve it;
+   - if no trust prompt is present and the classifier reports ready/idle input, continue without recovery;
+   - if the provider uses a trusted-workspace launch flag or cached trust state, treat the resulting no-prompt startup as ready only after classifier confirmation;
+   - re-inspect after any auto-resolution attempt;
    - return ready/blocked/failed truth.
 4. Ensure auth/login/secrets/unknown permission prompts remain blockers.
-5. Emit audit/trace events for every auto-resolution attempt.
+5. Emit audit/trace events for every trust-prompt expectation path: prompt observed and resolved, prompt expected but absent and ready, prompt absent but not ready, and prompt observed but unsafe.
 
 ### Acceptance criteria
 
 - Leader kickoff is not written behind a classified startup/trust/auth/permission blocker.
-- Managed-workspace trust can be auto-resolved only through provider-declared capability and only for safe known prompts.
+- Startup handshake treats managed-workspace trust as an expected startup branch: prompt present and safely auto-resolved, or prompt absent and explicitly confirmed ready/idle, both before kickoff payload delivery.
 - Provider-specific prompt strings remain inside provider adapter/classifier code and tests.
 - Startup blocked states include clear `blocker_reason` and `recovery_recommendation`.
 
 ### Validation
 
-- Provider tests with mocked Codex startup/trust/auth/permission excerpts.
+- Provider tests with mocked Codex startup/trust/auth/permission excerpts, including trust prompt present, trust prompt absent because workspace is already trusted, and trust prompt absent because a trusted-workspace launch capability was used.
 - Runtime service tests for ready, safe auto-trust, unsafe permission, and unknown blocker paths.
 - Static search confirms Tower/Leader/API/CLI do not match Codex prompt strings.
 
