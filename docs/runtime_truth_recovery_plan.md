@@ -1,7 +1,7 @@
 # Runtime Truth and Recovery Plan
 
-**Status:** Phases 1-9 implemented
-**Last updated:** 2026-06-12 21:15 UTC
+**Status:** Phases 1-9 implemented; follow-up Leader kickoff hardening planned in [`docs/leader_kickoff_recovery_plan.md`](leader_kickoff_recovery_plan.md)
+**Last updated:** 2026-06-13
 **Scope:** Provider-neutral runtime truth, delivery verification, health, and recovery for ATC Tower → Leader → Ace orchestration  
 **Primary design constraint:** Provider-specific terminal behavior, including Codex update prompts and starter screens, must remain encapsulated inside provider adapters/classifiers. Tower, Leader, Ace, task graph, API, CLI, and UI layers may only depend on provider-neutral runtime truth.
 
@@ -14,6 +14,7 @@ This plan turns that feedback into an implementation sequence that makes ATC exp
 The goal is to make these statements provable through API, CLI, logs, and UI evidence:
 
 - A Leader was started and actually accepted the kickoff goal.
+- Leader kickoff verification distinguishes session creation, provider readiness, payload write, submit, goal acceptance, first actionable step, and task graph creation; see [`docs/leader_kickoff_recovery_plan.md`](leader_kickoff_recovery_plan.md) for the follow-up phases.
 - A Leader began work or created project tasks before Tower backs off to normal monitoring.
 - An Ace assignment was delivered, submitted, accepted, and moved past default prompt state before a task is treated as truly working.
 - Runtime interruptions such as update prompts, auth prompts, missing panes, stale sessions, provider errors, and unsubmitted prompts become explicit blockers with safe recovery recommendations.
