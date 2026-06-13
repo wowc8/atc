@@ -40,6 +40,7 @@ Current responsibilities:
 Design rule:
 - Orchestration should wrap existing high-level flows where they already exist, not duplicate runtime behavior. For example, `spawn_leader` goes through Tower's submit-goal path, and `send_instruction` goes through the existing provider-owned delivery path.
 - Runtime truth and recovery work must follow the provider-neutral plan in [`docs/runtime_truth_recovery_plan.md`](runtime_truth_recovery_plan.md): product layers depend on `runtime_state`, `delivery_state`, `blocker_reason`, and recovery recommendations, while provider-specific prompt detection/recovery mechanics remain inside provider adapters/classifiers.
+- Leader kickoff hardening must follow [`docs/leader_kickoff_recovery_plan.md`](leader_kickoff_recovery_plan.md): Tower may treat a Leader as running only after provider-neutral kickoff evidence proves goal acceptance and actionable progress or task graph creation. Session existence, visible prompt text, `queued`, `submitted`, `sent`, or `202 Accepted` responses are not execution proof.
 
 | Package | Responsibility |
 |---|---|

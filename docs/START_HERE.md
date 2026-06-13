@@ -18,6 +18,8 @@ Examples:
 - provider/runtime work:
   - `docs/service_model.md`
   - `docs/runtime_orchestration_refactor_phases.md`
+  - `docs/runtime_truth_recovery_plan.md`
+  - `docs/leader_kickoff_recovery_plan.md`
   - `docs/provider_runtime_refactor_plan.md`
   - `docs/provider_cli_wrapper_spec.md`
   - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`
@@ -75,7 +77,11 @@ These docs exist to:
 - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`
   - runtime/provider boundary rules
 - `docs/runtime_orchestration_refactor_phases.md`
-  - phased implementation plan for the runtime/orchestration hardening refactor
+  - completed phased implementation plan for the runtime/orchestration hardening refactor
+- `docs/runtime_truth_recovery_plan.md`
+  - provider-neutral runtime truth, delivery verification, health, and recovery model
+- `docs/leader_kickoff_recovery_plan.md`
+  - planned follow-up phases for Leader kickoff verification, startup prompt recovery, task graph ergonomics, and local ATC API capability setup
 - `docs/runtime_orchestration_phase0_baseline.md`
   - Phase 0 validation evidence, current delivery/session path map, test inventory, and Playwright baseline gate
 - `docs/agents/README.md`
