@@ -37,13 +37,14 @@ Starting a Leader with a goal should expose a staged kickoff truth model:
 | `payload_written` | Kickoff payload was written to the PTY/runtime substrate. |
 | `submit_sent` | Enter/submit was sent for the kickoff payload. |
 | `submitted_pending_acceptance` | Submission happened, but no provider/activity proof exists yet. |
-| `goal_accepted` | Provider-neutral evidence shows the Leader accepted the goal. |
-| `first_actionable_step_observed` | Leader produced an actionable plan/status/tool use, or equivalent runtime evidence. |
+| `goal_accepted` | Provider-neutral evidence shows the Leader accepted the goal. Preferred proof is a Leader-originated active/goal-accepted report through the canonical ATC reporting path. |
+| `leader_reported_active` | The Leader explicitly reported active before beginning task work. This is the deterministic handshake Tower should prefer over terminal-output inference. |
+| `first_actionable_step_observed` | Leader produced an actionable plan/status/tool use, or equivalent runtime evidence after the active report. |
 | `task_graph_created` | A project task graph/milestone/task was created or updated through canonical services. |
 | `blocked` | Runtime/kickoff is blocked with a stable `blocker_reason` and recovery guidance. |
 | `failed` | Startup/kickoff failed unexpectedly. |
 
-Tower should not enter normal low-frequency monitoring until the Leader reaches `goal_accepted` plus either `first_actionable_step_observed` or `task_graph_created`, or until a classified blocker is reported.
+Tower should not enter normal low-frequency monitoring until the Leader reaches `goal_accepted` / `leader_reported_active` plus either `first_actionable_step_observed` or `task_graph_created`, or until a classified blocker is reported. If the Leader does not emit the active/goal-accepted report during the startup window, Tower should keep the state as `submitted_pending_acceptance`, `kickoff_unverified`, or `blocked`; it should not call the Leader `working`.
 
 ## Phase 0 — Baseline reproduction and contract audit
 
@@ -94,7 +95,7 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
    - `kickoff_blocker_reason`;
    - `kickoff_recovery_recommendation`.
 2. Persist the original Leader kickoff payload as replayable source-of-truth context.
-3. Ensure trace events correlate startup handshake, payload write, submit, acceptance observation, blocker, and task graph creation under one trace id.
+3. Ensure trace events can correlate startup handshake, payload write, submit, Leader active/goal-accepted report, acceptance observation, blocker, and task graph creation under one trace id.
 4. Keep responses additive/backward-compatible, but stop newly-added fields from using optimistic wording.
 5. Update REST/CLI/MCP schemas or docs to describe the additive fields.
 
@@ -154,32 +155,36 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 ### Work
 
 1. Wire Leader start/Tower kickoff through the Phase 1 state model and Phase 2 handshake.
-2. After submit, observe for evidence such as:
-   - provider active output/reasoning after the kickoff payload;
+2. After submit, require the Leader to emit an explicit active/goal-accepted report through the canonical ATC reporting path before starting task work. This report is the preferred proof that the Leader accepted the kickoff.
+3. After the active report, observe for working evidence such as:
    - first actionable Leader status/event;
    - canonical task graph/milestone/task creation;
-   - hook/context helper confirmation from the deployed Leader workspace.
-3. Treat these as invalid success signals:
+   - hook/context helper confirmation from the deployed Leader workspace;
+   - provider active output/reasoning only as supporting/fallback evidence, not as the primary deterministic proof.
+4. Treat these as invalid success signals:
    - session row exists;
    - pane exists;
    - payload text is visible but not submitted;
    - provider starter/default prompt is still visible;
-   - transport response says `queued`, `submitted`, or `sent` with no acceptance evidence.
-4. Update Tower startup cadence so normal monitoring starts only after verified kickoff or classified blocker.
-5. Surface Leader health states such as:
+   - transport response says `queued`, `submitted`, or `sent` with no acceptance evidence;
+   - provider output appears active but no Leader active/goal-accepted report or canonical work-state update was observed within the startup window.
+5. Update Tower startup cadence so normal monitoring starts only after verified kickoff or classified blocker.
+6. Surface Leader health states such as:
    - `starting`;
    - `blocked_on_provider_prompt`;
    - `kickoff_unverified`;
    - `goal_accepted`;
+   - `leader_reported_active`;
    - `task_graph_empty`;
-   - `active`;
+   - `working` only after active report plus actionable step or task graph evidence;
    - `failed`.
 
 ### Acceptance criteria
 
 - `atc leader start --goal ...` and corresponding REST responses expose kickoff state and verification truth.
+- Leader role instructions require an explicit active/goal-accepted report before task work begins.
 - Tower reports blocked/unverified kickoff instead of silently showing only zero tasks.
-- Tests cover success, prompt-not-submitted, default prompt, trust/auth/permission blocker, missing pane, and no-task-graph-yet cases.
+- Tests cover success, missing active report, prompt-not-submitted, default prompt, trust/auth/permission blocker, missing pane, and no-task-graph-yet cases.
 
 ### Validation
 
