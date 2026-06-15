@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from atc.providers.codex import runtime as codex_runtime
+from atc.providers.codex.classifier import CodexRuntimeClassifier
 from atc.providers.codex.runtime import CodexRuntime
 from atc.runtime.models import (
     BlockerReason,
@@ -68,3 +69,29 @@ async def test_codex_runtime_missing_pane_uses_neutral_missing_classification(
     assert inspection.readiness is ReadinessState.STOPPED
     assert inspection.details["runtime_state"] == RuntimeState.MISSING.value
     assert inspection.details["blocker_reason"] == BlockerReason.PANE_MISSING.value
+
+
+def test_codex_classifier_marks_managed_workspace_trust_as_safely_resolvable() -> None:
+    classifier = CodexRuntimeClassifier()
+
+    classification = classifier.classify_excerpt("Do you trust this folder?")
+
+    assert classification.readiness is ReadinessState.BLOCKED
+    assert classification.blocker_reason is BlockerReason.RUNTIME_TRUST_REQUIRED
+    assert classification.diagnostics["safe_to_auto_resolve"] is True
+    capabilities = classifier.recovery_capabilities().as_dict()
+    assert capabilities["can_classify_trust_prompt"] is True
+    assert capabilities["can_auto_accept_managed_workspace_trust_prompt"] is True
+    assert capabilities["can_distinguish_auth_secret_unknown_permission_prompts"] is True
+
+
+def test_codex_classifier_keeps_auth_and_permission_unsafe() -> None:
+    classifier = CodexRuntimeClassifier()
+
+    auth = classifier.classify_excerpt("Please sign in to continue")
+    permission = classifier.classify_excerpt("Allow command: rm -rf /tmp/example?")
+
+    assert auth.blocker_reason is BlockerReason.RUNTIME_AUTH_REQUIRED
+    assert auth.diagnostics["safe_to_auto_resolve"] is False
+    assert permission.blocker_reason is BlockerReason.RUNTIME_PERMISSION_REQUIRED
+    assert permission.diagnostics["safe_to_auto_resolve"] is False

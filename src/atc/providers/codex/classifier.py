@@ -73,6 +73,7 @@ _INTERRUPT_SPEC = RuntimeInterruptSpec(
     permission_triggers=_PERMISSION_TRIGGERS,
     login_triggers=_AUTH_TRIGGERS,
     provider_error_triggers=_PROVIDER_ERROR_TRIGGERS,
+    auto_resolvable_trust_triggers=("trust this folder", "do you trust"),
 )
 
 
@@ -215,6 +216,11 @@ class CodexRuntimeClassifier:
             can_detect_auth_prompt=True,
             can_detect_trust_prompt=True,
             can_detect_permission_prompt=True,
+            can_classify_trust_prompt=True,
+            can_auto_accept_managed_workspace_trust_prompt=True,
+            can_classify_local_api_approval_prompt=False,
+            can_preauthorize_local_atc_api_access=False,
+            can_distinguish_auth_secret_unknown_permission_prompts=True,
         )
 
     def detect_interrupt(self, excerpt: str):

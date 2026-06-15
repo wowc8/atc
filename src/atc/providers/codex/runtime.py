@@ -23,6 +23,7 @@ from atc.runtime.tmux.substrate import (
     ensure_tmux_session,
     kill_pane,
     pane_exists,
+    run_tmux,
     spawn_window_pane,
 )
 from atc.runtime.tracing import (
@@ -191,6 +192,30 @@ class CodexRuntime(ProviderRuntime):
             inspection
         )
         return inspection
+
+    async def resolve_startup_prompt(
+        self,
+        handle: RuntimeSessionHandle,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        """Resolve only Codex startup prompts declared safe by provider classification."""
+
+        if not handle.tmux_pane:
+            return False
+        if inspection.block_reason is not RuntimeBlockReason.TRUST:
+            return False
+        diagnostics = inspection.details.get("provider_diagnostics")
+        if not isinstance(diagnostics, dict):
+            return False
+        if diagnostics.get("safe_to_auto_resolve") is not True:
+            return False
+        capabilities = inspection.details.get("recovery_capabilities")
+        if not isinstance(capabilities, dict) or not capabilities.get(
+            "can_auto_accept_managed_workspace_trust_prompt"
+        ):
+            return False
+        await run_tmux("send-keys", "-t", handle.tmux_pane, "Enter")
+        return True
 
     def _runtime_hint_for_inspection(self, inspection: RuntimeInspection) -> str:
         if inspection.readiness is ReadinessState.READY:

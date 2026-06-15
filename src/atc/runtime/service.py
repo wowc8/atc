@@ -40,8 +40,6 @@ from atc.state.db import get_connection_app_state
 _STARTUP_INITIAL_DELAY_SECONDS = 2.0
 _STARTUP_RESOLVE_DELAY_SECONDS = 1.0
 _STARTUP_FINAL_DELAY_SECONDS = 1.0
-_STARTUP_AUTO_RESOLVE_REASONS = {RuntimeBlockReason.TRUST}
-
 if TYPE_CHECKING:
     from atc.providers.base import ProviderRuntime
 
@@ -409,7 +407,7 @@ class RuntimeService:
             phase="initial",
         )
         if first.readiness is ReadinessState.BLOCKED:
-            resolved = await self._try_resolve_startup_prompt(handle, first)
+            resolved = await self._try_resolve_startup_prompt(provider, handle, first)
             if resolved:
                 await asyncio.sleep(_STARTUP_RESOLVE_DELAY_SECONDS)
                 second = await provider.inspect_session(handle)
@@ -440,19 +438,28 @@ class RuntimeService:
             phase="final",
         )
 
-    @staticmethod
     async def _try_resolve_startup_prompt(
+        self,
+        provider: ProviderRuntime,
         handle: RuntimeSessionHandle,
         inspection: RuntimeInspection,
     ) -> bool:
-        if inspection.block_reason not in _STARTUP_AUTO_RESOLVE_REASONS:
+        if inspection.block_reason is not RuntimeBlockReason.TRUST:
             return False
-        if not handle.tmux_pane:
+        diagnostics = inspection.details.get("provider_diagnostics")
+        if not isinstance(diagnostics, dict):
             return False
-        from atc.runtime.tmux.substrate import run_tmux
-
-        await run_tmux("send-keys", "-t", handle.tmux_pane, "Enter")
-        return True
+        if diagnostics.get("safe_to_auto_resolve") is not True:
+            return False
+        capabilities = inspection.details.get("recovery_capabilities")
+        if not isinstance(capabilities, dict) or not capabilities.get(
+            "can_auto_accept_managed_workspace_trust_prompt"
+        ):
+            return False
+        resolver = getattr(provider, "resolve_startup_prompt", None)
+        if resolver is None:
+            return False
+        return bool(await resolver(handle, inspection))
 
     @staticmethod
     def _append_startup_inspection_event(

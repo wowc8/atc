@@ -71,7 +71,7 @@ def test_codex_inspect_session_reports_ready_at_prompt() -> None:
 
     assert inspection.alive is True
     assert inspection.readiness is ReadinessState.READY
-    assert inspection.summary == "Prompt ready"
+    assert inspection.summary == "Codex prompt ready"
 
 
 def test_codex_inspect_session_reports_busy_when_not_at_prompt() -> None:
@@ -141,7 +141,7 @@ def test_codex_inspect_session_reports_blocked_on_permission_prompt() -> None:
 
     assert inspection.readiness is ReadinessState.BLOCKED
     assert inspection.summary == "Blocked on permission prompt"
-    assert inspection.details["runtime_interrupt"] == "permission_prompt"
+    assert inspection.details["provider_diagnostics"]["runtime_interrupt"] == "permission_prompt"
     assert inspection.details["provider_runtime_action"] == "resolve_permission"
 
 

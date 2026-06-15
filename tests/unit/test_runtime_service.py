@@ -275,12 +275,8 @@ def test_runtime_service_startup_handshake_traces_blocked_auth_without_auto_answ
     assert events[-1]["details"]["startup_phase"] == "final"
 
 
-def test_runtime_service_startup_handshake_auto_resolves_trust(monkeypatch) -> None:
-    send_keys: list[tuple[str, ...]] = []
-
-    async def fake_run_tmux(*args: str) -> str:
-        send_keys.append(args)
-        return ""
+def test_runtime_service_startup_handshake_auto_resolves_provider_declared_safe_trust() -> None:
+    resolved: list[str] = []
 
     class TrustThenReadyProvider(DummyProviderRuntime):
         def __init__(self) -> None:
@@ -307,6 +303,12 @@ def test_runtime_service_startup_handshake_auto_resolves_trust(monkeypatch) -> N
                     readiness=ReadinessState.BLOCKED,
                     block_reason=RuntimeBlockReason.TRUST,
                     summary="Blocked on trust prompt",
+                    details={
+                        "provider_diagnostics": {"safe_to_auto_resolve": True},
+                        "recovery_capabilities": {
+                            "can_auto_accept_managed_workspace_trust_prompt": True
+                        },
+                    },
                 )
             return RuntimeInspection(
                 session_id=handle.session_id,
@@ -316,7 +318,14 @@ def test_runtime_service_startup_handshake_auto_resolves_trust(monkeypatch) -> N
                 summary="Ready",
             )
 
-    monkeypatch.setattr("atc.runtime.tmux.substrate.run_tmux", fake_run_tmux)
+        async def resolve_startup_prompt(
+            self,
+            handle: RuntimeSessionHandle,
+            inspection: RuntimeInspection,
+        ) -> bool:
+            resolved.append(handle.session_id)
+            return True
+
     register_provider_runtime("dummy_runtime_trust_then_ready", TrustThenReadyProvider)
     service = RuntimeService()
     request = StartRoleRequest(
@@ -326,8 +335,7 @@ def test_runtime_service_startup_handshake_auto_resolves_trust(monkeypatch) -> N
     )
 
     asyncio.run(service.spawn_existing_session(request))
-
-    assert send_keys == [("send-keys", "-t", "%42", "Enter")]
+    assert resolved == ["sess-trust-1"]
     phases = [
         event["details"].get("startup_phase")
         for event in request.metadata["delivery_trace_events"]
@@ -335,6 +343,159 @@ def test_runtime_service_startup_handshake_auto_resolves_trust(monkeypatch) -> N
     assert "initial" in phases
     assert "after_auto_resolve" in phases
     assert "final" in phases
+
+
+def test_runtime_service_startup_handshake_refuses_unsafe_trust() -> None:
+    resolved: list[str] = []
+
+    class UnsafeTrustProvider(DummyProviderRuntime):
+        async def spawn_existing_session(self, request: StartRoleRequest) -> RuntimeSessionHandle:
+            self.spawned_existing.append(request)
+            return RuntimeSessionHandle(
+                session_id=request.session_id,
+                provider_name=request.provider_name,
+                role=request.role,
+                transport=RuntimeTransport.TMUX,
+                tmux_pane="%43",
+            )
+
+        async def inspect_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
+            return RuntimeInspection(
+                session_id=handle.session_id,
+                provider_name=handle.provider_name,
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.TRUST,
+                summary="Blocked on unsafe trust prompt",
+                details={
+                    "provider_diagnostics": {"safe_to_auto_resolve": False},
+                    "recovery_capabilities": {
+                        "can_auto_accept_managed_workspace_trust_prompt": True
+                    },
+                },
+            )
+
+        async def resolve_startup_prompt(
+            self,
+            handle: RuntimeSessionHandle,
+            inspection: RuntimeInspection,
+        ) -> bool:
+            resolved.append(handle.session_id)
+            return True
+
+    register_provider_runtime("dummy_runtime_unsafe_trust", UnsafeTrustProvider)
+    service = RuntimeService()
+    request = StartRoleRequest(
+        session_id="sess-unsafe-trust-1",
+        provider_name="dummy_runtime_unsafe_trust",
+        role=RoleKind.ACE,
+    )
+
+    asyncio.run(service.spawn_existing_session(request))
+
+    assert resolved == []
+    events = request.metadata["delivery_trace_events"]
+    assert events[-1]["stage"] == "blocked"
+    assert events[-1]["reason_code"] == "trust_required"
+    phases = [event["details"].get("startup_phase") for event in events]
+    assert "after_auto_resolve" not in phases
+
+
+def test_runtime_service_startup_handshake_requires_provider_capability_for_trust() -> None:
+    resolved: list[str] = []
+
+    class NoCapabilityTrustProvider(DummyProviderRuntime):
+        async def inspect_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
+            return RuntimeInspection(
+                session_id=handle.session_id,
+                provider_name=handle.provider_name,
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.TRUST,
+                summary="Blocked on trust prompt",
+                details={"provider_diagnostics": {"safe_to_auto_resolve": True}},
+            )
+
+        async def resolve_startup_prompt(
+            self,
+            handle: RuntimeSessionHandle,
+            inspection: RuntimeInspection,
+        ) -> bool:
+            resolved.append(handle.session_id)
+            return True
+
+    register_provider_runtime("dummy_runtime_no_capability_trust", NoCapabilityTrustProvider)
+    service = RuntimeService()
+    request = StartRoleRequest(
+        session_id="sess-no-capability-trust-1",
+        provider_name="dummy_runtime_no_capability_trust",
+        role=RoleKind.LEADER,
+    )
+
+    asyncio.run(service.spawn_existing_session(request))
+
+    assert resolved == []
+    assert request.metadata["delivery_trace_events"][-1]["stage"] == "blocked"
+
+
+def test_runtime_service_startup_handshake_traces_ready_no_prompt_branch() -> None:
+    register_provider_runtime("dummy_runtime_ready_no_prompt", DummyProviderRuntime)
+    service = RuntimeService()
+    request = StartRoleRequest(
+        session_id="sess-ready-no-prompt-1",
+        provider_name="dummy_runtime_ready_no_prompt",
+        role=RoleKind.LEADER,
+    )
+
+    asyncio.run(service.spawn_existing_session(request))
+
+    events = request.metadata["delivery_trace_events"]
+    assert events[-1]["details"]["startup_phase"] == "final"
+    assert events[-1]["reason_code"] == "session_running"
+
+
+def test_runtime_service_startup_handshake_never_auto_resolves_permission() -> None:
+    resolved: list[str] = []
+
+    class PermissionBlockedProvider(DummyProviderRuntime):
+        async def inspect_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
+            return RuntimeInspection(
+                session_id=handle.session_id,
+                provider_name=handle.provider_name,
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.PERMISSION,
+                summary="Blocked on permission prompt",
+                details={
+                    "provider_diagnostics": {"safe_to_auto_resolve": True},
+                    "recovery_capabilities": {
+                        "can_auto_accept_managed_workspace_trust_prompt": True
+                    },
+                },
+            )
+
+        async def resolve_startup_prompt(
+            self,
+            handle: RuntimeSessionHandle,
+            inspection: RuntimeInspection,
+        ) -> bool:
+            resolved.append(handle.session_id)
+            return True
+
+    register_provider_runtime("dummy_runtime_permission_blocked", PermissionBlockedProvider)
+    service = RuntimeService()
+    request = StartRoleRequest(
+        session_id="sess-permission-blocked-1",
+        provider_name="dummy_runtime_permission_blocked",
+        role=RoleKind.LEADER,
+    )
+
+    asyncio.run(service.spawn_existing_session(request))
+
+    assert resolved == []
+    event = request.metadata["delivery_trace_events"][-1]
+    assert event["stage"] == "blocked"
+    assert event["reason_code"] == "permission_required"
 
 
 def test_runtime_service_send_instruction_adds_queued_trace_event() -> None:

@@ -32,6 +32,11 @@ class RecoveryCapabilities:
     can_detect_auth_prompt: bool = False
     can_detect_trust_prompt: bool = False
     can_detect_permission_prompt: bool = False
+    can_classify_trust_prompt: bool = False
+    can_auto_accept_managed_workspace_trust_prompt: bool = False
+    can_classify_local_api_approval_prompt: bool = False
+    can_preauthorize_local_atc_api_access: bool = False
+    can_distinguish_auth_secret_unknown_permission_prompts: bool = False
 
     def as_dict(self) -> dict[str, bool]:
         return {
@@ -43,6 +48,15 @@ class RecoveryCapabilities:
             "can_detect_auth_prompt": self.can_detect_auth_prompt,
             "can_detect_trust_prompt": self.can_detect_trust_prompt,
             "can_detect_permission_prompt": self.can_detect_permission_prompt,
+            "can_classify_trust_prompt": self.can_classify_trust_prompt,
+            "can_auto_accept_managed_workspace_trust_prompt": (
+                self.can_auto_accept_managed_workspace_trust_prompt
+            ),
+            "can_classify_local_api_approval_prompt": self.can_classify_local_api_approval_prompt,
+            "can_preauthorize_local_atc_api_access": self.can_preauthorize_local_atc_api_access,
+            "can_distinguish_auth_secret_unknown_permission_prompts": (
+                self.can_distinguish_auth_secret_unknown_permission_prompts
+            ),
         }
 
 
