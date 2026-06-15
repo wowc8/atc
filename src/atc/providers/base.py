@@ -73,6 +73,19 @@ class ProviderRuntime(Protocol):
         blocked and return False.
         """
 
+    async def submit_pending_prompt(
+        self,
+        handle: RuntimeSessionHandle,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        """Provider-owned submission of an already-visible pending prompt.
+
+        Callers must inspect first and only invoke this for neutral
+        ``prompt_not_submitted`` recovery when the visible prompt text is proven
+        to match the expected persisted payload. Provider adapters own the actual
+        key sequence and must refuse auth, trust, permission, or unknown prompts.
+        """
+
     async def restore_session(
         self,
         handle: RuntimeSessionHandle,
