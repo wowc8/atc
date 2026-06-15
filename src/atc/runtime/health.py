@@ -160,6 +160,38 @@ def _leader_kickoff_health_state(
     return "working"
 
 
+def _provider_details_from_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    details = diagnostics.get("details")
+    return details if isinstance(details, dict) else {}
+
+
+def _pending_prompt_text_from_diagnostics(diagnostics: dict[str, Any]) -> str | None:
+    details = _provider_details_from_diagnostics(diagnostics)
+    provider_diagnostics = details.get("provider_diagnostics")
+    if not isinstance(provider_diagnostics, dict):
+        return None
+    text = provider_diagnostics.get("pending_prompt_text")
+    return text if isinstance(text, str) and text.strip() else None
+
+
+def _pending_prompt_matches_payload(
+    pending_prompt_text: str | None,
+    persisted_payload: dict[str, Any] | None,
+) -> bool:
+    if not pending_prompt_text or not isinstance(persisted_payload, dict):
+        return False
+    message = persisted_payload.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return False
+    pending = " ".join(pending_prompt_text.split())
+    expected = " ".join(message.split())
+    if not pending:
+        return False
+    if pending == expected:
+        return True
+    return len(pending) >= 12 and pending in expected
+
+
 def _recovery_for(
     role: RuntimeRole, project_id: str, blocker: str | None, session_id: str | None
 ) -> dict[str, Any]:
@@ -279,6 +311,11 @@ async def leader_health(
     kickoff_trace_id = (
         kickoff_payload.get("trace_id") if isinstance(kickoff_payload, dict) else None
     )
+    pending_prompt_text = _pending_prompt_text_from_diagnostics(diagnostics)
+    pending_payload_matches = _pending_prompt_matches_payload(
+        pending_prompt_text,
+        kickoff_payload if isinstance(kickoff_payload, dict) else None,
+    )
     kickoff_state = {
         "kickoff_payload_persisted": bool(kickoff_payload),
         "kickoff_state": _leader_kickoff_health_state(
@@ -323,6 +360,11 @@ async def leader_health(
         "original_goal_available": bool(
             context.get("leader_original_goal") or (leader.goal if leader else None)
         ),
+        "pending_prompt_observed": bool(pending_prompt_text),
+        "pending_prompt_matches_persisted_payload": pending_payload_matches,
+        "pending_prompt_match_basis": "provider_pending_text"
+        if pending_prompt_text
+        else None,
     }
     task_summary = {
         "total": len(tasks),
@@ -524,6 +566,10 @@ def build_recovery_plan(
         BlockerReason.STALE_AFTER_UPDATE.value,
     } or health.runtime_state in {RuntimeState.MISSING.value, RuntimeState.STALE.value}
     update_required = health.current_blocker == BlockerReason.RUNTIME_UPDATE_REQUIRED.value
+    pending_prompt = health.current_blocker == BlockerReason.PROMPT_NOT_SUBMITTED.value
+    pending_matches_payload = bool(
+        health.kickoff_state.get("pending_prompt_matches_persisted_payload")
+    )
     required_restart_policy = _restart_policy_required(health) if restartable else None
 
     if not health.current_blocker and health.runtime_state in {
@@ -531,6 +577,27 @@ def build_recovery_plan(
         RuntimeState.ACTIVE.value,
     }:
         actions.append({"action": "none", "reason": "runtime_healthy"})
+    elif pending_prompt:
+        actions.append(
+            {
+                "action": "submit_pending_prompt",
+                "safe": pending_matches_payload,
+                "policy_required": "submit_pending_prompt",
+                "uses_persisted_payload": pending_matches_payload,
+                "match_basis": health.kickoff_state.get("pending_prompt_match_basis"),
+            }
+        )
+        safe = pending_matches_payload
+        if pending_matches_payload:
+            message = (
+                "Pending provider prompt matches persisted kickoff payload; "
+                "Enter-only submit can be applied under explicit policy."
+            )
+        else:
+            message = (
+                "Prompt-not-submitted was detected, but the visible prompt did "
+                "not match persisted payload."
+            )
     elif update_required:
         can_accept = bool(capabilities.get("can_accept_update_prompt"))
         fresh_required = bool(capabilities.get("requires_fresh_session_after_update"))
@@ -574,6 +641,8 @@ def build_recovery_plan(
 
     if mode == "apply" and not safe:
         refused = "unsafe_or_unneeded_recovery"
+    elif mode == "apply" and pending_prompt and policy != "submit_pending_prompt":
+        refused = "apply_requires_submit_pending_prompt_policy"
     elif (
         mode == "apply" and update_required and not _recovery_policy_allows(policy, "accept_update")
     ):
@@ -621,6 +690,47 @@ async def apply_recovery_plan(
 
     plan = build_recovery_plan(health, mode="apply", policy=policy)
     if plan.refused_reason:
+        return plan
+
+    if health.current_blocker == BlockerReason.PROMPT_NOT_SUBMITTED.value and any(
+        action.get("action") == "submit_pending_prompt" for action in plan.actions
+    ):
+        service = RuntimeService()
+        session = await db_ops.get_session(conn, health.session_id) if health.session_id else None
+        if session is None:
+            plan.refused_reason = "runtime_session_missing"
+            plan.message = "Apply refused: runtime session is missing."
+            return plan
+        inspection = await service.inspect_session_record(session)
+        blocker = _blocker_from_inspection(inspection)
+        if blocker != BlockerReason.PROMPT_NOT_SUBMITTED.value:
+            plan.refused_reason = "runtime_state_changed"
+            plan.message = "Apply refused: runtime is no longer prompt_not_submitted."
+            plan.actions.append(
+                {
+                    "action": "reinspect_runtime",
+                    "status": "refused",
+                    "blocker_reason": blocker,
+                }
+            )
+            return plan
+        submitted = await service.submit_pending_prompt_for_session_record(session, inspection)
+        if not submitted:
+            plan.refused_reason = "provider_refused_pending_prompt_submit"
+            plan.message = (
+                "Apply refused: provider adapter did not confirm safe pending "
+                "prompt submission."
+            )
+            return plan
+        plan.actions.append(
+            {"action": "submit_pending_prompt", "status": "applied", "session_id": session.id}
+        )
+        plan.message = "Pending kickoff prompt submitted via provider adapter."
+        plan.health = (
+            await leader_health(conn, health.project_id)
+            if health.role == "leader"
+            else await ace_health(conn, health.project_id, session.id)
+        ).as_dict()
         return plan
 
     if health.current_blocker == BlockerReason.RUNTIME_UPDATE_REQUIRED.value:

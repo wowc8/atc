@@ -169,7 +169,10 @@ class CodexRuntimeClassifier:
                 prompt_state="prompt_visible:not_submitted",
                 provider_observation="codex_prompt_not_submitted",
                 recovery_state=RecoveryState.NOT_NEEDED,
-                diagnostics={"codex_observation": "prompt_not_submitted"},
+                diagnostics={
+                    "codex_observation": "prompt_not_submitted",
+                    "pending_prompt_text": prompt_text.strip(),
+                },
             )
         if CODEX_PROMPT_RE.search(excerpt):
             return RuntimeClassification(

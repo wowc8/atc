@@ -52,11 +52,16 @@ async def db():
 class FakeRuntimeService:
     def __init__(self, inspection: RuntimeInspection | Exception) -> None:
         self.inspection = inspection
+        self.submitted = False
 
     async def inspect_session_record(self, _session):
         if isinstance(self.inspection, Exception):
             raise self.inspection
         return self.inspection
+
+    async def submit_pending_prompt_for_session_record(self, _session, _inspection):
+        self.submitted = True
+        return True
 
 
 def _request(db):
@@ -306,6 +311,142 @@ async def test_recovery_dry_run_and_apply_refusal(db) -> None:
     explicit_apply = build_recovery_plan(health, mode="apply", policy="restart_missing_pane")
     assert explicit_apply.safe_to_apply is True
     assert explicit_apply.refused_reason is None
+
+
+@pytest.mark.asyncio
+async def test_prompt_not_submitted_recovery_requires_persisted_payload_match(db) -> None:
+    project = await create_project(db, "pending-prompt-proj")
+    leader = await create_leader(db, project.id, goal="Recover pending prompt")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader-pending",
+        status="working",
+        provider="codex",
+    )
+    message = "# Mission Brief\n\nRecover pending prompt"
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%21", "atc", session.id),
+    )
+    await db.execute(
+        "UPDATE leaders SET session_id = ?, context = ? WHERE id = ?",
+        (
+            session.id,
+            json.dumps(
+                {
+                    "leader_kickoff_payload": {
+                        "project_id": project.id,
+                        "goal": "Recover pending prompt",
+                        "message": message,
+                        "source": "test",
+                    }
+                }
+            ),
+            leader.id,
+        ),
+    )
+    await db.commit()
+
+    health = await leader_health(
+        db,
+        project.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=session.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.READY,
+                summary="Codex prompt contains visible unsubmitted text",
+                details={
+                    "blocker_reason": BlockerReason.PROMPT_NOT_SUBMITTED.value,
+                    "provider_diagnostics": {
+                        "pending_prompt_text": "Recover pending prompt"
+                    },
+                },
+            )
+        ),
+    )
+
+    assert health.current_blocker == BlockerReason.PROMPT_NOT_SUBMITTED.value
+    assert health.kickoff_state["pending_prompt_observed"] is True
+    assert health.kickoff_state["pending_prompt_matches_persisted_payload"] is True
+    dry_run = build_recovery_plan(health, mode="dry_run")
+    assert dry_run.safe_to_apply is True
+    assert dry_run.actions[1]["action"] == "submit_pending_prompt"
+    assert dry_run.actions[1]["policy_required"] == "submit_pending_prompt"
+    apply_without_policy = build_recovery_plan(health, mode="apply")
+    assert (
+        apply_without_policy.refused_reason
+        == "apply_requires_submit_pending_prompt_policy"
+    )
+
+
+@pytest.mark.asyncio
+async def test_prompt_not_submitted_apply_reinspects_and_submits_via_provider(
+    db, monkeypatch
+) -> None:
+    project = await create_project(db, "pending-prompt-apply-proj")
+    leader = await create_leader(db, project.id, goal="Apply pending prompt")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader-pending-apply",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%22", "atc", session.id),
+    )
+    await db.execute(
+        "UPDATE leaders SET session_id = ?, context = ? WHERE id = ?",
+        (
+            session.id,
+            json.dumps(
+                {
+                    "leader_kickoff_payload": {
+                        "project_id": project.id,
+                        "goal": "Apply pending prompt",
+                        "message": "# Mission Brief\n\nApply pending prompt",
+                        "source": "test",
+                    }
+                }
+            ),
+            leader.id,
+        ),
+    )
+    await db.commit()
+    inspection = RuntimeInspection(
+        session_id=session.id,
+        provider_name="codex",
+        alive=True,
+        readiness=ReadinessState.READY,
+        summary="Codex prompt contains visible unsubmitted text",
+        details={
+            "blocker_reason": BlockerReason.PROMPT_NOT_SUBMITTED.value,
+            "provider_diagnostics": {"pending_prompt_text": "Apply pending prompt"},
+        },
+    )
+    fake_service = FakeRuntimeService(inspection)
+    health = await leader_health(db, project.id, runtime_service=fake_service)
+
+    import atc.runtime.health as health_module
+
+    async def fake_leader_health(conn, project_id, *, runtime_service=None):
+        return health
+
+    monkeypatch.setattr(health_module, "RuntimeService", lambda: fake_service)
+    monkeypatch.setattr(health_module, "leader_health", fake_leader_health)
+
+    plan = await apply_recovery_plan(db, health, policy="submit_pending_prompt")
+
+    assert plan.refused_reason is None
+    assert fake_service.submitted is True
+    assert plan.actions[-1]["action"] == "submit_pending_prompt"
+    assert plan.actions[-1]["status"] == "applied"
 
 
 @pytest.mark.asyncio

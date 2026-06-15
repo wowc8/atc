@@ -348,6 +348,27 @@ class RuntimeService:
 
         return await self.inspect_session(self.handle_from_session_record(session))
 
+    async def submit_pending_prompt(
+        self,
+        handle: RuntimeSessionHandle,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        """Submit a provider-classified pending prompt through the provider adapter."""
+
+        provider = self.get_provider(handle.provider_name)
+        return await provider.submit_pending_prompt(handle, inspection)
+
+    async def submit_pending_prompt_for_session_record(
+        self,
+        session: object,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        """Submit a pending prompt for a DB-backed session via provider boundary."""
+
+        return await self.submit_pending_prompt(
+            self.handle_from_session_record(session), inspection
+        )
+
     async def _start_role(self, request: StartRoleRequest) -> RuntimeSessionHandle:
         provider = self.get_provider(request.provider_name)
         await provider.prepare_workspace(request)

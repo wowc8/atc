@@ -31,6 +31,7 @@ from atc.runtime.tmux.substrate import (
     ensure_tmux_session,
     kill_pane,
     pane_exists,
+    run_tmux,
     spawn_window_pane,
 )
 from atc.runtime.tracing import (
@@ -389,6 +390,27 @@ class ClaudeCodeRuntime(ProviderRuntime):
             inspection
         )
         return inspection
+
+    async def submit_pending_prompt(
+        self,
+        handle: RuntimeSessionHandle,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        """Submit a visible Claude prompt by sending Enter only.
+
+        Claude does not yet expose provider-owned pending-payload text extraction,
+        so callers should only reach this after neutral safety checks prove the
+        pending prompt matches the persisted payload.
+        """
+
+        if not handle.tmux_pane:
+            return False
+        if inspection.readiness is not ReadinessState.READY:
+            return False
+        if inspection.block_reason is not None:
+            return False
+        await run_tmux("send-keys", "-t", handle.tmux_pane, "Enter")
+        return True
 
     def _runtime_hint_for_inspection(self, inspection: RuntimeInspection) -> str:
         if inspection.readiness is ReadinessState.READY:

@@ -217,6 +217,23 @@ class CodexRuntime(ProviderRuntime):
         await run_tmux("send-keys", "-t", handle.tmux_pane, "Enter")
         return True
 
+    async def submit_pending_prompt(
+        self,
+        handle: RuntimeSessionHandle,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        """Submit a provider-classified visible Codex prompt by sending Enter only."""
+
+        if not handle.tmux_pane:
+            return False
+        if inspection.details.get("blocker_reason") != "prompt_not_submitted":
+            return False
+        diagnostics = inspection.details.get("provider_diagnostics")
+        if not isinstance(diagnostics, dict) or not diagnostics.get("pending_prompt_text"):
+            return False
+        await run_tmux("send-keys", "-t", handle.tmux_pane, "Enter")
+        return True
+
     def _runtime_hint_for_inspection(self, inspection: RuntimeInspection) -> str:
         if inspection.readiness is ReadinessState.READY:
             return "prompt_visible"
