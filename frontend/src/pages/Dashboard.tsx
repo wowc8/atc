@@ -13,6 +13,10 @@ type ViewMode = "grid" | "row" | "board";
 
 const VIEW_PREF_KEY = "atc_dashboard_view";
 
+function formatCost(cost: number | null | undefined): string {
+  return cost == null ? "unavailable" : `$${cost.toFixed(2)}`;
+}
+
 function loadViewPref(): ViewMode {
   const stored = localStorage.getItem(VIEW_PREF_KEY);
   if (stored === "grid" || stored === "row" || stored === "board") return stored;
@@ -86,13 +90,13 @@ export default function Dashboard() {
           <h3 className="dashboard__card-title">Cost</h3>
           <div className="dashboard__stat">
             <span className="dashboard__stat-value">
-              ${usage.today_cost.toFixed(2)}
+              {formatCost(usage.today_cost)}
             </span>
             <span className="dashboard__stat-label">today</span>
           </div>
           <div className="dashboard__stat">
             <span className="dashboard__stat-value">
-              ${usage.month_cost.toFixed(2)}
+              {formatCost(usage.month_cost)}
             </span>
             <span className="dashboard__stat-label">this month</span>
           </div>

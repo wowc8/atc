@@ -134,10 +134,12 @@ export interface Notification {
 }
 
 export interface UsageSummary {
-  today_cost: number;
-  month_cost: number;
+  today_cost: number | null;
+  month_cost: number | null;
   today_tokens: number;
   month_tokens: number;
+  oauth_mode?: boolean;
+  message?: string | null;
 }
 
 export interface GitHubSummary {

@@ -48,6 +48,10 @@ const PERIOD_LABELS: Record<Period, string> = {
   "90d": "90d",
 };
 
+function formatCost(cost: number | null | undefined): string {
+  return cost == null ? "unavailable" : `$${cost.toFixed(2)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Period selector
 // ---------------------------------------------------------------------------
@@ -181,13 +185,13 @@ export default function UsagePage() {
           <div className="usage-page__stats">
             <div className="usage-page__stat">
               <span className="usage-page__stat-value">
-                ${usage.today_cost.toFixed(2)}
+                {formatCost(usage.today_cost)}
               </span>
               <span className="usage-page__stat-label">Today</span>
             </div>
             <div className="usage-page__stat">
               <span className="usage-page__stat-value">
-                ${usage.month_cost.toFixed(2)}
+                {formatCost(usage.month_cost)}
               </span>
               <span className="usage-page__stat-label">This Month</span>
             </div>
