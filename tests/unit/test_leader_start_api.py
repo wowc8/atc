@@ -29,7 +29,7 @@ def mock_request(db):
 
 
 @pytest.mark.asyncio
-async def test_leader_start_returns_verified_kickoff_and_persists_payload(
+async def test_leader_start_requires_leader_active_report_before_verified_kickoff(
     db,
     mock_request,
 ) -> None:
@@ -62,13 +62,15 @@ async def test_leader_start_returns_verified_kickoff_and_persists_payload(
             mock_request,
         )
 
-    assert response["kickoff_verified"] is True
-    assert response["kickoff_state"] == "accepted_active"
+    assert response["kickoff_verified"] is False
+    assert response["kickoff_state"] == "submitted_pending_acceptance"
     assert response["startup_handshake_state"] == "ready"
-    assert response["goal_acceptance_state"] == "accepted_active"
+    assert response["goal_acceptance_state"] == "provider_active_unverified"
     assert response["truth_delivery_state"] == "accepted_active"
     assert response["runtime_state"] == "active"
     assert response["kickoff_payload_persisted"] is True
+    assert response["leader_reported_active"] is False
+    assert response["goal_accepted"] is False
 
     cursor = await db.execute("SELECT context FROM leaders WHERE project_id = ?", (project.id,))
     context_json = (await cursor.fetchone())[0]

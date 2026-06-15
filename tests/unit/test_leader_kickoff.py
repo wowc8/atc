@@ -9,6 +9,7 @@ import pytest
 from atc.leader.kickoff import (
     build_leader_kickoff_message,
     persist_leader_kickoff_payload,
+    report_leader_goal_accepted,
     verify_leader_kickoff_delivery,
 )
 from atc.runtime.models import (
@@ -67,6 +68,7 @@ async def test_persist_leader_kickoff_payload_is_recoverable(db) -> None:
     assert context["leader_kickoff_payload"]["source"] == "test"
     assert context["leader_kickoff_payload"]["trace_id"]
     assert payload.trace_id == context["leader_kickoff_payload"]["trace_id"]
+    assert f"/api/projects/{project.id}/leader/report-active" in message
     assert f"/api/projects/{project.id}/leader/decompose" in message
     assert "/api/projects/{project_id}" not in message
 
@@ -86,18 +88,26 @@ def test_verify_leader_kickoff_accepts_active_delivery() -> None:
         last_activity_at="2026-06-13T00:00:00+00:00",
     )
 
-    verification = verify_leader_kickoff_delivery(result)
+    verification = verify_leader_kickoff_delivery(
+        result,
+        leader_reported_active=True,
+        goal_accepted=True,
+        first_actionable_step_observed_at="2026-06-13T00:00:30+00:00",
+        task_graph_created_at="2026-06-13T00:00:30+00:00",
+    )
 
     assert verification.kickoff_verified is True
-    assert verification.kickoff_state == "accepted_active"
+    assert verification.kickoff_state == "leader_reported_active"
     assert verification.startup_handshake_state == "ready"
-    assert verification.goal_acceptance_state == "accepted_active"
+    assert verification.goal_acceptance_state == "leader_reported_active"
     assert verification.delivery_trace_id == "trace-active"
-    assert verification.first_actionable_step_observed_at == "2026-06-13T00:00:00+00:00"
+    assert verification.first_actionable_step_observed_at == "2026-06-13T00:00:30+00:00"
     assert verification.runtime_created is True
     assert verification.payload_written is True
     assert verification.submit_sent is True
     assert verification.provider_accepted is True
+    assert verification.goal_accepted is True
+    assert verification.leader_reported_active is True
     assert verification.leader_began_work is True
 
 
@@ -123,7 +133,33 @@ def test_verify_leader_kickoff_distinguishes_pending_submission() -> None:
     assert verification.payload_written is True
     assert verification.submit_sent is True
     assert verification.provider_accepted is False
+    assert verification.goal_accepted is False
+    assert verification.leader_reported_active is False
     assert verification.leader_began_work is False
+
+
+@pytest.mark.asyncio
+async def test_report_leader_goal_accepted_persists_active_report(db) -> None:
+    project = await create_project(db, "leader-active-report")
+    await create_leader(db, project.id, goal="Ship it")
+
+    report = await report_leader_goal_accepted(
+        db,
+        project_id=project.id,
+        goal_accepted=True,
+        message="accepted",
+    )
+
+    cursor = await db.execute("SELECT context FROM leaders WHERE project_id = ?", (project.id,))
+    (context_json,) = await cursor.fetchone()
+    context = json.loads(context_json)
+    assert report["leader_reported_active"] is True
+    assert report["goal_accepted"] is True
+    assert context["project_id"] == project.id
+    assert context["goal"] == "Ship it"
+    assert context["leader_active_report"]["leader_reported_active"] is True
+    assert context["leader_active_report"]["goal_accepted"] is True
+    assert context["leader_active_report"]["message"] == "accepted"
 
 
 def test_verify_leader_kickoff_reports_blocker() -> None:

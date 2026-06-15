@@ -131,6 +131,35 @@ def _delivery_state_for_runtime(runtime_state: str, *, has_payload: bool = False
     return DeliveryState.NOT_STARTED.value
 
 
+def _leader_kickoff_health_state(
+    *,
+    runtime_state: str,
+    blocker: str | None,
+    has_payload: bool,
+    leader_reported_active: bool,
+    goal_accepted: bool,
+    task_total: int,
+    first_actionable_step_observed_at: str | None,
+) -> str:
+    """Return Phase 3 provider-neutral Leader startup/working state."""
+
+    if blocker == BlockerReason.PANE_MISSING.value:
+        return "runtime_missing"
+    if blocker:
+        return "blocked_on_provider_prompt"
+    if runtime_state in {RuntimeState.MISSING.value, RuntimeState.STARTING.value}:
+        return "starting"
+    if runtime_state == RuntimeState.FAILED.value:
+        return "failed"
+    if not has_payload:
+        return "starting"
+    if not (leader_reported_active and goal_accepted):
+        return "kickoff_unverified"
+    if task_total <= 0 and not first_actionable_step_observed_at:
+        return "task_graph_empty"
+    return "working"
+
+
 def _recovery_for(
     role: RuntimeRole, project_id: str, blocker: str | None, session_id: str | None
 ) -> dict[str, Any]:
@@ -234,15 +263,32 @@ async def leader_health(
     )
     context = leader.context if leader and isinstance(leader.context, dict) else {}
     kickoff_payload = context.get("leader_kickoff_payload") if isinstance(context, dict) else None
+    active_report = context.get("leader_active_report") if isinstance(context, dict) else None
+    leader_reported_active = bool(
+        isinstance(active_report, dict) and active_report.get("leader_reported_active")
+    )
+    goal_accepted = bool(isinstance(active_report, dict) and active_report.get("goal_accepted"))
+    leader_active_reported_at = (
+        active_report.get("reported_at") if isinstance(active_report, dict) else None
+    )
+    task_graph_created_at = min(
+        [task.created_at for task in tasks if task.created_at],
+        default=None,
+    )
+    first_actionable_step_observed_at = task_graph_created_at
     kickoff_trace_id = (
         kickoff_payload.get("trace_id") if isinstance(kickoff_payload, dict) else None
     )
     kickoff_state = {
         "kickoff_payload_persisted": bool(kickoff_payload),
-        "kickoff_state": (
-            DeliveryState.ACCEPTED_ACTIVE.value
-            if runtime_state == RuntimeState.ACTIVE.value
-            else _delivery_state_for_runtime(runtime_state, has_payload=bool(kickoff_payload))
+        "kickoff_state": _leader_kickoff_health_state(
+            runtime_state=runtime_state,
+            blocker=blocker,
+            has_payload=bool(kickoff_payload),
+            leader_reported_active=leader_reported_active,
+            goal_accepted=goal_accepted,
+            task_total=len(tasks),
+            first_actionable_step_observed_at=first_actionable_step_observed_at,
         ),
         "startup_handshake_state": "blocked"
         if blocker
@@ -251,12 +297,29 @@ async def leader_health(
             if runtime_state in {RuntimeState.READY.value, RuntimeState.ACTIVE.value}
             else "unknown"
         ),
-        "goal_acceptance_state": "accepted_active"
-        if runtime_state == RuntimeState.ACTIVE.value
-        else ("submitted_pending_acceptance" if kickoff_payload else "not_submitted"),
-        "kickoff_verified": runtime_state == RuntimeState.ACTIVE.value,
+        "goal_acceptance_state": (
+            "leader_reported_active"
+            if leader_reported_active and goal_accepted and first_actionable_step_observed_at
+            else (
+                "goal_accepted"
+                if leader_reported_active and goal_accepted
+                else ("submitted_pending_acceptance" if kickoff_payload else "not_submitted")
+            )
+        ),
+        "kickoff_verified": bool(
+            not blocker
+            and runtime_state in {RuntimeState.READY.value, RuntimeState.ACTIVE.value}
+            and leader_reported_active
+            and goal_accepted
+            and first_actionable_step_observed_at
+        ),
+        "goal_accepted": goal_accepted,
+        "leader_reported_active": leader_reported_active,
+        "leader_active_reported_at": leader_active_reported_at,
         "delivery_trace_id": kickoff_trace_id,
         "kickoff_blocker_reason": blocker,
+        "first_actionable_step_observed_at": first_actionable_step_observed_at,
+        "task_graph_created_at": task_graph_created_at,
         "original_goal_available": bool(
             context.get("leader_original_goal") or (leader.goal if leader else None)
         ),

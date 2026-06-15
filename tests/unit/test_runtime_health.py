@@ -86,7 +86,15 @@ async def test_leader_health_reports_runtime_and_task_summary(db) -> None:
         (
             session.id,
             json.dumps(
-                {"leader_kickoff_payload": {"message": "go"}, "leader_original_goal": "Ship health"}
+                {
+                    "leader_kickoff_payload": {"message": "go"},
+                    "leader_original_goal": "Ship health",
+                    "leader_active_report": {
+                        "leader_reported_active": True,
+                        "goal_accepted": True,
+                        "reported_at": "2026-06-12T12:00:30+00:00",
+                    },
+                }
             ),
             leader.id,
         ),
@@ -120,6 +128,10 @@ async def test_leader_health_reports_runtime_and_task_summary(db) -> None:
     data = health.as_dict()
     assert data["runtime_state"] == "active"
     assert data["kickoff_state"]["kickoff_payload_persisted"] is True
+    assert data["kickoff_state"]["leader_reported_active"] is True
+    assert data["kickoff_state"]["goal_accepted"] is True
+    assert data["kickoff_state"]["kickoff_verified"] is True
+    assert data["kickoff_state"]["kickoff_state"] == "working"
     assert data["task_graph_state"]["total"] == 1
     assert data["ace_dispatch"]["verified"] == 1
     assert data["ace_count"] == 1
