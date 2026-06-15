@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from atc.runtime.models import (
-    InstructionRequest,
-    ReadinessResult,
-    RuntimeInspection,
-    RuntimeSessionHandle,
-    StartRoleRequest,
-    StopRoleRequest,
-    TaskAssignmentRequest,
-)
+if TYPE_CHECKING:
+    from atc.runtime.models import (
+        InstructionRequest,
+        ReadinessResult,
+        RuntimeInspection,
+        RuntimeSessionHandle,
+        StartRoleRequest,
+        StopRoleRequest,
+        TaskAssignmentRequest,
+    )
 
 
 @runtime_checkable
@@ -59,6 +60,18 @@ class ProviderRuntime(Protocol):
         handle: RuntimeSessionHandle,
     ) -> RuntimeInspection:
         """Inspect health/output/readiness for a provider session."""
+
+    async def resolve_startup_prompt(
+        self,
+        handle: RuntimeSessionHandle,
+        inspection: RuntimeInspection,
+    ) -> bool:
+        """Provider-owned safe startup prompt resolution.
+
+        Implementations must only resolve prompts their classifier marked safe
+        to auto-resolve. Auth, secret, permission, and unknown prompts must stay
+        blocked and return False.
+        """
 
     async def restore_session(
         self,
