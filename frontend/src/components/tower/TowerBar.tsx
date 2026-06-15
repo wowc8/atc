@@ -5,6 +5,10 @@ import LogViewer from "./LogViewer";
 import SettingsPane from "./SettingsPane";
 import "./TowerBar.css";
 
+function formatCost(cost: number | null | undefined): string {
+  return cost == null ? "unavailable" : `$${cost.toFixed(2)}`;
+}
+
 function StatusDot({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
     idle: "var(--color-text-muted)",
@@ -86,7 +90,7 @@ export default function TowerBar() {
           )}
 
           <span className="tower-bar__metric" data-testid="cost-summary">
-            ${usage.today_cost.toFixed(2)} today
+            {formatCost(usage.today_cost)} today
           </span>
 
           <span className="tower-bar__metric" data-testid="token-summary">

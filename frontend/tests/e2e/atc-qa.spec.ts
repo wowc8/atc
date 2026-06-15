@@ -211,9 +211,9 @@ test("Test 4: Budget API CRUD operations", async ({ page }) => {
 });
 
 // ============================================================================
-// Test 5: Project page tabs
+// Test 5: Project page sections and Leader tabs
 // ============================================================================
-test("Test 5: Project page tabs render correctly", async ({ page }) => {
+test("Test 5: Project page sections and Leader tabs render correctly", async ({ page }) => {
   const projectId = await getTestProjectId();
   const jsErrors: string[] = [];
   page.on("pageerror", (err) => jsErrors.push(err.message));
@@ -228,8 +228,9 @@ test("Test 5: Project page tabs render correctly", async ({ page }) => {
   // No JS errors
   expect(jsErrors).toHaveLength(0);
 
-  // Tabs are visible
-  await expect(page.locator(".leader-console__tab", { hasText: "Tasks" })).toBeVisible();
+  // Task management is now a first-class Project page section, while Leader keeps
+  // only its own GitHub/Budget tabs.
+  await expect(page.locator(".project-view__tasks")).toBeVisible();
   await expect(page.locator(".leader-console__tab", { hasText: "GitHub" })).toBeVisible();
   await expect(page.locator(".leader-console__tab", { hasText: "Budget" })).toBeVisible();
 
@@ -249,10 +250,7 @@ test("Test 5: Project page tabs render correctly", async ({ page }) => {
   const githubContent = await tabContent.textContent();
   expect(githubContent).not.toBe("");
 
-  // Click Tasks tab
-  await page.locator(".leader-console__tab", { hasText: "Tasks" }).click();
-  await page.waitForTimeout(500);
-  const tasksContent = await tabContent.textContent();
+  const tasksContent = await page.locator(".project-view__tasks").textContent();
   expect(tasksContent).not.toBe("");
 });
 
@@ -262,16 +260,19 @@ test("Test 5: Project page tabs render correctly", async ({ page }) => {
 test("Test 6: API endpoints return correct structure", async ({ page }) => {
   // GET /api/usage/summary
   const summary = (await apiGet("/api/usage/summary")) as {
-    today_cost: number;
-    month_cost: number;
+    today_cost: number | null;
+    month_cost: number | null;
     today_tokens: number;
     month_tokens: number;
+    oauth_mode?: boolean;
+    message?: string | null;
   };
   expect(summary).toHaveProperty("today_cost");
   expect(summary).toHaveProperty("month_cost");
   expect(summary).toHaveProperty("today_tokens");
   expect(summary).toHaveProperty("month_tokens");
-  expect(typeof summary.today_cost).toBe("number");
+  expect(summary.today_cost === null || typeof summary.today_cost === "number").toBe(true);
+  expect(summary.month_cost === null || typeof summary.month_cost === "number").toBe(true);
   expect(typeof summary.today_tokens).toBe("number");
 
   // GET /api/usage/cost?period=7d - should return array
