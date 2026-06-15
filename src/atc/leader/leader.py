@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
-from atc.runtime.models import InstructionRequest, StopRoleRequest
+from atc.runtime.models import InstructionRequest, RuntimeDeliveryResult, StopRoleRequest
 from atc.runtime.service import RuntimeService
 from atc.session.ace import _accept_trust_dialog as _accept_trust_dialog  # noqa: F401
 from atc.session.ace import _persist_delivery_trace_events, _spawn_provider_session
@@ -324,7 +324,8 @@ async def send_leader_message(
     message: str,
     *,
     event_bus: EventBus | None = None,
-):
+    metadata: dict[str, object] | None = None,
+) -> RuntimeDeliveryResult:
     """Send a message to the Leader through the runtime boundary."""
     leader = await db_ops.get_leader_by_project(conn, project_id)
     if leader is None or leader.session_id is None:
@@ -345,10 +346,13 @@ async def send_leader_message(
 
     runtime = RuntimeService()
     handle = runtime.handle_from_session_record(session)
+    request_metadata: dict[str, object] = {"source": "leader_message"}
+    if metadata:
+        request_metadata.update(metadata)
     request = InstructionRequest(
         session_id=session.id,
         message=message,
-        metadata={"source": "leader_message"},
+        metadata=request_metadata,
     )
     try:
         result = await runtime.assign_project_to_leader(handle, request)

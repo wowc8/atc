@@ -234,6 +234,9 @@ async def leader_health(
     )
     context = leader.context if leader and isinstance(leader.context, dict) else {}
     kickoff_payload = context.get("leader_kickoff_payload") if isinstance(context, dict) else None
+    kickoff_trace_id = (
+        kickoff_payload.get("trace_id") if isinstance(kickoff_payload, dict) else None
+    )
     kickoff_state = {
         "kickoff_payload_persisted": bool(kickoff_payload),
         "kickoff_state": (
@@ -241,6 +244,19 @@ async def leader_health(
             if runtime_state == RuntimeState.ACTIVE.value
             else _delivery_state_for_runtime(runtime_state, has_payload=bool(kickoff_payload))
         ),
+        "startup_handshake_state": "blocked"
+        if blocker
+        else (
+            "ready"
+            if runtime_state in {RuntimeState.READY.value, RuntimeState.ACTIVE.value}
+            else "unknown"
+        ),
+        "goal_acceptance_state": "accepted_active"
+        if runtime_state == RuntimeState.ACTIVE.value
+        else ("submitted_pending_acceptance" if kickoff_payload else "not_submitted"),
+        "kickoff_verified": runtime_state == RuntimeState.ACTIVE.value,
+        "delivery_trace_id": kickoff_trace_id,
+        "kickoff_blocker_reason": blocker,
         "original_goal_available": bool(
             context.get("leader_original_goal") or (leader.goal if leader else None)
         ),

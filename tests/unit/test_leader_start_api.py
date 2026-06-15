@@ -64,6 +64,8 @@ async def test_leader_start_returns_verified_kickoff_and_persists_payload(
 
     assert response["kickoff_verified"] is True
     assert response["kickoff_state"] == "accepted_active"
+    assert response["startup_handshake_state"] == "ready"
+    assert response["goal_acceptance_state"] == "accepted_active"
     assert response["truth_delivery_state"] == "accepted_active"
     assert response["runtime_state"] == "active"
     assert response["kickoff_payload_persisted"] is True
@@ -73,6 +75,7 @@ async def test_leader_start_returns_verified_kickoff_and_persists_payload(
     context = json.loads(context_json)
     assert context["leader_original_goal"] == "Build kickoff verification"
     assert context["leader_kickoff_payload"]["message"].startswith("# Mission Brief")
+    assert context["leader_kickoff_payload"]["trace_id"]
 
 
 @pytest.mark.asyncio
@@ -98,3 +101,6 @@ async def test_leader_start_without_auto_kickoff_still_persists_goal_payload(
     assert response["kickoff_verified"] is False
     assert response["kickoff_state"] == "not_requested"
     assert response["kickoff_payload_persisted"] is True
+    cursor = await db.execute("SELECT context FROM leaders WHERE project_id = ?", (project.id,))
+    context_json = (await cursor.fetchone())[0]
+    assert json.loads(context_json)["leader_kickoff_payload"]["trace_id"]

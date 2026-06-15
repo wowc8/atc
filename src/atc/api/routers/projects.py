@@ -28,6 +28,7 @@ from atc.leader.kickoff import (
 )
 from atc.runtime.health import apply_recovery_plan, build_recovery_plan, leader_health
 from atc.runtime.models import RuntimeDeliveryResult
+from atc.runtime.tracing import new_trace_id
 from atc.state import db as db_ops
 
 logger = logging.getLogger(__name__)
@@ -411,6 +412,7 @@ async def start_leader(
             github_repo=github_repo,
             api_style="explicit-api",
         )
+        kickoff_trace_id = new_trace_id()
         kickoff_payload = await persist_leader_kickoff_payload(
             db,
             project_id=project_id,
@@ -418,11 +420,19 @@ async def start_leader(
             message=kickoff_msg,
             source="leader-start-api",
             auto_kickoff=body.auto_kickoff,
+            trace_id=kickoff_trace_id,
         )
         if body.auto_kickoff:
             try:
                 kickoff_delivery = await _send_leader_msg(
-                    db, project_id, kickoff_msg, event_bus=event_bus
+                    db,
+                    project_id,
+                    kickoff_msg,
+                    event_bus=event_bus,
+                    metadata={
+                        "delivery_trace_id": kickoff_trace_id,
+                        "instruction_kind": "leader_kickoff",
+                    },
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from None
