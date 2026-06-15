@@ -14,7 +14,15 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
 
-from atc.runtime.models import BlockerReason, DeliveryState, RuntimeDeliveryResult, RuntimeState
+from atc.runtime.models import (
+    BlockerReason,
+    DeliveryState,
+    RecoveryRecommendation,
+    RecoveryState,
+    RuntimeDeliveryResult,
+    RuntimeState,
+)
+from atc.runtime.tracing import new_trace_id
 from atc.state import db as db_ops
 
 
@@ -27,6 +35,7 @@ class LeaderKickoffPayload:
     message: str
     source: str
     auto_kickoff: bool = True
+    trace_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +44,7 @@ class LeaderKickoffPayload:
             "message": self.message,
             "source": self.source,
             "auto_kickoff": self.auto_kickoff,
+            "trace_id": self.trace_id,
         }
 
 
@@ -49,6 +59,13 @@ class LeaderKickoffVerification:
     submit_sent: bool
     provider_accepted: bool
     leader_began_work: bool
+    startup_handshake_state: str
+    goal_acceptance_state: str
+    first_actionable_step_observed_at: str | None = None
+    task_graph_created_at: str | None = None
+    kickoff_blocker_reason: str | None = None
+    kickoff_recovery_recommendation: dict[str, Any] | None = None
+    delivery_trace_id: str | None = None
     blocker_reason: str | None = None
     message: str | None = None
 
@@ -61,6 +78,13 @@ class LeaderKickoffVerification:
             "submit_sent": self.submit_sent,
             "provider_accepted": self.provider_accepted,
             "leader_began_work": self.leader_began_work,
+            "startup_handshake_state": self.startup_handshake_state,
+            "goal_acceptance_state": self.goal_acceptance_state,
+            "first_actionable_step_observed_at": self.first_actionable_step_observed_at,
+            "task_graph_created_at": self.task_graph_created_at,
+            "kickoff_blocker_reason": self.kickoff_blocker_reason,
+            "kickoff_recovery_recommendation": self.kickoff_recovery_recommendation,
+            "delivery_trace_id": self.delivery_trace_id,
         }
         if self.blocker_reason:
             data["blocker_reason"] = self.blocker_reason
@@ -111,8 +135,7 @@ def build_leader_kickoff_message(
             f"/api/projects/{project_id}/leader/decompose.",
             "2. Then spawn Aces for ready tasks via POST "
             f"/api/projects/{project_id}/leader/spawn-aces.",
-            "3. Then instruct spawned Aces via POST "
-            f"/api/projects/{project_id}/leader/instruct.",
+            f"3. Then instruct spawned Aces via POST /api/projects/{project_id}/leader/instruct.",
             f"4. Monitor progress via GET /api/projects/{project_id}/leader/progress.",
             "5. Drive the project to completion by delegating, not by coding directly.",
             "",
@@ -139,6 +162,7 @@ async def persist_leader_kickoff_payload(
     message: str,
     source: str,
     auto_kickoff: bool = True,
+    trace_id: str | None = None,
 ) -> LeaderKickoffPayload:
     """Persist original kickoff payload on the Leader context for deterministic recovery."""
 
@@ -162,6 +186,7 @@ async def persist_leader_kickoff_payload(
         message=message,
         source=source,
         auto_kickoff=auto_kickoff,
+        trace_id=trace_id or new_trace_id(),
     )
     context["leader_kickoff_payload"] = payload.as_dict()
     context["leader_original_goal"] = goal
@@ -171,6 +196,74 @@ async def persist_leader_kickoff_payload(
     )
     await conn.commit()
     return payload
+
+
+def _startup_handshake_state(
+    runtime_state: RuntimeState | None,
+    delivery_state: DeliveryState | None,
+    blocker: BlockerReason | None,
+) -> str:
+    """Return provider-neutral startup readiness for kickoff response fields."""
+
+    if blocker is not None or delivery_state is DeliveryState.BLOCKED:
+        return "blocked"
+    if runtime_state in {RuntimeState.FAILED, RuntimeState.MISSING, RuntimeState.STALE}:
+        return "failed"
+    if runtime_state in {
+        RuntimeState.READY,
+        RuntimeState.ACTIVE,
+        RuntimeState.IDLE,
+        RuntimeState.IDLE_AT_DEFAULT_PROMPT,
+    }:
+        return "ready"
+    if delivery_state in {
+        DeliveryState.RUNTIME_CREATED,
+        DeliveryState.PROMPT_VISIBLE,
+        DeliveryState.PAYLOAD_WRITTEN,
+        DeliveryState.SUBMIT_SENT,
+        DeliveryState.SUBMITTED_PENDING_ACCEPTANCE,
+        DeliveryState.ACCEPTED_ACTIVE,
+    }:
+        return "runtime_created"
+    return "not_started"
+
+
+def _goal_acceptance_state(
+    *,
+    provider_accepted: bool,
+    leader_began_work: bool,
+    submit_sent: bool,
+    blocker: BlockerReason | None,
+    failed: bool,
+) -> str:
+    """Return provider-neutral goal acceptance without optimistic wording."""
+
+    if blocker is not None:
+        return "blocked"
+    if failed:
+        return "failed"
+    if provider_accepted and leader_began_work:
+        return "accepted_active"
+    if provider_accepted:
+        return "accepted_unverified_activity"
+    if submit_sent:
+        return "submitted_pending_acceptance"
+    return "not_submitted"
+
+
+def _recovery_recommendation(
+    blocker: BlockerReason | None,
+) -> dict[str, Any] | None:
+    if blocker is None:
+        return None
+    return RecoveryRecommendation(
+        state=RecoveryState.BLOCKED,
+        command="atc leader recover --project-id <project-id> --dry-run",
+        safety="inspect_first",
+        message="Inspect Leader runtime health before resending the persisted kickoff payload.",
+        requires_operator=blocker
+        not in {BlockerReason.PROMPT_NOT_SUBMITTED, BlockerReason.DELIVERY_UNVERIFIED},
+    ).as_dict()
 
 
 def verify_leader_kickoff_delivery(
@@ -187,6 +280,8 @@ def verify_leader_kickoff_delivery(
             submit_sent=False,
             provider_accepted=False,
             leader_began_work=False,
+            startup_handshake_state="not_started",
+            goal_acceptance_state="not_submitted",
             message="Kickoff delivery was queued but not observed",
         )
 
@@ -224,10 +319,10 @@ def verify_leader_kickoff_delivery(
         "delivered",
     }
     leader_began_work = (
-        runtime_state is RuntimeState.ACTIVE
-        or delivery is DeliveryState.ACCEPTED_ACTIVE
+        runtime_state is RuntimeState.ACTIVE or delivery is DeliveryState.ACCEPTED_ACTIVE
     )
     kickoff_verified = bool(result.ok and provider_accepted and leader_began_work)
+    failed = result.status == "failed" or delivery is DeliveryState.FAILED
 
     if blocker is not None or result.status in {"blocked", "failed"}:
         state = "blocked" if result.status == "blocked" else "failed"
@@ -252,6 +347,22 @@ def verify_leader_kickoff_delivery(
         submit_sent=submit_sent,
         provider_accepted=provider_accepted,
         leader_began_work=leader_began_work,
+        startup_handshake_state=_startup_handshake_state(runtime_state, delivery, blocker),
+        goal_acceptance_state=_goal_acceptance_state(
+            provider_accepted=provider_accepted,
+            leader_began_work=leader_began_work,
+            submit_sent=submit_sent,
+            blocker=blocker,
+            failed=failed,
+        ),
+        first_actionable_step_observed_at=result.last_activity_at if leader_began_work else None,
+        kickoff_blocker_reason=blocker.value if isinstance(blocker, BlockerReason) else None,
+        kickoff_recovery_recommendation=(
+            result.recovery_recommendation.as_dict()
+            if result.recovery_recommendation
+            else _recovery_recommendation(blocker)
+        ),
+        delivery_trace_id=result.trace_id,
         blocker_reason=blocker.value if isinstance(blocker, BlockerReason) else None,
         message=result.message,
     )

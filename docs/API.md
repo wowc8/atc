@@ -30,6 +30,22 @@ POST   /api/projects/{id}/leader/stop         → stop Leader session
 POST   /api/projects/{id}/leader/message      → send message to Leader
 ```
 
+### Leader start kickoff truth
+
+`POST /api/projects/{id}/leader/start` returns additive kickoff truth fields when a goal is provided. Consumers must not treat `session_id`, `leader_session_id`, `status`, `delivery_state`, or `202`-style queued/submitted wording as proof that the Leader accepted the goal.
+
+Important fields:
+
+- `kickoff_state`: staged delivery/kickoff state such as `not_requested`, `queued_unverified`, `runtime_created`, `payload_written`, `submitted_pending_acceptance`, `accepted_active`, `blocked`, or `failed`.
+- `kickoff_verified`: `true` only when provider-neutral evidence shows the Leader accepted the kickoff and began work.
+- `startup_handshake_state`: provider-neutral startup readiness, e.g. `not_started`, `runtime_created`, `ready`, `blocked`, or `failed`.
+- `goal_acceptance_state`: whether the goal is `not_submitted`, `submitted_pending_acceptance`, `accepted_active`, `blocked`, or `failed`.
+- `delivery_trace_id`: trace id correlating startup, payload persistence, prompt delivery, submit, and later recovery events.
+- `kickoff_payload_persisted`: whether the original Leader kickoff payload was saved for recovery planning.
+- `kickoff_blocker_reason` / `kickoff_recovery_recommendation`: structured blocker and inspect-first recovery guidance when kickoff is blocked or unverified.
+
+`GET /api/projects/{id}/leader/health` exposes the same kickoff dimensions under `kickoff_state` alongside runtime, task graph, and recovery summaries.
+
 ## Tasks / Task Graphs
 
 ```

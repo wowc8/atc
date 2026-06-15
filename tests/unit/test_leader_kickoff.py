@@ -65,6 +65,8 @@ async def test_persist_leader_kickoff_payload_is_recoverable(db) -> None:
     assert context["leader_original_goal"] == "Build runtime truth"
     assert context["leader_kickoff_payload"]["message"] == message
     assert context["leader_kickoff_payload"]["source"] == "test"
+    assert context["leader_kickoff_payload"]["trace_id"]
+    assert payload.trace_id == context["leader_kickoff_payload"]["trace_id"]
     assert f"/api/projects/{project.id}/leader/decompose" in message
     assert "/api/projects/{project_id}" not in message
 
@@ -80,12 +82,18 @@ def test_verify_leader_kickoff_accepts_active_delivery() -> None:
         reason_code="agent_output",
         runtime_state=RuntimeState.ACTIVE,
         delivery_state=DeliveryState.ACCEPTED_ACTIVE,
+        trace_id="trace-active",
+        last_activity_at="2026-06-13T00:00:00+00:00",
     )
 
     verification = verify_leader_kickoff_delivery(result)
 
     assert verification.kickoff_verified is True
     assert verification.kickoff_state == "accepted_active"
+    assert verification.startup_handshake_state == "ready"
+    assert verification.goal_acceptance_state == "accepted_active"
+    assert verification.delivery_trace_id == "trace-active"
+    assert verification.first_actionable_step_observed_at == "2026-06-13T00:00:00+00:00"
     assert verification.runtime_created is True
     assert verification.payload_written is True
     assert verification.submit_sent is True
@@ -110,6 +118,8 @@ def test_verify_leader_kickoff_distinguishes_pending_submission() -> None:
 
     assert verification.kickoff_verified is False
     assert verification.kickoff_state == "submitted_pending_acceptance"
+    assert verification.startup_handshake_state == "ready"
+    assert verification.goal_acceptance_state == "submitted_pending_acceptance"
     assert verification.payload_written is True
     assert verification.submit_sent is True
     assert verification.provider_accepted is False
@@ -136,4 +146,8 @@ def test_verify_leader_kickoff_reports_blocker() -> None:
 
     assert verification.kickoff_verified is False
     assert verification.kickoff_state == "blocked"
+    assert verification.startup_handshake_state == "blocked"
+    assert verification.goal_acceptance_state == "blocked"
     assert verification.blocker_reason == "runtime_update_required"
+    assert verification.kickoff_blocker_reason == "runtime_update_required"
+    assert verification.kickoff_recovery_recommendation is not None
