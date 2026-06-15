@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -58,6 +59,8 @@ class LeaderKickoffVerification:
     payload_written: bool
     submit_sent: bool
     provider_accepted: bool
+    goal_accepted: bool
+    leader_reported_active: bool
     leader_began_work: bool
     startup_handshake_state: str
     goal_acceptance_state: str
@@ -77,6 +80,8 @@ class LeaderKickoffVerification:
             "payload_written": self.payload_written,
             "submit_sent": self.submit_sent,
             "provider_accepted": self.provider_accepted,
+            "goal_accepted": self.goal_accepted,
+            "leader_reported_active": self.leader_reported_active,
             "leader_began_work": self.leader_began_work,
             "startup_handshake_state": self.startup_handshake_state,
             "goal_acceptance_state": self.goal_acceptance_state,
@@ -140,7 +145,11 @@ def build_leader_kickoff_message(
             "5. Drive the project to completion by delegating, not by coding directly.",
             "",
             f"Project ID: {project_id}",
-            "Begin NOW by decomposing, not by exploring the workspace.",
+            "Before decomposing or starting task work, report goal acceptance via POST "
+            f"/api/projects/{project_id}/leader/report-active with JSON "
+            "{\"goal_accepted\": true}. This active report is required proof that you "
+            "accepted the kickoff.",
+            "Begin NOW by reporting active, then decomposing; do not explore the workspace first.",
         ]
     else:
         lines += [
@@ -149,9 +158,61 @@ def build_leader_kickoff_message(
             "3. Monitor progress and drive to completion.",
             "4. Report back to Tower when done.",
             "",
-            "Begin NOW. Do not ask for clarification — start decomposing.",
+            "Before task work, report goal acceptance through the ATC Leader active-report API.",
+            "Begin NOW. Do not ask for clarification — report active, then start decomposing.",
         ]
     return "\n".join(lines)
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _leader_context_dict(leader: Any) -> dict[str, Any]:
+    if isinstance(leader.context, dict):
+        return dict(leader.context)
+    if leader.context:
+        try:
+            parsed = json.loads(leader.context)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+async def report_leader_goal_accepted(
+    conn: aiosqlite.Connection,
+    *,
+    project_id: str,
+    goal_accepted: bool = True,
+    message: str | None = None,
+) -> dict[str, Any]:
+    """Persist the canonical Leader-originated active/goal-accepted report."""
+
+    leader = await db_ops.get_leader_by_project(conn, project_id)
+    if leader is None:
+        raise ValueError(f"No leader found for project {project_id}")
+    context = _leader_context_dict(leader)
+    context.setdefault("project_id", project_id)
+    if leader.goal:
+        context.setdefault("goal", leader.goal)
+    reported_at = _now()
+    report = {
+        "leader_reported_active": True,
+        "goal_accepted": bool(goal_accepted),
+        "reported_at": reported_at,
+        "message": message,
+    }
+    context["leader_active_report"] = report
+    await conn.execute(
+        (
+            "UPDATE leaders SET context = ?, status = 'managing', "
+            "updated_at = datetime('now') WHERE id = ?"
+        ),
+        (json.dumps(context), leader.id),
+    )
+    await conn.commit()
+    return report
 
 
 async def persist_leader_kickoff_payload(
@@ -231,6 +292,8 @@ def _startup_handshake_state(
 def _goal_acceptance_state(
     *,
     provider_accepted: bool,
+    goal_accepted: bool,
+    leader_reported_active: bool,
     leader_began_work: bool,
     submit_sent: bool,
     blocker: BlockerReason | None,
@@ -242,10 +305,12 @@ def _goal_acceptance_state(
         return "blocked"
     if failed:
         return "failed"
-    if provider_accepted and leader_began_work:
-        return "accepted_active"
+    if goal_accepted and leader_reported_active and leader_began_work:
+        return "leader_reported_active"
+    if goal_accepted and leader_reported_active:
+        return "goal_accepted"
     if provider_accepted:
-        return "accepted_unverified_activity"
+        return "provider_active_unverified"
     if submit_sent:
         return "submitted_pending_acceptance"
     return "not_submitted"
@@ -268,6 +333,11 @@ def _recovery_recommendation(
 
 def verify_leader_kickoff_delivery(
     result: RuntimeDeliveryResult | None,
+    *,
+    leader_reported_active: bool = False,
+    goal_accepted: bool = False,
+    first_actionable_step_observed_at: str | None = None,
+    task_graph_created_at: str | None = None,
 ) -> LeaderKickoffVerification:
     """Classify a kickoff delivery result into explicit startup guarantees."""
 
@@ -279,6 +349,8 @@ def verify_leader_kickoff_delivery(
             payload_written=False,
             submit_sent=False,
             provider_accepted=False,
+            goal_accepted=False,
+            leader_reported_active=False,
             leader_began_work=False,
             startup_handshake_state="not_started",
             goal_acceptance_state="not_submitted",
@@ -318,16 +390,17 @@ def verify_leader_kickoff_delivery(
         "confirmed",
         "delivered",
     }
-    leader_began_work = (
-        runtime_state is RuntimeState.ACTIVE or delivery is DeliveryState.ACCEPTED_ACTIVE
+    canonical_work_observed = bool(
+        first_actionable_step_observed_at or task_graph_created_at
     )
-    kickoff_verified = bool(result.ok and provider_accepted and leader_began_work)
+    leader_began_work = bool(leader_reported_active and goal_accepted and canonical_work_observed)
+    kickoff_verified = bool(result.ok and submit_sent and leader_began_work)
     failed = result.status == "failed" or delivery is DeliveryState.FAILED
 
     if blocker is not None or result.status in {"blocked", "failed"}:
         state = "blocked" if result.status == "blocked" else "failed"
     elif kickoff_verified:
-        state = "accepted_active"
+        state = "leader_reported_active"
     elif submit_sent:
         state = "submitted_pending_acceptance"
     elif payload_written:
@@ -346,16 +419,21 @@ def verify_leader_kickoff_delivery(
         payload_written=payload_written,
         submit_sent=submit_sent,
         provider_accepted=provider_accepted,
+        goal_accepted=goal_accepted,
+        leader_reported_active=leader_reported_active,
         leader_began_work=leader_began_work,
         startup_handshake_state=_startup_handshake_state(runtime_state, delivery, blocker),
         goal_acceptance_state=_goal_acceptance_state(
             provider_accepted=provider_accepted,
+            goal_accepted=goal_accepted,
+            leader_reported_active=leader_reported_active,
             leader_began_work=leader_began_work,
             submit_sent=submit_sent,
             blocker=blocker,
             failed=failed,
         ),
-        first_actionable_step_observed_at=result.last_activity_at if leader_began_work else None,
+        first_actionable_step_observed_at=first_actionable_step_observed_at,
+        task_graph_created_at=task_graph_created_at,
         kickoff_blocker_reason=blocker.value if isinstance(blocker, BlockerReason) else None,
         kickoff_recovery_recommendation=(
             result.recovery_recommendation.as_dict()

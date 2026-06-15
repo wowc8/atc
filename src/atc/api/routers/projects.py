@@ -24,6 +24,7 @@ from atc.leader import leader as leader_ops
 from atc.leader.kickoff import (
     build_leader_kickoff_message,
     persist_leader_kickoff_payload,
+    report_leader_goal_accepted,
     verify_leader_kickoff_delivery,
 )
 from atc.runtime.health import apply_recovery_plan, build_recovery_plan, leader_health
@@ -74,6 +75,11 @@ class LeaderStartRequest(BaseModel):
 
 class LeaderMessageRequest(BaseModel):
     message: str
+
+
+class LeaderActiveReportRequest(BaseModel):
+    goal_accepted: bool = True
+    message: str | None = None
 
 
 class RecoveryRequest(BaseModel):
@@ -451,9 +457,25 @@ async def start_leader(
             session_id=session_id,
             recovery="inspect Leader runtime/session status before normal monitoring",
         )
-        verification = verify_leader_kickoff_delivery(kickoff_delivery)
+        health = await leader_health(db, project_id)
+        health_kickoff = health.kickoff_state
+        verification = verify_leader_kickoff_delivery(
+            kickoff_delivery,
+            leader_reported_active=bool(health_kickoff.get("leader_reported_active")),
+            goal_accepted=bool(health_kickoff.get("goal_accepted")),
+            first_actionable_step_observed_at=health_kickoff.get(
+                "first_actionable_step_observed_at"
+            ),
+            task_graph_created_at=health_kickoff.get("task_graph_created_at"),
+        )
         response.update(verification.as_dict())
         response["kickoff_payload_persisted"] = kickoff_payload is not None
+        response["leader_state"] = health_kickoff.get("kickoff_state")
+        response["recommended_action"] = (
+            "wait_for_leader_active_report_or_run_leader_health"
+            if response.get("leader_state") == "kickoff_unverified"
+            else health.recovery_recommendation
+        )
         return response
     return {
         "status": "queued",
@@ -498,6 +520,38 @@ async def send_leader_message(
         project_id=project_id,
         recovery="inspect Leader runtime/session status for delivery confirmation",
     )
+
+
+@router.post("/{project_id}/leader/report-active")
+async def report_leader_active(
+    project_id: str, body: LeaderActiveReportRequest, request: Request
+) -> dict[str, object]:
+    """Leader-originated proof that kickoff goal was accepted and execution began."""
+
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        report = await report_leader_goal_accepted(
+            db,
+            project_id=project_id,
+            goal_accepted=body.goal_accepted,
+            message=body.message,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    health = await leader_health(db, project_id)
+    return {
+        "status": "accepted",
+        "project_id": project_id,
+        "leader_reported_active": report["leader_reported_active"],
+        "goal_accepted": report["goal_accepted"],
+        "reported_at": report["reported_at"],
+        "leader_state": health.kickoff_state.get("kickoff_state"),
+        "kickoff_verified": health.kickoff_state.get("kickoff_verified"),
+        "kickoff_state": health.kickoff_state,
+    }
 
 
 @router.get("/{project_id}/leader/health")
