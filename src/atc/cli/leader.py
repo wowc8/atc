@@ -81,6 +81,22 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     bootstrap_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
     bootstrap_parser.set_defaults(handler=_handle_bootstrap_tasks)
 
+    # atc leader report-complete --project-id <id> --summary '...'
+    complete_parser = leader_sub.add_parser(
+        "report-complete",
+        help="Notify Tower that the Leader-owned project is complete",
+    )
+    complete_parser.add_argument("--project-id", required=True, help="Project UUID")
+    complete_parser.add_argument("--summary", default=None, help="Completion summary")
+    complete_parser.add_argument(
+        "--evidence",
+        action="append",
+        default=[],
+        help="Evidence path/URL/note; repeat for multiple items",
+    )
+    complete_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
+    complete_parser.set_defaults(handler=_handle_report_complete)
+
     leader_parser.set_defaults(handler=lambda _: leader_parser.print_help() or 1)
 
 
@@ -210,4 +226,11 @@ def _handle_bootstrap_tasks(args: argparse.Namespace) -> int:
     return _post_json(
         f"{args.api}/api/projects/{args.project_id}/leader/decompose",
         {"task_specs": task_specs},
+    )
+
+
+def _handle_report_complete(args: argparse.Namespace) -> int:
+    return _post_json(
+        f"{args.api}/api/projects/{args.project_id}/leader/report-complete",
+        {"summary": args.summary, "evidence": args.evidence or []},
     )

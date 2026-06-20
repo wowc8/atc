@@ -11,8 +11,8 @@ The full orchestration loop:
   User → Tower.submit_goal() → start_leader() → Leader running
   User → Tower.send_message() → send_leader_message() → Leader receives
   Leader PTY output → Tower._on_leader_output() → broadcast to UI
-  Tower.get_progress() → Leader task graph status → broadcast to UI
-  Leader all done → Tower.mark_complete() → idle
+  Tower.get_progress() → explicit operator/status request only
+  Leader completion hook → Tower.mark_complete() → idle
 """
 
 from __future__ import annotations
@@ -114,10 +114,11 @@ class TowerController:
         self._max_concurrent_aces: int = max_concurrent_aces
         self._active_ace_count: int = 0
 
-        # Subscribe to leader session events for monitoring
+        # Subscribe to leader session events for startup/runtime safety and completion hooks.
         self._event_bus.subscribe("session_status_changed", self._on_session_status_changed)
         self._event_bus.subscribe("pty_output", self._on_agent_output)
         self._event_bus.subscribe("session_created", self._on_session_created)
+        self._event_bus.subscribe("leader_project_completed", self._on_leader_project_completed)
 
         # Subscribe to budget events for proactive slowdown
         self._event_bus.subscribe("budget_warning", self._on_budget_warning)
@@ -453,6 +454,89 @@ class TowerController:
         self._current_goal = None
         self._leader_session_id = None
         self._leader_output_lines.clear()
+
+    async def on_leader_project_completed(
+        self,
+        *,
+        project_id: str,
+        leader_id: str | None = None,
+        session_id: str | None = None,
+        summary: str | None = None,
+        evidence: list[str] | None = None,
+        reported_at: str | None = None,
+    ) -> None:
+        """Handle the Leader→Tower completion hook.
+
+        This is the event-driven handoff path: after Leader accepts and owns the
+        project, Tower should not poll the task graph for normal completion.
+        Leader reports completion explicitly, and Tower marks its controller
+        state complete plus notifies Tower's operator-facing session/UI.
+        """
+        if self._current_project_id and self._current_project_id != project_id:
+            logger.info(
+                "Ignoring completion report for project %s while Tower tracks %s",
+                project_id,
+                self._current_project_id,
+            )
+            return
+
+        if self._state == TowerState.MANAGING:
+            await self._transition(TowerState.COMPLETE)
+        elif self._state not in (TowerState.COMPLETE, TowerState.IDLE):
+            logger.info(
+                "Leader completion report received while Tower state=%s", self._state.value
+            )
+
+        self._current_goal = None
+        self._leader_session_id = None
+        self._leader_output_lines.clear()
+
+        payload = {
+            "type": "leader_project_completed",
+            "project_id": project_id,
+            "leader_id": leader_id,
+            "session_id": session_id,
+            "summary": summary,
+            "evidence": evidence or [],
+            "reported_at": reported_at,
+        }
+        if self._ws_hub is not None:
+            await self._ws_hub.broadcast("tower", payload)
+
+        if self._current_session_id:
+            evidence_lines = "\n".join(f"- {item}" for item in (evidence or []))
+            notification = (
+                f"[ATC] Leader reported project complete.\n"
+                f"Project ID: {project_id}\n"
+                f"Leader session: {session_id or 'unknown'}\n"
+                f"Reported at: {reported_at or 'unknown'}\n"
+                f"Summary: {summary or 'No summary provided.'}"
+            )
+            if evidence_lines:
+                notification += f"\nEvidence:\n{evidence_lines}"
+            try:
+                await send_tower_message(
+                    self._db,
+                    self._current_session_id,
+                    notification,
+                    event_bus=self._event_bus,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not notify Tower session %s of Leader completion: %s",
+                    self._current_session_id,
+                    exc,
+                )
+
+    async def _on_leader_project_completed(self, data: dict[str, Any]) -> None:
+        await self.on_leader_project_completed(
+            project_id=str(data.get("project_id") or ""),
+            leader_id=data.get("leader_id"),
+            session_id=data.get("session_id"),
+            summary=data.get("summary"),
+            evidence=data.get("evidence") or [],
+            reported_at=data.get("reported_at"),
+        )
 
     async def cancel_goal(self) -> None:
         """Cancel the current goal and stop the Leader.
@@ -940,16 +1024,14 @@ class TowerController:
             f"Goal: {goal}\n"
             f"Leader session: {leader_session_id}\n"
             f"Project ID: {project_id}\n\n"
-            f"Monitor Leader health at low frequency; the Leader owns Ace monitoring/recovery.\n"
-            f"Check project-level progress with:\n"
-            f"  curl -s http://127.0.0.1:8420/api/projects/{project_id}/leader/progress\n"
-            f"Check provider-neutral Leader health with:\n"
-            f"  atc leader health --project-id {project_id}\n"
-            "Only nudge if Leader health shows no visible activity for 5-10 minutes:\n"
-            f"  atc leader message --project-id {project_id} "
-            "--message 'Please continue with your goal.'\n"
-            "\nDo NOT inspect Ace panes unless the Leader reports blocked, the Leader runtime "
-            "is missing, progress is flat past threshold, or the operator asks for detail. "
+            "Startup/goal acceptance has enough provider-neutral proof for handoff. "
+            "The Leader is now the busy project session and owns task graph/Ace monitoring.\n"
+            "Do NOT poll normal project progress to discover completion. Wait for the "
+            "Leader completion hook instead:\n"
+            f"  atc leader report-complete --project-id {project_id} --summary '...'\n"
+            "Only inspect Leader health if the Leader reports blocked/failed, the runtime "
+            "disappears, the operator asks for detail, or an explicit recovery threshold "
+            "is reached. "
             "Do NOT write code or create files yourself — delegate to the Leader only."
         )
 
