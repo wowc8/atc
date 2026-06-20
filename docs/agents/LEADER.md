@@ -47,12 +47,13 @@ atc tasks assign --project-id <project-id> --task-id <task-id>
 atc leader bootstrap-tasks --project-id <project-id> --goal "..." --task "..."
 ```
 
-When assigning work to Aces, Leader must distinguish `dispatch_verified` delivery from Ace-side assignment acceptance. Delivery alone means the provider received or started the prompt; it is not proof the Ace accepted task ownership. Leader should monitor `ace_dispatch.assignment_acceptance_state` from `atc ace health --project-id <project-id> --ace-id <ace-id>` and wait for `assignment_accepted` or `accepted_active` before treating the Ace as actively working.
+When assigning work to Aces, Leader must distinguish startup readiness, delivery, Ace-side assignment acceptance, and artifact routing. Delivery alone means the provider received or started the prompt; it is not proof the Ace accepted task ownership. Leader should monitor `ace_dispatch.startup_readiness_state` from `atc ace health --project-id <project-id> --ace-id <ace-id>` and wait for `input_ready` before relying on assignment delivery. Startup blockers such as `awaiting_startup_confirmation` and `blocked_on_provider_startup_prompt` are provider-neutral states; Codex/Claude prompt text and key sequences stay inside provider adapters. Leader should then monitor `ace_dispatch.assignment_acceptance_state` and wait for `assignment_accepted` or `accepted_active` before treating the Ace as actively working.
 
 Ace-managed workspaces should call:
 
 ```bash
 atc ace report-active --project-id <project-id> --ace-id <ace-id> --message "accepted task"
+atc ace report-artifact --project-id <project-id> --ace-id <ace-id> --path /absolute/output --kind worktree
 ```
 
 Leader should recover unaccepted assignments through `atc ace recover --project-id <project-id> --ace-id <ace-id> --dry-run` rather than assuming the Ace is working because a session row or assignment row exists.

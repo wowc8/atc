@@ -629,6 +629,9 @@ async def ace_health(
         "assignment_id": active_assignment.assignment_id if active_assignment else None,
         "task_graph_id": active_assignment.task_graph_id if active_assignment else None,
         "assignment_status": active_assignment.status if active_assignment else None,
+        "startup_readiness_state": (
+            active_assignment.startup_readiness_state if active_assignment else None
+        ),
         "dispatch_delivery_state": dispatch_delivery_state,
         "dispatch_verified": active_assignment.dispatch_verified if active_assignment else False,
         "assignment_acceptance_state": assignment_acceptance_state,
@@ -642,6 +645,12 @@ async def ace_health(
             active_assignment.assignment_accepted_at if active_assignment else None
         ),
         "acceptance_message": active_assignment.acceptance_message if active_assignment else None,
+        "artifact_ready": active_assignment.artifact_ready if active_assignment else False,
+        "artifact_path": active_assignment.artifact_path if active_assignment else None,
+        "artifact_kind": active_assignment.artifact_kind if active_assignment else None,
+        "artifact_reported_at": (
+            active_assignment.artifact_reported_at if active_assignment else None
+        ),
         "first_work_observed_at": active_assignment.last_activity_at if active_assignment else None,
         "assigned_task_id": active_assignment.assigned_task_id if active_assignment else None,
         "blocker_reason": assignment_blocker,

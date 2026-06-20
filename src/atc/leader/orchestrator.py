@@ -64,8 +64,16 @@ class AceAssignment:
     task_title: str
     assignment_id: str = ""  # idempotency key for assign_task
     status: str = "assigned"  # assigned|working|done|failed
+    startup_readiness_state: str = "startup_handshake_pending"
     dispatch_delivery_state: str = "queued_unverified"
     dispatch_verified: bool = False
+    ace_reported_active: bool = False
+    assignment_accepted: bool = False
+    assignment_accepted_at: str | None = None
+    artifact_ready: bool = False
+    artifact_path: str | None = None
+    artifact_kind: str | None = None
+    artifact_reported_at: str | None = None
     blocker_reason: str | None = None
     last_activity_at: str | None = None
     deployed_root: Path | None = None  # staging dir for cleanup
@@ -372,6 +380,36 @@ class LeaderOrchestrator:
 
         return assignment
 
+    async def _artifact_context_for_task(self, task_graph_id: str) -> str:
+        """Return dependency artifact paths that should be routed to this task."""
+
+        task = await db_ops.get_task_graph(self.conn, task_graph_id)
+        dependencies = getattr(task, "dependencies", None) if task is not None else None
+        if not dependencies:
+            return ""
+        assignments = await db_ops.list_task_assignments(self.conn)
+        dependency_artifacts = [
+            a
+            for a in assignments
+            if a.task_graph_id in dependencies and a.artifact_ready and a.artifact_path
+        ]
+        if not dependency_artifacts:
+            return ""
+        lines = [
+            "Dependency artifact routing:",
+            (
+                "Use these canonical paths from completed dependency tasks instead "
+                "of searching sibling worktrees."
+            ),
+        ]
+        for artifact in dependency_artifacts:
+            lines.append(
+                f"- task_graph_id={artifact.task_graph_id} "
+                f"kind={artifact.artifact_kind or 'artifact'} "
+                f"path={artifact.artifact_path}"
+            )
+        return "\n".join(lines)
+
     async def send_instruction_to_ace(
         self,
         task_graph_id: str,
@@ -382,6 +420,10 @@ class LeaderOrchestrator:
         if assignment is None:
             raise ValueError(f"No Ace assigned to task graph {task_graph_id}")
 
+        artifact_context = await self._artifact_context_for_task(task_graph_id)
+        if artifact_context:
+            instruction = f"{instruction}\n\n{artifact_context}"
+
         result = await start_ace(
             self.conn,
             assignment.ace_session_id,
@@ -391,9 +433,21 @@ class LeaderOrchestrator:
         verification = verify_ace_dispatch_delivery(result, task_graph_id=task_graph_id)
         assignment.dispatch_delivery_state = verification.dispatch_delivery_state
         assignment.dispatch_verified = verification.dispatch_verified
+        assignment.startup_readiness_state = str(
+            result.details.get("startup_readiness_state")
+            or result.details.get("startup_state")
+            or getattr(assignment, "startup_readiness_state", "startup_handshake_pending")
+        )
         assignment.blocker_reason = verification.blocker_reason
 
         if assignment.assignment_id:
+            await db_ops.update_task_assignment_startup_readiness(
+                self.conn,
+                assignment.assignment_id,
+                startup_readiness_state=assignment.startup_readiness_state,
+                blocker_reason=verification.blocker_reason,
+                last_activity=False,
+            )
             persisted_assignment = await db_ops.update_task_assignment_dispatch(
                 self.conn,
                 assignment.assignment_id,
@@ -669,24 +723,59 @@ class LeaderOrchestrator:
         )
 
         status = get_completion_status(task_graphs)
+        persisted_assignments = await db_ops.list_task_assignments(self.conn)
+        assignment_rows = persisted_assignments or list(self.assignments.values())
         status["assignments"] = [
             {
                 "task_graph_id": a.task_graph_id,
                 "ace_session_id": a.ace_session_id,
-                "task_title": a.task_title,
+                "task_title": getattr(a, "task_title", None),
                 "status": a.status,
+                "startup_readiness_state": getattr(
+                    a, "startup_readiness_state", "startup_handshake_pending"
+                ),
                 "dispatch_delivery_state": a.dispatch_delivery_state,
                 "dispatch_verified": a.dispatch_verified,
+                "assignment_acceptance_state": self._assignment_acceptance_state(a),
+                "ace_reported_active": getattr(a, "ace_reported_active", False),
+                "assignment_accepted": getattr(a, "assignment_accepted", False),
+                "assignment_accepted_at": getattr(a, "assignment_accepted_at", None),
+                "artifact_ready": getattr(a, "artifact_ready", False),
+                "artifact_path": getattr(a, "artifact_path", None),
+                "artifact_kind": getattr(a, "artifact_kind", None),
+                "artifact_reported_at": getattr(a, "artifact_reported_at", None),
                 "blocker_reason": a.blocker_reason,
                 "last_activity_at": a.last_activity_at,
+                "last_provider_activity_at": a.last_activity_at,
+                "last_ace_report_at": getattr(a, "assignment_accepted_at", None),
             }
-            for a in self.assignments.values()
+            for a in assignment_rows
         ]
         status["leader_id"] = self.leader_id
         status["project_id"] = self.project_id
         status["blocked_transition_errors"] = list(self.blocked_transition_errors)
 
         return status
+
+    @staticmethod
+    def _assignment_acceptance_state(assignment: Any) -> str:
+        if getattr(assignment, "assignment_accepted", False):
+            return "assignment_accepted"
+        if getattr(assignment, "ace_reported_active", False):
+            return "ace_reported_active"
+        if getattr(assignment, "blocker_reason", None):
+            return "blocked"
+        dispatch_state = getattr(assignment, "dispatch_delivery_state", "queued_unverified")
+        if dispatch_state == "accepted_active":
+            return "awaiting_ace_active_report"
+        if dispatch_state == "submitted_pending_acceptance":
+            return "submitted_pending_acceptance"
+        startup_state = getattr(
+            assignment, "startup_readiness_state", "startup_handshake_pending"
+        )
+        if startup_state != "input_ready":
+            return startup_state
+        return dispatch_state
 
     async def monitor_ace_assignments(self, *, detailed: bool = False) -> list[dict[str, Any]]:
         """Leader-owned Ace monitoring summary.

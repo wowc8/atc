@@ -661,3 +661,38 @@ def test_runtime_service_inspect_session_record_uses_provider_boundary() -> None
     assert inspection.provider_name == "dummy_runtime_record_inspect"
     assert inspection.alive is True
     assert service.get_handle("sess-record-ace-1").role is RoleKind.ACE
+
+
+def test_runtime_service_assign_task_blocks_until_ace_input_ready() -> None:
+    class TrustBlockedProvider(DummyProviderRuntime):
+        async def inspect_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
+            return RuntimeInspection(
+                session_id=handle.session_id,
+                provider_name=handle.provider_name,
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.TRUST,
+                summary="Do you trust this directory?",
+            )
+
+    register_provider_runtime("dummy_runtime_ace_startup_blocked", TrustBlockedProvider)
+    service = RuntimeService()
+    request = StartRoleRequest(
+        session_id="sess-ace-startup-blocked-1",
+        provider_name="dummy_runtime_ace_startup_blocked",
+        role=RoleKind.ACE,
+    )
+    handle = asyncio.run(service.start_ace(request))
+    assignment = TaskAssignmentRequest(
+        session_id="sess-ace-startup-blocked-1",
+        task_id="task-1",
+        message="Do the work",
+        assignment_id="assign-startup-blocked-1",
+    )
+    result = asyncio.run(service.assign_task_to_ace(handle, assignment))
+
+    provider = service.get_provider("dummy_runtime_ace_startup_blocked")
+    assert provider.assignments == []
+    assert result.status == "blocked"
+    assert result.blocker_reason.value == "runtime_trust_required"
+    assert result.details["startup_readiness_state"] == "awaiting_startup_confirmation"

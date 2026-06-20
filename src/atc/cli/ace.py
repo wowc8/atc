@@ -24,6 +24,7 @@ _DEFAULT_API = "http://127.0.0.1:8420"
 def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
     """Register the ``ace`` command group."""
     ace_parser = subparsers.add_parser("ace", help="Ace session commands")
+    ace_parser.set_defaults(handler=lambda _: ace_parser.print_help() or 1)
     ace_sub = ace_parser.add_subparsers(dest="ace_command")
 
     # atc ace status <session_id> <status>
@@ -119,6 +120,26 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     )
     report_parser.set_defaults(handler=_handle_report_active)
 
+    artifact_parser = ace_sub.add_parser(
+        "report-artifact", help="Report canonical artifact path for an assignment"
+    )
+    artifact_parser.add_argument("--project-id", required=True, help="Project UUID")
+    artifact_parser.add_argument("--ace-id", required=True, help="Ace session UUID")
+    artifact_parser.add_argument("--assignment-id", default=None, help="Assignment idempotency key")
+    artifact_parser.add_argument("--path", required=True, help="Canonical artifact path")
+    artifact_parser.add_argument("--kind", default="build_output", help="Artifact kind")
+    artifact_parser.add_argument(
+        "--not-ready",
+        action="store_true",
+        help="Report artifact path without marking it ready",
+    )
+    artifact_parser.add_argument(
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
+    )
+    artifact_parser.set_defaults(handler=_handle_report_artifact)
+
     # atc ace health --project-id <id> --ace-id <id>
     health_parser = ace_sub.add_parser("health", help="Inspect Ace runtime/dispatch health")
     health_parser.add_argument("--project-id", required=True, help="Project UUID")
@@ -179,8 +200,6 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     mem_get_parser.set_defaults(handler=_handle_memory_get)
 
     memory_parser.set_defaults(handler=lambda _: memory_parser.print_help() or 1)
-
-    ace_parser.set_defaults(handler=lambda _: ace_parser.print_help() or 1)
 
 
 def _api_get_json(url: str) -> int:
@@ -401,6 +420,20 @@ def _handle_report_active(args: argparse.Namespace) -> int:
         payload["assignment_id"] = args.assignment_id
     return _api_post_json(
         f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/report-active",
+        payload,
+    )
+
+
+def _handle_report_artifact(args: argparse.Namespace) -> int:
+    payload = {
+        "artifact_path": args.path,
+        "artifact_kind": args.kind,
+        "ready": not args.not_ready,
+    }
+    if args.assignment_id:
+        payload["assignment_id"] = args.assignment_id
+    return _api_post_json(
+        f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/report-artifact",
         payload,
     )
 
