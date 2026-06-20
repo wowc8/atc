@@ -35,6 +35,26 @@ Leader is expected to:
 - update project plans when facts change
 - escalate unclear requirements, blocked dependencies, or unsafe actions to Tower
 
+## Task graph and API ergonomics
+
+Leader should use first-class ATC helpers for normal task graph work instead of starting by reading OpenAPI. In managed ATC workspaces, do not inspect OpenAPI as the first move for basic task creation or assignment.
+
+Preferred commands:
+
+```bash
+atc tasks create --project-id <project-id> --title "..." --description "..."
+atc tasks assign --project-id <project-id> --task-id <task-id>
+atc leader bootstrap-tasks --project-id <project-id> --goal "..." --task "..."
+```
+
+When the kickoff goal is accepted, Leader should call the canonical report-active path so Tower can distinguish goal acceptance from a mere session row:
+
+```text
+POST /api/projects/{project_id}/leader/report-active
+```
+
+Leader may inspect the local ATC API helper/capability files generated into the managed workspace for approved local API access. The local ATC API helper is restricted to the configured localhost base URL and allowlisted paths; external network or secret-bearing approval decisions remain outside Leader control.
+
 ## Must not do
 
 Leader must not:

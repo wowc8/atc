@@ -350,6 +350,29 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 - Mac Studio Playwright changed-behavior and baseline smoke evidence is captured.
 - Post-merge validation is rerun from `main`.
 
+## Phase 9 — Contract/documentation convergence
+
+**Goal:** Make the durable API docs, role contracts, and validation tests match the runtime truth behavior implemented through Phase 8 so future agents do not regress to session-row or provider-prompt assumptions.
+
+### Work
+
+1. Update API docs for Leader health, report-active, and inspect-first recovery endpoints.
+2. Update Tower/Leader/Ace role contracts with the runtime truth responsibilities each role must follow.
+3. Document first-class task helpers and local ATC API helper expectations in the Leader-facing contract.
+4. Add documentation contract tests that fail if critical runtime truth fields, recovery commands, or role boundaries disappear from the docs.
+
+### Acceptance criteria
+
+- Docs and role contracts encode the same runtime truth rules as the code: normal monitoring still requires kickoff/task-graph truth rather than a session row.
+- Documentation contract tests pass and cover API, Tower, Leader, Ace, and the recovery plan.
+- Provider boundaries remain explicit: product docs refer to provider-neutral blockers/guidance; exact prompt strings and key sequences stay in adapters/classifiers.
+
+### Validation
+
+- Documentation contract tests pass with the targeted runtime/API/CLI suites.
+- Baseline UI smoke still passes, with screenshots attached to the PR when PR evidence exists.
+- Post-merge validation is rerun from `main`.
+
 ## Documentation requirements for every phase
 
 Every implementation PR for this plan must check and update the relevant docs before merge:

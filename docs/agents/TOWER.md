@@ -35,6 +35,22 @@ Tower is expected to:
 - enforce system-level constraints before allowing more work to start
 - keep state durable and inspectable
 
+## Runtime truth and recovery behavior
+
+Tower must treat Leader startup as unverified until provider-neutral evidence proves goal acceptance and actionable progress. A Leader session row is not proof that the Leader accepted the goal; neither are `queued`, `submitted`, `sent`, or a visible pane by themselves.
+
+Tower should monitor and display these neutral fields before entering normal low-frequency monitoring:
+
+- `kickoff_verified`
+- `kickoff_state.goal_acceptance_state`
+- `kickoff_state.task_graph_created_at`
+- `runtime_state`
+- `delivery_state`
+- `blocker_reason`
+- `operator_guidance`
+
+When a Leader is blocked, Tower should surface `operator_guidance` and run inspect-first recovery paths such as `atc leader health --project-id <project-id> --summary` and `atc leader recover --project-id <project-id> --dry-run`. Tower must not paste provider-specific key sequences or branch on raw provider prompt text; provider adapters/classifiers own those details and expose only provider-neutral blockers and recovery recommendations.
+
 ## Must not do
 
 Tower must not:
