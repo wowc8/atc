@@ -117,6 +117,13 @@ class TestLeaderLifecycle:
         mock_tmux: AsyncMock,
         client: TestClient,
     ) -> None:
+        mock_send.return_value = RuntimeDeliveryResult(
+            session_id="leader-session",
+            provider_name="codex",
+            role=RoleKind.LEADER,
+            status="accepted",
+            message="queued for verification",
+        )
         resp = client.post("/api/projects", json={"name": "leader-proj"})
         project_id = resp.json()["id"]
 
@@ -126,10 +133,13 @@ class TestLeaderLifecycle:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "queued"
-        assert data["delivery_state"] == "queued"
-        assert "does not prove" in data["recovery"]
+        assert data["status"] == "submitted"
+        assert data["delivery_state"] == "submitted"
         assert "session_id" in data
+        assert data["startup_expectation"]["folder_trust_prompt_expected"] is True
+        assert data["startup_expectation"]["must_check_health_before_nudge"] is True
+        assert data["recommended_action"] != "wait_for_leader_active_report_or_run_leader_health"
+        assert "operator_guidance" in data
 
     def test_start_and_stop_leader(
         self,

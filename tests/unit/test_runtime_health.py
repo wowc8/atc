@@ -150,6 +150,103 @@ async def test_leader_health_reports_runtime_and_task_summary(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_leader_health_treats_startup_trust_as_expected_pre_nudge_branch(db) -> None:
+    project = await create_project(db, "leader-trust-startup")
+    leader = await create_leader(db, project.id, goal="Handle trust")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader-trust",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%21", "atc", session.id),
+    )
+    await db.execute(
+        "UPDATE leaders SET session_id = ?, context = ? WHERE id = ?",
+        (
+            session.id,
+            json.dumps({"leader_kickoff_payload": {"message": "go"}}),
+            leader.id,
+        ),
+    )
+    await db.commit()
+
+    health = await leader_health(
+        db,
+        project.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=session.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.TRUST,
+                summary="Do you trust this directory?",
+            )
+        ),
+    )
+
+    assert health.runtime_state == "blocked"
+    assert health.current_blocker == "runtime_trust_required"
+    assert health.kickoff_state["kickoff_state"] == "blocked_on_provider_prompt"
+    assert health.operator_guidance["recommended_action"] == (
+        "resolve_startup_trust_prompt_before_nudge"
+    )
+    assert "Do not send goal nudges" in health.operator_guidance["details"]
+
+
+@pytest.mark.asyncio
+async def test_leader_health_unverified_startup_checks_trust_before_progress_nudge(db) -> None:
+    project = await create_project(db, "leader-unverified-startup")
+    leader = await create_leader(db, project.id, goal="Check health first")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader-unverified",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%22", "atc", session.id),
+    )
+    await db.execute(
+        "UPDATE leaders SET session_id = ?, context = ? WHERE id = ?",
+        (
+            session.id,
+            json.dumps({"leader_kickoff_payload": {"message": "go"}}),
+            leader.id,
+        ),
+    )
+    await db.commit()
+
+    health = await leader_health(
+        db,
+        project.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=session.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.READY,
+                summary="Ready",
+            )
+        ),
+    )
+
+    assert health.kickoff_state["kickoff_state"] == "kickoff_unverified"
+    assert health.operator_guidance["recommended_action"] == (
+        "check_startup_trust_prompt_before_nudge"
+    )
+    assert "folder trust/startup prompt may appear" in health.operator_guidance["details"]
+
+
+@pytest.mark.asyncio
 async def test_ace_health_reports_blocked_dispatch_separately(db) -> None:
     project = await create_project(db, "ace-health-proj")
     task = await create_task_graph(db, project.id, "Task one")

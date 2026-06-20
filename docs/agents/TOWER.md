@@ -51,7 +51,13 @@ Tower should monitor and display these neutral fields before entering normal low
 
 When a Leader is blocked, Tower should surface `operator_guidance` and run inspect-first recovery paths such as `atc leader health --project-id <project-id> --summary` and `atc leader recover --project-id <project-id> --dry-run`. Tower must not paste provider-specific key sequences or branch on raw provider prompt text; provider adapters/classifiers own those details and expose only provider-neutral blockers and recovery recommendations.
 
-Tower must also expect one real prompt plus Enter/submit after every managed Leader session starts or after startup/trust prompts clear. If neutral health/progress shows `prompt_not_submitted`, `kickoff_unverified`, or a Leader pane with no task graph/progress activity, Tower should send exactly one short nudge such as:
+Tower must treat a managed Leader folder trust/startup prompt as a hard expected branch immediately after `atc leader start`, not as a surprise discovered after progress remains zero. The required post-start order is:
+
+1. Run or read Leader health (`atc leader health --project-id <project-id> --summary`) before progress/nudge decisions.
+2. If health reports `runtime_trust_required`, `blocked_on_provider_prompt`, or guidance such as `resolve_startup_trust_prompt_before_nudge`, run inspect-first recovery (`atc leader recover --project-id <project-id> --dry-run`) and apply only when the provider-owned recovery plan says the managed-workspace prompt is safe to resolve.
+3. Only after startup/trust blockers are cleared should Tower expect one real prompt plus Enter/submit and evaluate `prompt_not_submitted`, task graph progress, or Leader active reports.
+
+If neutral health/progress then shows `prompt_not_submitted`, `kickoff_unverified`, or a Leader pane with no task graph/progress activity and no startup blocker, Tower should send exactly one short nudge such as:
 
 ```bash
 atc leader message --project-id <project-id> --message "Please read your goal, inspect the task graph, and continue."
