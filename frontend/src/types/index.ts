@@ -261,6 +261,41 @@ export interface DeliveryStatusResponse {
   };
 }
 
+export interface RuntimeOperatorGuidance {
+  severity: "ok" | "warning" | "blocked" | string;
+  summary: string;
+  recommended_action: string;
+  command: string;
+  details: string;
+}
+
+export interface LeaderRuntimeHealth {
+  runtime_state: string;
+  delivery_state: string;
+  current_blocker: string | null;
+  kickoff_state: {
+    kickoff_state?: string;
+    goal_acceptance_state?: string;
+    kickoff_verified?: boolean;
+    pending_prompt_observed?: boolean;
+    pending_prompt_matches_persisted_payload?: boolean;
+  };
+  task_graph_state: {
+    total?: number;
+    todo?: number;
+    assigned?: number;
+    in_progress?: number;
+    done?: number;
+    failed?: number;
+  };
+  ace_dispatch: {
+    verified?: number;
+    blocked?: number;
+    unverified?: number;
+  };
+  operator_guidance: RuntimeOperatorGuidance;
+}
+
 export interface AppState {
   projects: Project[];
   leaders: Record<string, Leader>;

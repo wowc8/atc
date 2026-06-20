@@ -52,6 +52,7 @@ class RuntimeHealth:
     ace_count: int = 0
     current_blocker: str | None = None
     recovery_recommendation: dict[str, Any] | None = None
+    operator_guidance: dict[str, Any] = field(default_factory=dict)
     provider_diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -219,6 +220,97 @@ def _recovery_for(
     ).as_dict()
 
 
+def _operator_guidance_for(
+    *,
+    role: RuntimeRole,
+    project_id: str,
+    session_id: str | None,
+    runtime_state: str,
+    delivery_state: str,
+    current_blocker: str | None,
+    kickoff_state: dict[str, Any] | None = None,
+    ace_dispatch: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return concise, provider-neutral operator-facing health guidance."""
+
+    kickoff = kickoff_state or {}
+    dispatch = ace_dispatch or {}
+    leader_state = kickoff.get("kickoff_state")
+    command = (
+        f"atc leader recover --project-id {project_id} --dry-run"
+        if role == "leader"
+        else (
+            f"atc ace recover --project-id {project_id} "
+            f"--ace-id {session_id or '<ace-id>'} --dry-run"
+        )
+    )
+    health_command = (
+        f"atc leader health --project-id {project_id} --summary"
+        if role == "leader"
+        else f"atc ace health --project-id {project_id} --ace-id {session_id or '<ace-id>'}"
+    )
+
+    if current_blocker:
+        if current_blocker == BlockerReason.PROMPT_NOT_SUBMITTED.value:
+            return {
+                "severity": "blocked",
+                "summary": "Kickoff prompt was not submitted to the provider.",
+                "recommended_action": "run_inspect_first_recovery",
+                "command": command,
+                "details": (
+                    "Use dry-run first; apply only if persisted payload/prompt "
+                    "evidence matches."
+                ),
+            }
+        if current_blocker == BlockerReason.PANE_MISSING.value:
+            return {
+                "severity": "blocked",
+                "summary": "Runtime pane/session is missing.",
+                "recommended_action": "restart_runtime",
+                "command": command,
+                "details": "Inspect runtime state before restarting managed work.",
+            }
+        return {
+            "severity": "blocked",
+            "summary": f"Runtime is blocked: {current_blocker}.",
+            "recommended_action": "inspect_runtime_blocker",
+            "command": command,
+            "details": "Provider-specific prompt text is intentionally kept in diagnostics.",
+        }
+
+    if role == "leader" and leader_state == "kickoff_unverified":
+        return {
+            "severity": "warning",
+            "summary": "Leader session exists but goal acceptance is not verified yet.",
+            "recommended_action": "wait_or_check_health",
+            "command": health_command,
+            "details": "Normal monitoring should wait for active report or actionable progress.",
+        }
+    if role == "leader" and leader_state == "task_graph_empty":
+        return {
+            "severity": "warning",
+            "summary": "Leader accepted the goal but no task graph/actionable step is visible.",
+            "recommended_action": "bootstrap_or_wait_for_task_graph",
+            "command": f"atc leader bootstrap-tasks --project-id {project_id}",
+            "details": "A task graph is required before Ace dispatch truth can be verified.",
+        }
+    if int(dispatch.get("blocked") or 0) > 0 or int(dispatch.get("unverified") or 0) > 0:
+        return {
+            "severity": "warning",
+            "summary": "Some Ace dispatches are blocked or unverified.",
+            "recommended_action": "inspect_dispatch_health",
+            "command": health_command,
+            "details": "Check dispatch evidence before treating assigned tasks as executing.",
+        }
+    return {
+        "severity": "ok",
+        "summary": f"{role.title()} runtime is {runtime_state}; delivery is {delivery_state}.",
+        "recommended_action": "none",
+        "command": health_command,
+        "details": "No recovery is currently required.",
+    }
+
+
 async def _inspect_session(
     session: Any | None,
     runtime_service: RuntimeService,
@@ -383,6 +475,7 @@ async def leader_health(
     current_blocker = blocker or next(
         (a.blocker_reason for a in project_assignments if a.blocker_reason), None
     )
+    delivery_state = _delivery_state_for_runtime(runtime_state, has_payload=bool(kickoff_payload))
     return RuntimeHealth(
         role="leader",
         project_id=project_id,
@@ -391,9 +484,7 @@ async def leader_health(
         pane_attached=bool(getattr(session, "tmux_pane", None)),
         provider=getattr(session, "provider", None),
         runtime_state=runtime_state,
-        delivery_state=_delivery_state_for_runtime(
-            runtime_state, has_payload=bool(kickoff_payload)
-        ),
+        delivery_state=delivery_state,
         blocker_reason=blocker,
         last_activity_at=latest_activity,
         task_graph_state=task_summary,
@@ -403,6 +494,16 @@ async def leader_health(
         current_blocker=current_blocker,
         recovery_recommendation=_recovery_for(
             "leader", project_id, current_blocker, session.id if session else None
+        ),
+        operator_guidance=_operator_guidance_for(
+            role="leader",
+            project_id=project_id,
+            session_id=session.id if session else None,
+            runtime_state=runtime_state,
+            delivery_state=delivery_state,
+            current_blocker=current_blocker,
+            kickoff_state=kickoff_state,
+            ace_dispatch=dispatch_summary,
         ),
         provider_diagnostics=diagnostics,
     )
@@ -436,6 +537,14 @@ async def ace_health(
             ace_count=0,
             current_blocker=blocker,
             recovery_recommendation=_recovery_for("ace", project_id, blocker, ace_id),
+            operator_guidance=_operator_guidance_for(
+                role="ace",
+                project_id=project_id,
+                session_id=ace_id,
+                runtime_state=runtime_state,
+                delivery_state=DeliveryState.NOT_STARTED.value,
+                current_blocker=blocker,
+            ),
             provider_diagnostics=diagnostics,
         )
     runtime_state, blocker, diagnostics = await _inspect_session(session, service)
@@ -489,6 +598,15 @@ async def ace_health(
         ace_count=1 if session is not None else 0,
         current_blocker=current_blocker,
         recovery_recommendation=_recovery_for("ace", project_id, current_blocker, ace_id),
+        operator_guidance=_operator_guidance_for(
+            role="ace",
+            project_id=project_id,
+            session_id=ace_id,
+            runtime_state=runtime_state,
+            delivery_state=delivery_state,
+            current_blocker=current_blocker,
+            ace_dispatch=ace_dispatch,
+        ),
         provider_diagnostics=diagnostics,
     )
 

@@ -322,6 +322,55 @@ class TestLeaderStart:
             cli(["leader", "start"])
 
 
+class TestLeaderHealth:
+    def test_health_summary_prints_operator_guidance(
+        self, api_stub: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _StubHandler.response_body = {
+            "runtime_state": "blocked",
+            "delivery_state": "blocked",
+            "current_blocker": "prompt_not_submitted",
+            "kickoff_state": {
+                "kickoff_state": "blocked_on_provider_prompt",
+                "goal_acceptance_state": "unverified",
+            },
+            "task_graph_state": {
+                "total": 0,
+                "todo": 0,
+                "assigned": 0,
+                "in_progress": 0,
+                "done": 0,
+            },
+            "ace_dispatch": {"verified": 0, "blocked": 0, "unverified": 0},
+            "operator_guidance": {
+                "severity": "blocked",
+                "summary": "Kickoff prompt was not submitted to the provider.",
+                "recommended_action": "run_inspect_first_recovery",
+                "command": "atc leader recover --project-id proj-1 --dry-run",
+                "details": "Use dry-run first.",
+            },
+        }
+
+        rc = cli([
+            "leader",
+            "health",
+            "--project-id",
+            "proj-1",
+            "--summary",
+            "--api",
+            api_stub,
+        ])
+
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "GET"
+        assert req["path"] == "/api/projects/proj-1/leader/health"
+        output = capsys.readouterr().out
+        assert "Leader health: blocked" in output
+        assert "Recommended action: run_inspect_first_recovery" in output
+        assert "atc leader recover --project-id proj-1 --dry-run" in output
+
+
 class TestLeaderBootstrapTasks:
     def test_bootstrap_tasks_posts_decompose_specs(self, api_stub: str) -> None:
         rc = cli([

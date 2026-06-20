@@ -140,6 +140,8 @@ async def test_leader_health_reports_runtime_and_task_summary(db) -> None:
     assert data["task_graph_state"]["total"] == 1
     assert data["ace_dispatch"]["verified"] == 1
     assert data["ace_count"] == 1
+    assert data["operator_guidance"]["severity"] == "ok"
+    assert data["operator_guidance"]["recommended_action"] == "none"
 
 
 @pytest.mark.asyncio
@@ -234,6 +236,8 @@ async def test_leader_health_surfaces_ace_blocker_without_tower_ace_inspection(d
     assert health.current_blocker == "ace_dispatch_failed"
     assert health.recovery_recommendation is not None
     assert health.recovery_recommendation["command"].startswith("atc leader recover")
+    assert health.operator_guidance["severity"] == "blocked"
+    assert health.operator_guidance["recommended_action"] == "inspect_runtime_blocker"
 
 
 @pytest.mark.asyncio

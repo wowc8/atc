@@ -45,6 +45,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     # atc leader health --project-id <id>
     health_parser = leader_sub.add_parser("health", help="Inspect leader runtime health")
     health_parser.add_argument("--project-id", required=True, help="Project UUID")
+    health_parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print concise operator guidance instead of raw JSON",
+    )
     health_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
     health_parser.set_defaults(handler=_handle_health)
 
@@ -102,21 +107,54 @@ def _post_json(url: str, payload: dict) -> int:
         return 1
 
 
-def _get_json(url: str) -> int:
+def _get_json(url: str) -> tuple[int, dict | None]:
     """GET JSON from a URL and print the response."""
     req = urllib.request.Request(url, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read().decode())
-            print(json.dumps(body, indent=2))
-            return 0
+            return 0, body
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode() if exc.fp else str(exc)
         print(f"Error: {exc.code} — {detail}", file=sys.stderr)
-        return 1
+        return 1, None
     except urllib.error.URLError as exc:
         print(f"Error: cannot reach ATC API — {exc.reason}", file=sys.stderr)
-        return 1
+        return 1, None
+
+
+def _print_health_summary(body: dict) -> None:
+    guidance = body.get("operator_guidance") or {}
+    kickoff = body.get("kickoff_state") or {}
+    tasks = body.get("task_graph_state") or {}
+    dispatch = body.get("ace_dispatch") or {}
+    print(f"Leader health: {guidance.get('severity', 'unknown')}")
+    print(f"Summary: {guidance.get('summary', 'No guidance available.')}")
+    print(f"Runtime: {body.get('runtime_state')} / delivery: {body.get('delivery_state')}")
+    print(
+        "Leader state: "
+        f"{kickoff.get('kickoff_state')} / acceptance: {kickoff.get('goal_acceptance_state')}"
+    )
+    print(
+        "Tasks: "
+        f"total={tasks.get('total', 0)} todo={tasks.get('todo', 0)} "
+        f"active={tasks.get('assigned', 0) + tasks.get('in_progress', 0)} "
+        f"done={tasks.get('done', 0)}"
+    )
+    print(
+        "Ace dispatch: "
+        f"verified={dispatch.get('verified', 0)} "
+        f"blocked={dispatch.get('blocked', 0)} "
+        f"unverified={dispatch.get('unverified', 0)}"
+    )
+    if body.get("current_blocker"):
+        print(f"Blocker: {body['current_blocker']}")
+    if guidance.get("recommended_action"):
+        print(f"Recommended action: {guidance['recommended_action']}")
+    if guidance.get("command"):
+        print(f"Command: {guidance['command']}")
+    if guidance.get("details"):
+        print(f"Details: {guidance['details']}")
 
 
 def _handle_start(args: argparse.Namespace) -> int:
@@ -138,7 +176,14 @@ def _handle_message(args: argparse.Namespace) -> int:
 
 
 def _handle_health(args: argparse.Namespace) -> int:
-    return _get_json(f"{args.api}/api/projects/{args.project_id}/leader/health")
+    rc, body = _get_json(f"{args.api}/api/projects/{args.project_id}/leader/health")
+    if rc != 0 or body is None:
+        return rc
+    if args.summary:
+        _print_health_summary(body)
+    else:
+        print(json.dumps(body, indent=2))
+    return 0
 
 
 def _handle_recover(args: argparse.Namespace) -> int:
