@@ -113,6 +113,7 @@ GET    /api/projects/{id}/aces                → list ace sessions
 POST   /api/projects/{id}/aces                → spawn new ace
 GET    /api/projects/{id}/aces/{ace_id}/health → provider-neutral Ace runtime/assignment health
 POST   /api/projects/{id}/aces/{ace_id}/report-active → Ace reports assignment acceptance
+POST   /api/projects/{id}/aces/{ace_id}/report-artifact → Ace reports canonical artifact/worktree path
 POST   /api/projects/{id}/aces/{ace_id}/recover → inspect-first Ace recovery dry-run/apply
 POST   /api/aces/{id}/start                   → start session
 POST   /api/aces/{id}/stop                    → stop session
@@ -120,7 +121,7 @@ POST   /api/aces/{id}/message                 → send message to ace
 DELETE /api/aces/{id}                         → delete session
 ```
 
-Leader → Ace handoff uses a separate assignment-acceptance truth contract so Leaders do not confuse session/assignment existence with active Ace work. `ace_dispatch.assignment_acceptance_state` distinguishes `queued_unverified`, `session_created`, `payload_written`, `submitted_pending_acceptance`, `awaiting_ace_active_report`, `assignment_accepted`, `accepted_active`, `blocked`, and `failed`.
+Leader → Ace handoff uses a separate startup-readiness, assignment-acceptance, and artifact-routing truth contract so Leaders do not confuse session/assignment existence with active Ace work. `ace_dispatch.startup_readiness_state` distinguishes `startup_handshake_pending`, `awaiting_startup_confirmation`, `blocked_on_provider_startup_prompt`, `input_ready`, `runtime_missing`, and `startup_handshake_failed`. `ace_dispatch.assignment_acceptance_state` distinguishes `queued_unverified`, `session_created`, `payload_written`, `submitted_pending_acceptance`, `awaiting_ace_active_report`, `assignment_accepted`, `accepted_active`, `blocked`, and `failed`.
 
 `POST /api/projects/{id}/aces/{ace_id}/report-active` records Ace-side acceptance evidence:
 
@@ -134,11 +135,25 @@ Leader → Ace handoff uses a separate assignment-acceptance truth contract so L
 
 The response includes `ace_reported_active`, `assignment_accepted`, `assignment_accepted_at`, `acceptance_message`, and the resulting `ace_dispatch` block. Leaders should treat `dispatch_verified=true` plus `assignment_accepted=true` as stronger evidence than delivery alone; delivery alone may remain `awaiting_ace_active_report`.
 
+`POST /api/projects/{id}/aces/{ace_id}/report-artifact` records canonical artifact routing evidence so verification Aces do not search isolated sibling worktrees:
+
+```json
+{
+  "assignment_id": "optional-assignment-id",
+  "artifact_path": "/absolute/worktree-or-build-output",
+  "artifact_kind": "worktree",
+  "ready": true
+}
+```
+
+Leader progress and Ace health expose `artifact_ready`, `artifact_path`, `artifact_kind`, `artifact_reported_at`, `last_provider_activity_at`, and `last_ace_report_at` separately from task lifecycle status.
+
 CLI helpers:
 
 ```bash
 atc ace health --project-id <project-id> --ace-id <ace-id>
 atc ace report-active --project-id <project-id> --ace-id <ace-id> --message "accepted task"
+atc ace report-artifact --project-id <project-id> --ace-id <ace-id> --path /absolute/output --kind worktree
 atc ace recover --project-id <project-id> --ace-id <ace-id> --dry-run
 ```
 

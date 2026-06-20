@@ -70,6 +70,13 @@ class AceActiveReportRequest(BaseModel):
     message: str | None = None
 
 
+class AceArtifactReportRequest(BaseModel):
+    assignment_id: str | None = None
+    artifact_path: str
+    artifact_kind: str = "build_output"
+    ready: bool = True
+
+
 async def _require_project_ace(db, project_id: str, session_id: str):
     session = await db_ops.get_session(db, session_id)
     if session is None or session.project_id != project_id or session.session_type != "ace":
@@ -242,6 +249,51 @@ async def report_ace_active(
         "assignment_accepted_at": report.assignment_accepted_at,
         "assignment_acceptance_state": dispatch.get("assignment_acceptance_state"),
         "ace_dispatch": dispatch,
+    }
+
+
+@router.post("/projects/{project_id}/aces/{session_id}/report-artifact")
+async def report_ace_artifact(
+    project_id: str,
+    session_id: str,
+    body: AceArtifactReportRequest,
+    request: Request,
+) -> dict[str, object]:
+    """Record a canonical artifact path produced by an Ace assignment."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await _require_project_ace(db, project_id, session_id)
+    assignments = await db_ops.list_task_assignments(db, ace_session_id=session_id)
+    if body.assignment_id:
+        assignment = next((a for a in assignments if a.assignment_id == body.assignment_id), None)
+    else:
+        assignment = next(
+            (a for a in assignments if a.status in {"assigned", "working", "done"}),
+            None,
+        )
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Ace assignment not found")
+    report = await db_ops.report_task_assignment_artifact(
+        db,
+        assignment.assignment_id,
+        artifact_path=body.artifact_path,
+        artifact_kind=body.artifact_kind,
+        ready=body.ready,
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="Ace assignment not found")
+    return {
+        "status": "artifact_ready" if report.artifact_ready else "artifact_reported",
+        "project_id": project_id,
+        "ace_id": session_id,
+        "assignment_id": report.assignment_id,
+        "task_graph_id": report.task_graph_id,
+        "artifact_path": report.artifact_path,
+        "artifact_kind": report.artifact_kind,
+        "artifact_ready": report.artifact_ready,
+        "artifact_reported_at": report.artifact_reported_at,
     }
 
 

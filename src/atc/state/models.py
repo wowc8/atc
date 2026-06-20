@@ -238,12 +238,17 @@ class TaskAssignment:
     ace_session_id: str
     assignment_id: str
     status: str = "assigned"  # assigned|working|done|failed
+    startup_readiness_state: str = "startup_handshake_pending"
     dispatch_delivery_state: str = "queued_unverified"
     dispatch_verified: bool = False
     ace_reported_active: bool = False
     assignment_accepted: bool = False
     assignment_accepted_at: str | None = None
     acceptance_message: str | None = None
+    artifact_path: str | None = None
+    artifact_kind: str | None = None
+    artifact_ready: bool = False
+    artifact_reported_at: str | None = None
     last_activity_at: str | None = None
     assigned_task_id: str | None = None
     blocker_reason: str | None = None

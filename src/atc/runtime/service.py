@@ -292,6 +292,22 @@ class RuntimeService:
             ),
         )
         provider = self.get_provider(handle.provider_name)
+        readiness = await provider.inspect_session(handle)
+        request.metadata["ace_startup_readiness_state"] = self._startup_readiness_state(readiness)
+        self._append_assignment_readiness_event(handle, request, trace_id, readiness)
+        if readiness.readiness is not ReadinessState.READY:
+            request.metadata["runtime_truth"] = self._runtime_truth_from_inspection(
+                readiness
+            )
+            return self._result_from_metadata(
+                handle,
+                request.metadata,
+                status="blocked",
+                message=(
+                    "Ace assignment was not submitted because the provider runtime "
+                    "is not input-ready"
+                ),
+            )
         try:
             await provider.assign_task(handle, request)
         except Exception as exc:
@@ -554,6 +570,115 @@ class RuntimeService:
             raise
 
     @staticmethod
+    def _runtime_truth_from_inspection(inspection: RuntimeInspection) -> dict[str, object]:
+        if inspection.readiness is ReadinessState.READY:
+            runtime_state = RuntimeState.READY
+            delivery_state = DeliveryState.RUNTIME_CREATED
+            blocker = None
+        elif inspection.readiness is ReadinessState.BLOCKED:
+            runtime_state = RuntimeState.BLOCKED
+            delivery_state = DeliveryState.BLOCKED
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                blocker = BlockerReason.RUNTIME_TRUST_REQUIRED
+            elif inspection.block_reason in {RuntimeBlockReason.AUTH, RuntimeBlockReason.LOGIN}:
+                blocker = BlockerReason.RUNTIME_AUTH_REQUIRED
+            elif inspection.block_reason is RuntimeBlockReason.PERMISSION:
+                blocker = BlockerReason.RUNTIME_PERMISSION_REQUIRED
+            else:
+                blocker = BlockerReason.UNKNOWN_PROMPT_BLOCKER
+        elif inspection.readiness is ReadinessState.STOPPED:
+            runtime_state = RuntimeState.MISSING
+            delivery_state = DeliveryState.FAILED
+            blocker = BlockerReason.PANE_MISSING
+        elif inspection.readiness is ReadinessState.ERROR:
+            runtime_state = RuntimeState.FAILED
+            delivery_state = DeliveryState.FAILED
+            blocker = BlockerReason.PROVIDER_ERROR
+        else:
+            runtime_state = RuntimeState.STARTING
+            delivery_state = DeliveryState.RUNTIME_CREATED
+            blocker = BlockerReason.DELIVERY_UNVERIFIED
+        return {
+            "runtime_state": runtime_state.value,
+            "delivery_state": delivery_state.value,
+            "blocker_reason": blocker.value if blocker is not None else None,
+            "provider": inspection.provider_name,
+            "provider_diagnostics": inspection.details,
+        }
+
+    @staticmethod
+    def _startup_readiness_state(inspection: RuntimeInspection) -> str:
+        """Map provider inspection to a provider-neutral startup/input readiness gate."""
+
+        if inspection.readiness is ReadinessState.READY:
+            return "input_ready"
+        if inspection.readiness is ReadinessState.STARTING:
+            return "startup_handshake_pending"
+        if inspection.readiness is ReadinessState.BLOCKED:
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                return "awaiting_startup_confirmation"
+            return "blocked_on_provider_startup_prompt"
+        if inspection.readiness is ReadinessState.STOPPED:
+            return "runtime_missing"
+        if inspection.readiness is ReadinessState.ERROR:
+            return "startup_handshake_failed"
+        return "startup_handshake_pending"
+
+    @staticmethod
+    def _append_assignment_readiness_event(
+        handle: RuntimeSessionHandle,
+        request: TaskAssignmentRequest,
+        trace_id: str,
+        inspection: RuntimeInspection,
+    ) -> None:
+        ready = inspection.readiness is ReadinessState.READY
+        if ready:
+            verdict = DeliveryVerdict.ACCEPTED
+            reason = DeliveryReasonCode.SESSION_RUNNING
+            stage = DeliveryStage.CONFIRMED_RUNNING
+        else:
+            verdict = DeliveryVerdict.BLOCKED
+            stage = DeliveryStage.BLOCKED
+            if inspection.block_reason is RuntimeBlockReason.TRUST:
+                reason = DeliveryReasonCode.TRUST_REQUIRED
+            elif inspection.block_reason in {RuntimeBlockReason.AUTH, RuntimeBlockReason.LOGIN}:
+                reason = DeliveryReasonCode.AUTH_REQUIRED
+            elif inspection.block_reason is RuntimeBlockReason.PERMISSION:
+                reason = DeliveryReasonCode.PERMISSION_REQUIRED
+            elif inspection.readiness is ReadinessState.STOPPED:
+                reason = DeliveryReasonCode.PANE_MISSING
+            elif inspection.readiness is ReadinessState.ERROR:
+                reason = DeliveryReasonCode.PROVIDER_ERROR
+            else:
+                reason = DeliveryReasonCode.UNKNOWN_PROMPT_BLOCKER
+        append_trace_event(
+            request.metadata,
+            trace_event(
+                trace_id=trace_id,
+                session_id=handle.session_id,
+                role=handle.role.value,
+                provider=handle.provider_name,
+                pane_id=handle.tmux_pane,
+                action=DeliveryAction.TASK_ASSIGNMENT,
+                stage=stage,
+                verdict=verdict,
+                reason_code=reason,
+                prompt_state_after=inspection.readiness.value,
+                first_output_excerpt=inspection.last_output_excerpt,
+                details={
+                    "startup_readiness_state": RuntimeService._startup_readiness_state(inspection),
+                    "summary": inspection.summary,
+                    "task_id": request.task_id,
+                    "assignment_id": request.assignment_id,
+                    "block_reason": inspection.block_reason.value
+                    if inspection.block_reason is not None
+                    else None,
+                    **inspection.details,
+                },
+            ),
+        )
+
+    @staticmethod
     def _ensure_trace_id(metadata: dict[str, object]) -> str:
         existing = metadata.get("delivery_trace_id")
         if isinstance(existing, str) and existing:
@@ -619,7 +744,14 @@ class RuntimeService:
         if isinstance(events, list) and events:
             latest = events[-1]
             if isinstance(latest, dict) and latest.get("stage") != DeliveryStage.QUEUED.value:
-                return
+                details = latest.get("details")
+                readiness_gate_only = (
+                    action is DeliveryAction.TASK_ASSIGNMENT
+                    and isinstance(details, dict)
+                    and "startup_readiness_state" in details
+                )
+                if not readiness_gate_only:
+                    return
         append_trace_event(
             metadata,
             trace_event(
@@ -632,7 +764,10 @@ class RuntimeService:
                 stage=DeliveryStage.CONFIRMED_RUNNING,
                 verdict=DeliveryVerdict.ACCEPTED,
                 reason_code=DeliveryReasonCode.DELIVERY_UNVERIFIED,
-                details={"source": "provider_returned_without_detailed_trace"},
+                details={
+                    "source": "provider_returned_without_detailed_trace",
+                    "startup_readiness_state": metadata.get("ace_startup_readiness_state"),
+                },
             ),
         )
 

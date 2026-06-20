@@ -472,12 +472,17 @@ CREATE TABLE IF NOT EXISTS task_assignments (
     ace_session_id          TEXT NOT NULL,
     assignment_id           TEXT NOT NULL UNIQUE,
     status                  TEXT NOT NULL DEFAULT 'assigned',
+    startup_readiness_state TEXT NOT NULL DEFAULT 'startup_handshake_pending',
     dispatch_delivery_state TEXT NOT NULL DEFAULT 'queued_unverified',
     dispatch_verified       INTEGER NOT NULL DEFAULT 0,
     ace_reported_active     INTEGER NOT NULL DEFAULT 0,
     assignment_accepted     INTEGER NOT NULL DEFAULT 0,
     assignment_accepted_at  TEXT,
     acceptance_message      TEXT,
+    artifact_path           TEXT,
+    artifact_kind           TEXT,
+    artifact_ready          INTEGER NOT NULL DEFAULT 0,
+    artifact_reported_at    TEXT,
     last_activity_at        TEXT,
     assigned_task_id        TEXT,
     blocker_reason          TEXT,
@@ -582,12 +587,17 @@ async def run_migrations(db_path: str) -> None:
 
         # --- task_assignments dispatch truth fields ---
         task_assignment_columns = {
+            "startup_readiness_state": "TEXT NOT NULL DEFAULT 'startup_handshake_pending'",
             "dispatch_delivery_state": "TEXT NOT NULL DEFAULT 'queued_unverified'",
             "dispatch_verified": "INTEGER NOT NULL DEFAULT 0",
             "ace_reported_active": "INTEGER NOT NULL DEFAULT 0",
             "assignment_accepted": "INTEGER NOT NULL DEFAULT 0",
             "assignment_accepted_at": "TEXT",
             "acceptance_message": "TEXT",
+            "artifact_path": "TEXT",
+            "artifact_kind": "TEXT",
+            "artifact_ready": "INTEGER NOT NULL DEFAULT 0",
+            "artifact_reported_at": "TEXT",
             "last_activity_at": "TEXT",
             "assigned_task_id": "TEXT",
             "blocker_reason": "TEXT",
@@ -671,6 +681,24 @@ async def _apply_file_migrations(db: aiosqlite.Connection) -> None:
             ]
             if all(
                 [await _has_column(db, "task_assignments", column) for column in acceptance_columns]
+            ):
+                logger.info("Migration skip: %s already applied structurally", path.name)
+                await db.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (path.name, _now()),
+                )
+                await db.commit()
+                continue
+        if path.name == "018_ace_startup_artifact_parity.sql":
+            parity_columns = [
+                "startup_readiness_state",
+                "artifact_path",
+                "artifact_kind",
+                "artifact_ready",
+                "artifact_reported_at",
+            ]
+            if all(
+                [await _has_column(db, "task_assignments", column) for column in parity_columns]
             ):
                 logger.info("Migration skip: %s already applied structurally", path.name)
                 await db.execute(
@@ -1310,7 +1338,12 @@ _ASSIGNMENT_TRANSITIONS: dict[str, set[str]] = {
 
 def _row_to_task_assignment(row: aiosqlite.Row) -> TaskAssignment:
     d = dict(row)
-    for key in ("dispatch_verified", "ace_reported_active", "assignment_accepted"):
+    for key in (
+        "dispatch_verified",
+        "ace_reported_active",
+        "assignment_accepted",
+        "artifact_ready",
+    ):
         if key in d:
             d[key] = bool(d[key])
     return TaskAssignment(**d)
@@ -1380,6 +1413,7 @@ async def assign_task(
             ace_session_id=ace_session_id,
             assignment_id=existing.assignment_id,
             status="assigned",
+            startup_readiness_state="startup_handshake_pending",
             dispatch_delivery_state="queued_unverified",
             dispatch_verified=False,
             assigned_task_id=task_graph_id,
@@ -1388,15 +1422,17 @@ async def assign_task(
         )
         await db.execute(
             """UPDATE task_assignments
-               SET ace_session_id = ?, status = ?, dispatch_delivery_state = ?,
-                   dispatch_verified = 0, ace_reported_active = 0,
+               SET ace_session_id = ?, status = ?, startup_readiness_state = ?,
+                   dispatch_delivery_state = ?, dispatch_verified = 0, ace_reported_active = 0,
                    assignment_accepted = 0, assignment_accepted_at = NULL,
-                   acceptance_message = NULL, last_activity_at = NULL,
+                   acceptance_message = NULL, artifact_path = NULL, artifact_kind = NULL,
+                   artifact_ready = 0, artifact_reported_at = NULL, last_activity_at = NULL,
                    assigned_task_id = ?, blocker_reason = NULL, updated_at = ?
                WHERE assignment_id = ?""",
             (
                 ace_session_id,
                 assignment.status,
+                assignment.startup_readiness_state,
                 assignment.dispatch_delivery_state,
                 task_graph_id,
                 assignment.updated_at,
@@ -1410,6 +1446,7 @@ async def assign_task(
             ace_session_id=ace_session_id,
             assignment_id=assignment_id,
             status="assigned",
+            startup_readiness_state="startup_handshake_pending",
             dispatch_delivery_state="queued_unverified",
             dispatch_verified=False,
             assigned_task_id=task_graph_id,
@@ -1420,15 +1457,17 @@ async def assign_task(
         await db.execute(
             """INSERT INTO task_assignments
                (id, task_graph_id, ace_session_id, assignment_id, status,
-                dispatch_delivery_state, dispatch_verified, assigned_task_id,
+                startup_readiness_state, dispatch_delivery_state,
+                dispatch_verified, assigned_task_id,
                 created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 assignment.id,
                 assignment.task_graph_id,
                 assignment.ace_session_id,
                 assignment.assignment_id,
                 assignment.status,
+                assignment.startup_readiness_state,
                 assignment.dispatch_delivery_state,
                 1 if assignment.dispatch_verified else 0,
                 assignment.assigned_task_id,
@@ -1525,8 +1564,34 @@ async def update_task_assignment_status(
 
 
 # ---------------------------------------------------------------------------
-# Heartbeat CRUD
+# Task assignment runtime/artifact truth
 # ---------------------------------------------------------------------------
+
+
+async def update_task_assignment_startup_readiness(
+    db: aiosqlite.Connection,
+    assignment_id: str,
+    *,
+    startup_readiness_state: str,
+    blocker_reason: str | None = None,
+    last_activity: bool = False,
+) -> TaskAssignment | None:
+    """Persist provider-neutral Ace startup/input readiness before assignment delivery."""
+
+    existing = await get_task_assignment(db, assignment_id)
+    if existing is None:
+        return None
+    now = _now()
+    last_activity_at = now if last_activity else existing.last_activity_at
+    await db.execute(
+        """UPDATE task_assignments
+           SET startup_readiness_state = ?, blocker_reason = ?,
+               last_activity_at = ?, updated_at = ?
+           WHERE assignment_id = ?""",
+        (startup_readiness_state, blocker_reason, last_activity_at, now, assignment_id),
+    )
+    await db.commit()
+    return await get_task_assignment(db, assignment_id)
 
 
 async def update_task_assignment_dispatch(
@@ -1594,6 +1659,31 @@ async def report_ace_assignment_active(
             now,
             assignment_id,
         ),
+    )
+    await db.commit()
+    return await get_task_assignment(db, assignment_id)
+
+
+async def report_task_assignment_artifact(
+    db: aiosqlite.Connection,
+    assignment_id: str,
+    *,
+    artifact_path: str,
+    artifact_kind: str = "build_output",
+    ready: bool = True,
+) -> TaskAssignment | None:
+    """Record canonical artifact routing info produced by an Ace assignment."""
+
+    existing = await get_task_assignment(db, assignment_id)
+    if existing is None:
+        return None
+    now = _now()
+    await db.execute(
+        """UPDATE task_assignments
+           SET artifact_path = ?, artifact_kind = ?, artifact_ready = ?,
+               artifact_reported_at = ?, last_activity_at = ?, updated_at = ?
+           WHERE assignment_id = ?""",
+        (artifact_path, artifact_kind, 1 if ready else 0, now, now, now, assignment_id),
     )
     await db.commit()
     return await get_task_assignment(db, assignment_id)

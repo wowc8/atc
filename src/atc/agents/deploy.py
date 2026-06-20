@@ -458,6 +458,8 @@ def _build_ace_instructions_md(spec: AceDeploySpec) -> str:
             "```bash",
             f'atc ace report-active --project-id "{spec.project_id or '<project-id>'}" '
             f'--ace-id "{spec.session_id}" --message "accepted task"',
+            f'atc ace report-artifact --project-id "{spec.project_id or '<project-id>'}" '
+            f'--ace-id "{spec.session_id}" --path "$PWD" --kind worktree  # when output path ready',
             f'atc ace status "{spec.session_id}" working   # when actively working',
             f'atc ace status "{spec.session_id}" waiting   # when idle/waiting',
             f'atc ace done "{spec.session_id}"              # when task is complete',
