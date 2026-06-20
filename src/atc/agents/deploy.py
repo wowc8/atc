@@ -18,6 +18,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,50 @@ class DeployedFiles:
     @property
     def manifest_path(self) -> Path:
         return self.root / ".manifest.json"
+
+    @property
+    def local_api_capability_path(self) -> Path:
+        return self.root / ".atc" / "local_api_capability.json"
+
+    @property
+    def local_api_helper_path(self) -> Path:
+        return self.root / ".atc" / "local_api.sh"
+
+
+@dataclass(frozen=True)
+class LocalAtcApiCapability:
+    """Provider-neutral, local-only ATC API access capability."""
+
+    name: str = "local_atc_api_inspection"
+    base_url: str = "http://127.0.0.1:8420"
+    host_allowlist: tuple[str, ...] = ("127.0.0.1", "localhost")
+    methods: tuple[str, ...] = ("GET", "POST", "PATCH", "PUT")
+    path_prefixes: tuple[str, ...] = (
+        "/api/health",
+        "/api/projects",
+        "/api/task-graphs",
+        "/api/sessions",
+        "/api/context",
+        "/api/aces",
+        "/api/heartbeat",
+        "/api/memory",
+        "/openapi.json",
+        "/docs",
+    )
+
+    def as_dict(self) -> dict[str, Any]:
+        parsed = urlparse(self.base_url)
+        return {
+            "name": self.name,
+            "base_url": self.base_url,
+            "scheme": parsed.scheme,
+            "host": parsed.hostname,
+            "port": parsed.port,
+            "host_allowlist": list(self.host_allowlist),
+            "methods": list(self.methods),
+            "path_prefixes": list(self.path_prefixes),
+            "external_network_allowed": False,
+        }
 
 
 def _write_instruction_files(root: Path, content: str) -> list[str]:
@@ -194,6 +239,7 @@ def deploy_ace_files(
     written.append(_write_file(root / ".claude" / "settings.json", settings_json))
     # Also write settings.local.json — Claude Code reads trust/personal prefs from here
     written.append(_write_file(root / ".claude" / "settings.local.json", settings_json))
+    written.extend(_write_local_api_capability_files(root, spec.api_base_url))
 
     # Hook scripts
     for hook in _ace_hook_scripts(spec):
@@ -257,6 +303,7 @@ def deploy_manager_files(
     written.append(_write_file(root / ".claude" / "settings.json", settings_json))
     # Also write settings.local.json — Claude Code reads trust/personal prefs from here
     written.append(_write_file(root / ".claude" / "settings.local.json", settings_json))
+    written.extend(_write_local_api_capability_files(root, spec.api_base_url))
 
     # Hook scripts
     for hook in _manager_hook_scripts(spec):
@@ -313,6 +360,7 @@ def deploy_tower_files(
     written.append(_write_file(root / ".claude" / "settings.json", settings_json))
     # Also write settings.local.json — Claude Code reads trust/personal prefs from here
     written.append(_write_file(root / ".claude" / "settings.local.json", settings_json))
+    written.extend(_write_local_api_capability_files(root, spec.api_base_url))
 
     # Hook scripts
     for hook in _tower_hook_scripts(spec):
@@ -438,6 +486,7 @@ def _build_ace_instructions_md(spec: AceDeploySpec) -> str:
     # Context read/write CLI instructions
     hooks_dir = f"/tmp/atc-agents/{spec.session_id}/.claude/hooks"
     lines.extend(_context_cli_instructions(hooks_dir))
+    lines.extend(_local_api_capability_instructions(root_session_id=spec.session_id))
 
     if spec.github_repo:
         lines.extend(
@@ -619,6 +668,7 @@ def _build_manager_instructions_md(spec: ManagerDeploySpec) -> str:
     # Context read/write CLI instructions
     hooks_dir = f"/tmp/atc-agents/{spec.leader_id}/.claude/hooks"
     lines.extend(_context_cli_instructions(hooks_dir))
+    lines.extend(_local_api_capability_instructions(root_session_id=spec.leader_id))
 
     status_session_id = spec.session_id or spec.leader_id
     lines.extend(
@@ -767,6 +817,7 @@ def _build_tower_instructions_md(spec: TowerDeploySpec) -> str:
     # Context read/write CLI instructions
     hooks_dir = f"/tmp/atc-agents/{spec.session_id}/.claude/hooks"
     lines.extend(_context_cli_instructions(hooks_dir))
+    lines.extend(_local_api_capability_instructions(root_session_id=spec.session_id))
 
     if spec.repo_path or spec.github_repo:
         lines.append("## Repository")
@@ -807,6 +858,56 @@ def _build_settings(
     }
 
 
+_LOCAL_API_HELPER_TEMPLATE = r"""#!/usr/bin/env bash
+set -euo pipefail
+
+CAPABILITY_FILE="$(dirname "$0")/local_api_capability.json"
+METHOD="${1:-GET}"
+PATH_ARG="${2:-/api/health}"
+BODY="${3:-}"
+
+python3 - "$CAPABILITY_FILE" "$METHOD" "$PATH_ARG" "$BODY" <<'PY'
+import json
+import sys
+import urllib.request
+
+capability_path, method, path, body = sys.argv[1:5]
+capability = json.load(open(capability_path, encoding="utf-8"))
+method = method.upper()
+if method not in capability["methods"]:
+    raise SystemExit(f"method not allowed: {method}")
+if not path.startswith("/") or not any(
+    path == prefix or path.startswith(prefix + "/") or path.startswith(prefix + "?")
+    for prefix in capability["path_prefixes"]
+):
+    raise SystemExit(f"path not allowed: {path}")
+url = capability["base_url"].rstrip("/") + path
+data = body.encode() if body else None
+headers = {"Accept": "application/json"}
+if data is not None:
+    headers["Content-Type"] = "application/json"
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+with urllib.request.urlopen(request, timeout=20) as response:
+    sys.stdout.buffer.write(response.read())
+PY
+"""
+
+
+def _write_local_api_capability_files(root: Path, api_base_url: str) -> list[str]:
+    """Write scoped local ATC API capability metadata and helper script."""
+    capability = LocalAtcApiCapability(base_url=api_base_url)
+    parsed = urlparse(api_base_url)
+    if parsed.hostname not in capability.host_allowlist:
+        return []
+    return [
+        _write_file(
+            root / ".atc" / "local_api_capability.json",
+            json.dumps(capability.as_dict(), indent=2),
+        ),
+        _write_executable(root / ".atc" / "local_api.sh", _LOCAL_API_HELPER_TEMPLATE),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Hook configuration
 # ---------------------------------------------------------------------------
@@ -837,6 +938,27 @@ def _context_cli_instructions(hooks_dir: str) -> list[str]:
         "Context entries are scoped to your session and visible to your scope's",
         "inheritance rules. Use them to record findings, decisions, and notes",
         "that should persist beyond the current conversation.",
+        "",
+    ]
+
+
+def _local_api_capability_instructions(root_session_id: str) -> list[str]:
+    """Return instructions for the preauthorized local ATC API capability."""
+    helper = f"/tmp/atc-agents/{root_session_id}/.atc/local_api.sh"
+    capability = f"/tmp/atc-agents/{root_session_id}/.atc/local_api_capability.json"
+    return [
+        "## Local ATC API Capability",
+        "",
+        "Local ATC API inspection is pre-authorized for this managed workspace.",
+        "Use the scoped helper or the `atc` CLI instead of asking for permission",
+        "to inspect the local API. This capability is limited to localhost ATC",
+        "paths and does not authorize external network access.",
+        "",
+        "```bash",
+        f"bash {helper} GET /openapi.json",
+        f"bash {helper} GET /api/health",
+        f"cat {capability}",
+        "```",
         "",
     ]
 
