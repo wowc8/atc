@@ -338,6 +338,12 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 - Full chain validation does not rely on `202 Accepted`, `sent`, or session rows as execution proof.
 - Docs match implementation behavior at merge time.
 
+### Phase 8 implementation notes
+
+- `tests/e2e/test_phase8_scenarios.py` is the canonical scenario regression suite for this Leader kickoff recovery plan. It now covers the original field failure, prompt blockers before PTY writes, dry-run/safe apply recovery coverage through the runtime-health unit contract, Leader active-report plus task-graph proof, task bootstrap helpers, local ATC API capability files, and Tower-driven Leader/Ace execution truth.
+- Scenario acceptance requires canonical evidence beyond a session row: Leader health must expose unaccepted/blocked kickoff state until the Leader reports goal acceptance and task graph evidence exists; Ace validation must preserve assignment plus runtime delivery/blocker evidence.
+- Post-merge evidence for this phase must include the Phase 8 scenario suite, targeted runtime/CLI/deploy coverage, a live API/CLI evidence artifact, and Mac Studio Playwright changed-behavior/baseline screenshots.
+
 ### Validation
 
 - Targeted backend/CLI/frontend tests pass for changed behavior.
