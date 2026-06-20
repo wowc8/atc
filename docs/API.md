@@ -28,6 +28,9 @@ GET    /api/projects/{id}/manager             → Leader detail + task graph
 POST   /api/projects/{id}/leader/start        → start Leader session
 POST   /api/projects/{id}/leader/stop         → stop Leader session
 POST   /api/projects/{id}/leader/message      → send message to Leader
+POST   /api/projects/{id}/leader/report-active → Leader reports kickoff goal acceptance
+GET    /api/projects/{id}/leader/health       → provider-neutral Leader runtime/kickoff health
+POST   /api/projects/{id}/leader/recover      → inspect-first Leader recovery dry-run/apply
 ```
 
 ### Leader start kickoff truth
@@ -45,6 +48,27 @@ Important fields:
 - `kickoff_blocker_reason` / `kickoff_recovery_recommendation`: structured blocker and inspect-first recovery guidance when kickoff is blocked or unverified.
 
 `GET /api/projects/{id}/leader/health` exposes the same kickoff dimensions under `kickoff_state` alongside runtime, task graph, and recovery summaries.
+
+### Leader health and recovery
+
+`GET /api/projects/{id}/leader/health` is the canonical operator/Tower view for a Leader's runtime truth. Important top-level fields include:
+
+- `leader_state`: normalized health state for the Leader, such as healthy, unverified, blocked, or missing.
+- `runtime_state`: provider-neutral runtime state; product layers branch on this, not raw terminal text.
+- `delivery_state`: provider-neutral kickoff delivery state.
+- `blocker_reason`: stable blocker reason such as `pane_missing`, `runtime_trust_required`, `runtime_permission_required`, or `prompt_not_submitted`.
+- `recovery_recommendation`: concise safe next action for tooling.
+- `operator_guidance`: user-facing summary with severity, recommended action, command, and details.
+- `provider_diagnostics`: redacted nested provider details for debugging only; orchestration must not branch on provider-specific prompt strings.
+
+`POST /api/projects/{id}/leader/recover` plans or applies inspect-first recovery. Use dry-run before mutation. A typical operator flow is:
+
+```bash
+atc leader health --project-id <project-id> --summary
+atc leader recover --project-id <project-id> --dry-run
+```
+
+Recovery apply policies must remain explicit; pressing Enter or resending a persisted kickoff is not success until health/kickoff verification changes.
 
 ## Tasks / Task Graphs
 
@@ -71,6 +95,16 @@ Task graph responses keep `status` as a legacy product task-state field, but als
 `GET /api/tower/progress` keeps the legacy `todo`/`in_progress`/`done` task counters and adds separate `task_states`, `runtime_states`, `delivery_states`, `blocked`, and `dispatch_unverified` summaries. The progress endpoint therefore reports product progress and runtime truth as separate dimensions instead of collapsing assignment intent into "working".
 
 A task in `assigned` state is ownership intent only. UI/API consumers must not treat it as active Ace work unless `delivery_state`/`runtime_state` provide that evidence.
+
+First-class CLI helpers are thin wrappers over these REST contracts and are preferred for managed agents:
+
+```bash
+atc tasks create --project-id <project-id> --title "..." --description "..."
+atc tasks assign --project-id <project-id> --task-id <task-id>
+atc leader bootstrap-tasks --project-id <project-id> --goal "..." --task "..."
+```
+
+These commands return stable task/session identifiers plus task/runtime/delivery truth so Leaders do not need to inspect OpenAPI before creating or assigning normal task graphs.
 
 ## Aces
 

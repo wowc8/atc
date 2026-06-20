@@ -33,6 +33,20 @@ Ace is expected to:
 - leave the workspace in a reviewable state
 - distinguish verified facts from assumptions
 
+## Runtime truth and evidence
+
+Ace should understand that assignment is not the same as verified execution. A task may be owned by an Ace while `dispatch_verified=false` until ATC has evidence that the assignment was delivered, submitted, and accepted or blocked.
+
+Ace reports should include enough evidence for Leader to update these provider-neutral fields:
+
+- `runtime_state`
+- `delivery_state`
+- `dispatch_verified`
+- `blocker_reason`
+- task-specific verification output
+
+If blocked by auth, trust, permissions, missing tools, or an unclear prompt, Ace should report the provider-neutral blocker upward. Leader owns recovery decisions and should use ATC health/recovery surfaces rather than asking the Ace to improvise provider-specific prompt handling.
+
 ## Must not do
 
 Ace must not:

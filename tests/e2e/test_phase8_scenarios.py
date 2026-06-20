@@ -40,6 +40,34 @@ from atc.runtime.tracing import (
 from atc.session.reconcile import reconcile_runtime_state
 from atc.state import db as db_ops
 
+
+async def _fake_create_ace_session(
+    conn,
+    project_id: str,
+    ace_name: str,
+    *,
+    task_id: str | None = None,
+    **_: object,
+) -> str:
+    """Create a DB Ace session without launching a provider process.
+
+    Scenario tests validate orchestration/runtime truth contracts; spawning real tmux
+    provider panes would make the suite depend on local descriptor/process limits.
+    """
+
+    session = await db_ops.create_session(
+        conn,
+        project_id,
+        "ace",
+        ace_name,
+        task_id=task_id,
+        status="waiting",
+        provider="codex",
+    )
+    await conn.commit()
+    return session.id
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -503,6 +531,10 @@ def test_tower_driven_project_flow_manages_leader_and_ace(client: TestClient) ->
                 trace_id="phase8-confirmed",
             ),
         ),
+        patch(
+            "atc.leader.orchestrator.create_ace",
+            new=_fake_create_ace_session,
+        ),
     ):
         start = client.post(
             f"/api/projects/{project['id']}/leader/start",
@@ -565,6 +597,10 @@ def test_blocked_ace_instruction_preserves_assignment_for_operator_resolution(
                 reason_code="trust_required",
                 trace_id="phase8-blocked",
             ),
+        ),
+        patch(
+            "atc.leader.orchestrator.create_ace",
+            new=_fake_create_ace_session,
         ),
     ):
         start = client.post(
