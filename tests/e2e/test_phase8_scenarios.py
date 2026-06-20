@@ -8,12 +8,15 @@ only isolated unit contracts while regressing the operator workflow.
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
+from atc.agents.deploy import ManagerDeploySpec, deploy_manager_files
 from atc.api.app import create_app
 from atc.config import Settings
 from atc.providers.claude_code.runtime import ClaudeCodeRuntime
@@ -236,6 +239,119 @@ def test_permission_prompt_intercept_blocks_before_pty_write() -> None:
     event = metadata["delivery_trace_events"][-1]  # type: ignore[index]
     assert event["stage"] == DeliveryStage.BLOCKED.value
     assert event["reason_code"] == DeliveryReasonCode.PERMISSION_REQUIRED.value
+
+
+def test_field_failure_session_exists_without_goal_acceptance_is_not_healthy(
+    client: TestClient,
+) -> None:
+    """Session rows alone must not prove Leader accepted the kickoff goal."""
+
+    project = client.post(
+        "/api/projects",
+        json={"name": "phase8 original field failure", "agent_provider": "codex"},
+    ).json()
+    start = client.post(
+        f"/api/projects/{project['id']}/leader/start",
+        json={"goal": "Exercise the original blocked-startup failure", "auto_kickoff": False},
+    )
+
+    assert start.status_code == 200
+    assert start.json()["session_id"]
+    assert start.json()["kickoff_payload_persisted"] is True
+    assert start.json()["kickoff_verified"] is False
+
+    health = client.get(f"/api/projects/{project['id']}/leader/health")
+    assert health.status_code == 200
+    body = health.json()
+    assert body["kickoff_state"]["goal_acceptance_state"] != "leader_reported_accepted"
+    assert body["kickoff_state"]["kickoff_verified"] is False
+    assert body["operator_guidance"]["severity"] in {"warning", "blocked"}
+
+
+def test_leader_acceptance_requires_active_report_and_task_graph(
+    client: TestClient,
+) -> None:
+    """Goal acceptance becomes healthy only after canonical report + task graph evidence."""
+
+    project = client.post(
+        "/api/projects",
+        json={"name": "phase8 accepted leader", "agent_provider": "codex"},
+    ).json()
+    start = client.post(
+        f"/api/projects/{project['id']}/leader/start",
+        json={"goal": "Create useful task graph evidence", "auto_kickoff": False},
+    )
+    assert start.status_code == 200
+
+    report = client.post(
+        f"/api/projects/{project['id']}/leader/report-active",
+        json={"goal_accepted": True, "message": "Accepted phase 8 scenario goal."},
+    )
+    assert report.status_code == 200
+    assert report.json()["goal_accepted"] is True
+
+    task = client.post(
+        f"/api/projects/{project['id']}/task-graphs",
+        json={"title": "first actionable task graph", "description": "proof of work"},
+    )
+    assert task.status_code == 201
+
+    health = client.get(f"/api/projects/{project['id']}/leader/health")
+    assert health.status_code == 200
+    kickoff = health.json()["kickoff_state"]
+    assert kickoff["leader_reported_active"] is True
+    assert kickoff["goal_accepted"] is True
+    assert kickoff["first_actionable_step_observed_at"]
+    assert kickoff["task_graph_created_at"]
+    assert kickoff["kickoff_verified"] is True
+
+
+def test_local_api_capability_and_bootstrap_helpers_are_scenario_locked(
+    tmp_path: Path,
+    client: TestClient,
+) -> None:
+    """Managed agents get local API capability and task bootstrap stays first-class."""
+
+    result = deploy_manager_files(
+        ManagerDeploySpec(
+            leader_id="phase8-leader",
+            project_name="Phase 8",
+            goal="Lock scenario coverage",
+            project_id="phase8-project",
+            model="gpt-5.5",
+            api_base_url="http://127.0.0.1:8420",
+        ),
+        staging_root=tmp_path,
+    )
+    capability = json.loads(result.local_api_capability_path.read_text())
+    assert capability["external_network_allowed"] is False
+    assert capability["host_allowlist"] == ["127.0.0.1", "localhost"]
+    assert "/openapi.json" in capability["path_prefixes"]
+    denied = subprocess.run(
+        [str(result.local_api_helper_path), "GET", "/not-atc"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert denied.returncode != 0
+    assert "path not allowed" in denied.stderr
+
+    project = client.post(
+        "/api/projects",
+        json={"name": "phase8 bootstrap helper", "agent_provider": "codex"},
+    ).json()
+    bootstrap = client.post(
+        f"/api/projects/{project['id']}/leader/decompose",
+        json={
+            "task_specs": [
+                {"title": "Create CLI", "description": "first-class helper"},
+                {"title": "Validate CLI", "description": "evidence"},
+            ]
+        },
+    )
+    assert bootstrap.status_code == 201
+    created = bootstrap.json()["task_graphs"]
+    assert [task["title"] for task in created] == ["Create CLI", "Validate CLI"]
 
 
 @pytest.mark.asyncio
