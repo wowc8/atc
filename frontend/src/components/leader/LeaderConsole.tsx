@@ -6,7 +6,7 @@ import StatusBadge from "../common/StatusBadge";
 import ConfirmPopover from "../common/ConfirmPopover";
 import GitHubPanel from "../dashboard/GitHubPanel";
 import BudgetPanel from "./BudgetPanel";
-import type { DeliveryStatusResponse, Leader, Project } from "../../types";
+import type { DeliveryStatusResponse, Leader, LeaderRuntimeHealth, Project } from "../../types";
 import "./LeaderConsole.css";
 
 interface LeaderConsoleProps {
@@ -34,6 +34,8 @@ export default function LeaderConsole({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatusResponse | null>(null);
+  const [health, setHealth] = useState<LeaderRuntimeHealth | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("github");
   const autoStarted = useRef(false);
   const userStopped = useRef(false);
@@ -70,6 +72,48 @@ export default function LeaderConsole({
       void handleStart();
     }
   }, [isTerminalProvider, isIdle, loading, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!leader?.session_id && !isRunning) {
+      setHealth(null);
+      return;
+    }
+    void refreshHealth();
+    const timer = window.setInterval(() => {
+      void refreshHealth();
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [leader?.session_id, isRunning, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function refreshHealth() {
+    setHealthLoading(true);
+    try {
+      const res = await api.get<LeaderRuntimeHealth>(`/projects/${projectId}/leader/health`);
+      setHealth(res);
+    } catch (err) {
+      console.error("Failed to load leader health:", err);
+    } finally {
+      setHealthLoading(false);
+    }
+  }
+
+  async function handleRecoveryDryRun() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.post<DeliveryStatusResponse>(
+        `/projects/${projectId}/leader/recover`,
+        { dry_run: true, policy: "inspect_first" },
+      );
+      setDeliveryStatus(res);
+      await refreshHealth();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to inspect recovery";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleStart() {
     userStopped.current = false;
@@ -178,6 +222,42 @@ export default function LeaderConsole({
           Delivery state: <strong>{deliveryStatus.delivery_state}</strong>
           {deliveryStatus.message ? ` — ${deliveryStatus.message}` : ""}
           {deliveryStatus.recovery ? ` Recovery: ${deliveryStatus.recovery}` : ""}
+        </div>
+      )}
+
+      {health && (
+        <div
+          className={`leader-console__health leader-console__health--${health.operator_guidance.severity}`}
+          data-testid="leader-health-guidance"
+        >
+          <div className="leader-console__health-topline">
+            <strong>Leader health:</strong> {health.operator_guidance.summary}
+          </div>
+          <div className="leader-console__health-grid">
+            <span>Runtime: {health.runtime_state}</span>
+            <span>Delivery: {health.delivery_state}</span>
+            <span>State: {health.kickoff_state.kickoff_state ?? "unknown"}</span>
+            <span>Tasks: {health.task_graph_state.total ?? 0}</span>
+          </div>
+          {health.current_blocker && (
+            <div className="leader-console__health-blocker">Blocker: {health.current_blocker}</div>
+          )}
+          {health.operator_guidance.recommended_action !== "none" && (
+            <div className="leader-console__health-action">
+              Recommended: {health.operator_guidance.recommended_action}
+              {health.operator_guidance.command ? ` — ${health.operator_guidance.command}` : ""}
+            </div>
+          )}
+          <div className="leader-console__health-controls">
+            <button className="btn btn-secondary btn-sm" onClick={refreshHealth} disabled={healthLoading}>
+              {healthLoading ? "Refreshing..." : "Refresh health"}
+            </button>
+            {health.operator_guidance.severity === "blocked" && (
+              <button className="btn btn-secondary btn-sm" onClick={handleRecoveryDryRun} disabled={loading}>
+                Inspect recovery
+              </button>
+            )}
+          </div>
         </div>
       )}
 

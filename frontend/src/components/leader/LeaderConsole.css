@@ -40,6 +40,47 @@
   flex-shrink: 0;
 }
 
+.leader-console__health {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  background: var(--color-surface-muted, rgba(255, 255, 255, 0.03));
+}
+
+.leader-console__health--warning {
+  border-color: var(--color-status-amber);
+}
+
+.leader-console__health--blocked {
+  border-color: var(--color-danger, #f85149);
+}
+
+.leader-console__health-topline {
+  color: var(--color-text);
+}
+
+.leader-console__health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1) var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.leader-console__health-blocker,
+.leader-console__health-action {
+  color: var(--color-text-secondary);
+}
+
+.leader-console__health-controls {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .leader-console__goal {
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
