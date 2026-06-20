@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { AppProvider, useAppContext } from "../AppContext";
+import { AppProvider, initialState, reducer, useAppContext } from "../AppContext";
 
 // Mock WebSocket
 class MockWebSocket {
@@ -100,6 +100,34 @@ describe("AppContext", () => {
       screen.getByTestId("set-projects").click();
     });
     expect(screen.getByTestId("project-count")).toHaveTextContent("1");
+  });
+
+  it("removes destroyed sessions from state immediately", () => {
+    const next = reducer(
+      {
+        ...initialState,
+        sessions: [
+          {
+            id: "ace-1",
+            project_id: "proj-1",
+            session_type: "ace",
+            name: "alpha",
+            status: "working",
+            task_id: null,
+            host: null,
+            alternate_on: false,
+            auto_accept: false,
+            tmux_session: null,
+            tmux_pane: null,
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        ],
+      },
+      { type: "REMOVE_SESSION", payload: "ace-1" },
+    );
+
+    expect(next.sessions).toEqual([]);
   });
 
   it("throws when used outside provider", () => {

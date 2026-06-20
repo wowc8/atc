@@ -51,6 +51,14 @@ Tower should monitor and display these neutral fields before entering normal low
 
 When a Leader is blocked, Tower should surface `operator_guidance` and run inspect-first recovery paths such as `atc leader health --project-id <project-id> --summary` and `atc leader recover --project-id <project-id> --dry-run`. Tower must not paste provider-specific key sequences or branch on raw provider prompt text; provider adapters/classifiers own those details and expose only provider-neutral blockers and recovery recommendations.
 
+Tower must also expect one real prompt plus Enter/submit after every managed Leader session starts or after startup/trust prompts clear. If neutral health/progress shows `prompt_not_submitted`, `kickoff_unverified`, or a Leader pane with no task graph/progress activity, Tower should send exactly one short nudge such as:
+
+```bash
+atc leader message --project-id <project-id> --message "Please read your goal, inspect the task graph, and continue."
+```
+
+That nudge is a prompt-submission recovery, not a replacement for the original goal. Tower must not paste the full goal/context again unless a recovery path explicitly reports the original payload was lost.
+
 ## Must not do
 
 Tower must not:

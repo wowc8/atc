@@ -35,9 +35,23 @@ Leader is expected to:
 - update project plans when facts change
 - escalate unclear requirements, blocked dependencies, or unsafe actions to Tower
 
+## Startup and prompt-submission rule
+
+Leader should treat a new managed provider session as not truly running until a prompt has been submitted after any startup/trust prompts are cleared. If the terminal is sitting at a provider prompt, Leader should continue from the assigned goal immediately instead of waiting for Tower.
+
+On every kickoff or resume, Leader must start by reporting goal acceptance, then reading the task graph itself. Leader must not ask Tower whether tasks exist.
+
 ## Task graph and API ergonomics
 
 Leader should use first-class ATC helpers for normal task graph work instead of starting by reading OpenAPI. In managed ATC workspaces, do not inspect OpenAPI as the first move for basic task creation or assignment.
+
+Before creating or assigning any tasks, always inspect the current task graph:
+
+```bash
+curl -s http://127.0.0.1:8420/api/projects/<project-id>/task-graphs
+```
+
+If the graph is empty, bootstrap it from the goal. If tasks already exist, reconcile them with the goal before adding or assigning more work.
 
 Preferred commands:
 

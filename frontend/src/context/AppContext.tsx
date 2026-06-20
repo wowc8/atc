@@ -33,7 +33,7 @@ const isTauri =
 // ---------------------------------------------------------------------------
 // Initial state
 // ---------------------------------------------------------------------------
-const initialState: AppState = {
+export const initialState: AppState = {
   projects: [],
   leaders: {},
   sessions: [],
@@ -101,7 +101,7 @@ type Action =
   | { type: "REMOVE_SESSION"; payload: string }
   | { type: "SET_PROJECT_TASK_GRAPHS"; payload: { projectId: string; taskGraphs: TaskGraph[] } };
 
-function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "SET_STATE":
       return { ...state, ...action.payload };
@@ -338,11 +338,17 @@ export function AppProvider({ children }: AppProviderProps) {
     if (msg.channel === "state") {
       const data = msg.data as Record<string, unknown>;
       // Handle individual session status updates from the backend
-      if (data.sessions_updated && typeof data.session_id === "string" && typeof data.new_status === "string") {
+      if (data.session_destroyed && typeof data.session_id === "string") {
+        dispatch({ type: "REMOVE_SESSION", payload: data.session_id });
+        void fetchAll();
+      } else if (data.sessions_updated && typeof data.session_id === "string" && typeof data.new_status === "string") {
         dispatch({
           type: "UPDATE_SESSION_STATUS",
           payload: { session_id: data.session_id, status: data.new_status },
         });
+        if (["disconnected", "error"].includes(data.new_status)) {
+          void fetchAll();
+        }
       } else if (data.project_created && data.project) {
         dispatch({ type: "ADD_PROJECT", payload: data.project as Project });
       } else if (data.project_updated && data.project) {
@@ -438,7 +444,7 @@ export function AppProvider({ children }: AppProviderProps) {
         dispatch({ type: "RESOLVE_FAILURE_LOG", payload: data.resolved });
       }
     }
-  }, []);
+  }, [fetchAll]);
 
   useWebSocket({
     channels: ["state", "failure_logs", "tower", "heartbeat"],
@@ -449,6 +455,14 @@ export function AppProvider({ children }: AppProviderProps) {
     if (backendReady) {
       void fetchAll();
     }
+  }, [fetchAll, backendReady]);
+
+  useEffect(() => {
+    if (!backendReady) return;
+    const refresh = window.setInterval(() => {
+      void fetchAll();
+    }, 15000);
+    return () => window.clearInterval(refresh);
   }, [fetchAll, backendReady]);
 
   return (
