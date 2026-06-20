@@ -73,11 +73,13 @@ class DecomposeResponse(BaseModel):
 
 class SpawnAcesResponse(BaseModel):
     spawned: list[dict[str, Any]]
+    startup_expectation: dict[str, Any] = Field(default_factory=dict)
 
 
 class AssignTaskResponse(BaseModel):
     assigned: dict[str, Any] | None = None
     error: str | None = None
+    startup_expectation: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProgressResponse(BaseModel):
@@ -109,6 +111,22 @@ def _get_event_bus(request: Request) -> Any:
 def _transition_error_detail(exc: LifecycleTransitionError) -> dict[str, object]:
     """Return normalized lifecycle-transition error detail for API callers."""
     return exc.to_detail()
+
+
+def _ace_startup_expectation(project_id: str, ace_id: str = "<ace-id>") -> dict[str, object]:
+    return {
+        "folder_trust_prompt_expected": True,
+        "must_check_health_before_instruction_nudge": True,
+        "health_command": f"atc ace health --project-id {project_id} --ace-id {ace_id}",
+        "recover_command": (
+            f"atc ace recover --project-id {project_id} --ace-id {ace_id} --dry-run"
+        ),
+        "hard_rule": (
+            "Leader must expect every newly spawned managed Ace may stop at a folder "
+            "trust/startup prompt. Check Ace health and clear classified startup blockers "
+            "before resending instructions or treating acknowledgement as task acceptance."
+        ),
+    }
 
 
 async def _broadcast_tower_progress(request: Request) -> None:
@@ -277,9 +295,11 @@ async def spawn_aces(
                 "task_title": a.task_title,
                 "assignment_id": a.assignment_id,
                 "status": a.status,
+                "startup_expectation": _ace_startup_expectation(project_id, a.ace_session_id),
             }
             for a in assignments
         ],
+        startup_expectation=_ace_startup_expectation(project_id),
     )
 
 
@@ -301,7 +321,10 @@ async def assign_task(
     await _broadcast_tower_progress(request)
 
     if assignment is None:
-        return AssignTaskResponse(error="assignment_not_created")
+        return AssignTaskResponse(
+            error="assignment_not_created",
+            startup_expectation=_ace_startup_expectation(project_id),
+        )
     return AssignTaskResponse(
         assigned={
             "ace_session_id": assignment.ace_session_id,
@@ -309,7 +332,9 @@ async def assign_task(
             "task_title": assignment.task_title,
             "assignment_id": assignment.assignment_id,
             "status": assignment.status,
-        }
+            "startup_expectation": _ace_startup_expectation(project_id, assignment.ace_session_id),
+        },
+        startup_expectation=_ace_startup_expectation(project_id, assignment.ace_session_id),
     )
 
 
@@ -332,13 +357,19 @@ async def instruct_ace(
     except LifecycleTransitionError as exc:
         raise HTTPException(status_code=409, detail=_transition_error_detail(exc)) from None
 
-    return delivery_response(
+    response = delivery_response(
         result,
         fallback_state="submitted",
         message="Ace instruction submitted; provider acknowledgement is not verified",
         project_id=project_id,
-        recovery="inspect Ace runtime/session status and task assignment state for confirmation",
+        recovery=(
+            "check Ace health for expected startup/folder trust blockers before resending "
+            "instructions; then inspect task assignment acceptance state"
+        ),
     )
+    ace_id = str(response.get("session_id") or "<ace-id>")
+    response["startup_expectation"] = _ace_startup_expectation(project_id, ace_id)
+    return response
 
 
 @router.post("/projects/{project_id}/leader/task-done")

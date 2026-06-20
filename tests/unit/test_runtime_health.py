@@ -247,6 +247,50 @@ async def test_leader_health_unverified_startup_checks_trust_before_progress_nud
 
 
 @pytest.mark.asyncio
+async def test_ace_health_treats_startup_trust_as_expected_pre_instruction_branch(db) -> None:
+    project = await create_project(db, "ace-trust-startup")
+    task = await create_task_graph(db, project.id, "Task one")
+    ace = await create_session(db, project.id, "ace", "ace-one", status="waiting", task_id=task.id)
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%19", "atc", ace.id),
+    )
+    assignment, _ = await assign_task(db, task.id, ace.id, f"ace:{task.id}")
+    await update_task_assignment_dispatch(
+        db,
+        assignment.assignment_id,
+        dispatch_delivery_state="submitted",
+        dispatch_verified=False,
+        blocker_reason="runtime_trust_required",
+    )
+
+    health = await ace_health(
+        db,
+        project.id,
+        ace.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=ace.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.TRUST,
+                summary="Do you trust this directory?",
+            )
+        ),
+    )
+
+    data = health.as_dict()
+    assert data["runtime_state"] == "blocked"
+    assert data["current_blocker"] == "runtime_trust_required"
+    assert data["operator_guidance"]["recommended_action"] == (
+        "resolve_ace_startup_trust_prompt_before_assignment_nudge"
+    )
+    assert "expected Ace-start branch" in data["operator_guidance"]["details"]
+    assert "Do not resend task instructions" in data["operator_guidance"]["details"]
+
+
+@pytest.mark.asyncio
 async def test_ace_health_reports_blocked_dispatch_separately(db) -> None:
     project = await create_project(db, "ace-health-proj")
     task = await create_task_graph(db, project.id, "Task one")

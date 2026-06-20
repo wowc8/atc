@@ -384,6 +384,16 @@ class TestDeployManagerFiles:
         assert '"instruction": "Detailed work instructions for the Ace"' in content
         assert "'\n     '\"instruction" not in content
 
+    def test_leader_prompt_makes_ace_trust_startup_a_hard_expectation(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "Hard expectation: every newly spawned managed Ace" in content
+        assert "atc ace health --api" in content
+        assert "atc ace recover --api" in content
+        assert "resending instructions" in content
+
     def test_claude_md_includes_constraints(
         self, manager_spec: ManagerDeploySpec, staging_root: Path
     ) -> None:

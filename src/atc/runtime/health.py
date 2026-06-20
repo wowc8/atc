@@ -290,6 +290,22 @@ def _operator_guidance_for(
 
     if current_blocker:
         if current_blocker == BlockerReason.RUNTIME_TRUST_REQUIRED.value:
+            if role == "ace":
+                return {
+                    "severity": "blocked",
+                    "summary": "Ace startup is blocked on a managed-workspace trust prompt.",
+                    "recommended_action": (
+                        "resolve_ace_startup_trust_prompt_before_assignment_nudge"
+                    ),
+                    "command": command,
+                    "details": (
+                        "Treat the folder trust prompt as an expected Ace-start branch. "
+                        "Leader must run dry-run recovery first; apply only when provider "
+                        "diagnostics mark the current managed-workspace trust prompt safe "
+                        "to resolve. Do not resend task instructions or assume assignment "
+                        "acceptance until this startup prompt is cleared."
+                    ),
+                }
             return {
                 "severity": "blocked",
                 "summary": "Leader startup is blocked on a managed-workspace trust prompt.",
@@ -361,8 +377,11 @@ def _operator_guidance_for(
             "recommended_action": "wait_for_ace_report_active_or_inspect_runtime",
             "command": health_command,
             "details": (
-                "Leader should not treat this Ace as working until assignment_accepted "
-                "or accepted_active evidence is visible."
+                "Hard expectation: a newly spawned Ace may still be on a folder "
+                "trust/startup prompt. Leader should check Ace health and resolve "
+                "classified startup blockers before resending instructions, and must "
+                "not treat the Ace as working until assignment_accepted or "
+                "accepted_active evidence is visible."
             ),
         }
     if int(dispatch.get("blocked") or 0) > 0 or int(dispatch.get("unverified") or 0) > 0:
