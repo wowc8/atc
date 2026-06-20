@@ -502,23 +502,36 @@ def _build_manager_instructions_md(spec: ManagerDeploySpec) -> str:
         "",
         "#### Step 2 — Decompose the goal into tasks",
         "",
-        "Send a POST with `task_specs` array. Each spec needs `title` and `description`:",
+        "Use the first-class ATC task CLI instead of inspecting OpenAPI:",
         "```",
-        f"curl -s -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/decompose \\",
-        '  -H "Content-Type: application/json" \\',
-        '  -d \'{"task_specs": [',
-        '    {"title": "Task 1 title", "description": "What to build and acceptance criteria"},',
-        '    {"title": "Task 2 title", "description": "..."}',
-        "  ]}'",
+        f"atc leader bootstrap-tasks --api {spec.api_base_url} --project-id {spec.project_id} \\",
+        '  --goal "Tower goal" \\',
+        '  --task "Task 1 title" \\',
+        '  --task "Task 2 title"',
         "```",
         "The response contains a `task_graphs` array with `id` fields — save these IDs.",
+        (
+            "For one-off additions, use `atc tasks create --project-id ... "
+            "--title ... --description ...`."
+        ),
         "",
         "#### Step 3 — Spawn Aces for ready tasks",
         "",
+        "Assign one ready task at a time:",
+        "```",
+        (
+            f"atc tasks assign --api {spec.api_base_url} "
+            f"--project-id {spec.project_id} --task-id <task_graph_id>"
+        ),
+        "```",
+        "Or spawn Aces for all ready tasks when concurrency is appropriate:",
         "```",
         f"curl -s -X POST {spec.api_base_url}/api/projects/{spec.project_id}/leader/spawn-aces",
         "```",
-        "Returns a `spawned` array with `ace_session_id` and `task_graph_id` for each Ace.",
+        (
+            "Returns `ace_session_id`, `task_graph_id`, `assignment_id`, "
+            "and `status` for each assignment."
+        ),
         "",
         "#### Step 4 — Send work instructions to each Ace",
         "",

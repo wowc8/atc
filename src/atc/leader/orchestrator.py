@@ -148,6 +148,67 @@ class LeaderOrchestrator:
 
         return new_assignments
 
+    async def spawn_ace_for_task(self, task_graph_id: str) -> AceAssignment | None:
+        """Spawn or reuse an Ace assignment for one ready task graph entry."""
+        task_graphs = await db_ops.list_task_graphs(
+            self.conn,
+            project_id=self.project_id,
+        )
+        task_by_id = {tg.id: tg for tg in task_graphs}
+        task = task_by_id.get(task_graph_id)
+        if task is None:
+            raise ValueError(f"TaskGraph {task_graph_id} not found")
+
+        active_aces_by_task = await self._active_ace_sessions_by_task()
+        if task_graph_id in active_aces_by_task:
+            existing = self.assignments.get(task_graph_id)
+            if existing is not None:
+                return existing
+            active_assignment = next(
+                (
+                    assignment
+                    for assignment in await db_ops.list_task_assignments(
+                        self.conn,
+                        task_graph_id=task_graph_id,
+                    )
+                    if assignment.status in {"assigned", "working"}
+                    and assignment.ace_session_id == active_aces_by_task[task_graph_id]
+                ),
+                None,
+            )
+            if active_assignment is not None:
+                restored = AceAssignment(
+                    ace_session_id=active_assignment.ace_session_id,
+                    task_graph_id=task_graph_id,
+                    task_title=task.title,
+                    assignment_id=active_assignment.assignment_id,
+                    status=active_assignment.status,
+                )
+                self.assignments[task_graph_id] = restored
+                return restored
+            raise ValueError(
+                f"Task {task_graph_id} already has an active Ace session "
+                f"{active_aces_by_task[task_graph_id]}"
+            )
+
+        ready_ids = {tg.id for tg in get_ready_tasks(task_graphs)}
+        if task_graph_id not in ready_ids:
+            raise ValueError(f"Task {task_graph_id} is not ready for assignment")
+
+        global _GLOBAL_ACTIVE_ACES
+        lock = await _get_global_lock()
+        reserved = False
+        async with lock:
+            if self._governor.available_ace_slots(_GLOBAL_ACTIVE_ACES) <= 0:
+                raise ValueError("No Ace slots available")
+            _GLOBAL_ACTIVE_ACES += 1
+            reserved = True
+
+        assignment = await self._spawn_ace_for_task(task.id, task.title, task.description)
+        if assignment is None and reserved:
+            _GLOBAL_ACTIVE_ACES = max(0, _GLOBAL_ACTIVE_ACES - 1)
+        return assignment
+
     async def _active_ace_sessions_by_task(self) -> dict[str, str]:
         """Return active Ace sessions keyed by task id to preserve 1:1 pairing."""
         terminal_statuses = {"completed", "cancelled", "error", "disconnected"}
