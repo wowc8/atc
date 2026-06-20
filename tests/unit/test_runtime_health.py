@@ -8,8 +8,13 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
+from atc.api.routers.aces import (
+    AceActiveReportRequest,
+    get_ace_health,
+    recover_ace,
+    report_ace_active,
+)
 from atc.api.routers.aces import RecoveryRequest as AceRecoveryRequest
-from atc.api.routers.aces import get_ace_health, recover_ace
 from atc.api.routers.projects import RecoveryRequest as LeaderRecoveryRequest
 from atc.api.routers.projects import get_leader_health, recover_leader
 from atc.runtime.health import (
@@ -183,6 +188,103 @@ async def test_ace_health_reports_blocked_dispatch_separately(db) -> None:
     assert data["ace_dispatch"]["dispatch_delivery_state"] == "blocked"
     assert data["ace_dispatch"]["dispatch_verified"] is False
     assert data["current_blocker"] == "unknown_prompt_blocker"
+
+
+@pytest.mark.asyncio
+async def test_ace_report_active_records_assignment_acceptance_and_health(db) -> None:
+    project = await create_project(db, "ace-report-active-proj")
+    task = await create_task_graph(db, project.id, "Task one")
+    ace = await create_session(db, project.id, "ace", "ace-one", status="waiting", task_id=task.id)
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%10", "atc", ace.id),
+    )
+    assignment, _ = await assign_task(db, task.id, ace.id, f"ace:{task.id}")
+    await update_task_assignment_dispatch(
+        db,
+        assignment.assignment_id,
+        dispatch_delivery_state="accepted_active",
+        dispatch_verified=True,
+        last_activity=True,
+    )
+
+    result = await report_ace_active(
+        project.id,
+        ace.id,
+        AceActiveReportRequest(
+            assignment_id=assignment.assignment_id,
+            message="accepted and working",
+        ),
+        _request(db),
+    )
+
+    assert result["assignment_accepted"] is True
+    assert result["ace_reported_active"] is True
+    assert result["assignment_acceptance_state"] == "assignment_accepted"
+    updated_session = await get_session(db, ace.id)
+    assert updated_session is not None
+    assert updated_session.status == "working"
+
+    health = await ace_health(
+        db,
+        project.id,
+        ace.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=ace.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.BUSY,
+                summary="working",
+            )
+        ),
+    )
+    dispatch = health.as_dict()["ace_dispatch"]
+    assert dispatch["assignment_acceptance_state"] == "accepted_active"
+    assert dispatch["assignment_accepted"] is True
+    assert dispatch["ace_reported_active"] is True
+    assert dispatch["acceptance_message"] == "accepted and working"
+    assert health.operator_guidance["severity"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_ace_health_warns_when_delivery_active_but_ace_has_not_reported(db) -> None:
+    project = await create_project(db, "ace-waiting-report-proj")
+    task = await create_task_graph(db, project.id, "Task one")
+    ace = await create_session(db, project.id, "ace", "ace-one", status="working", task_id=task.id)
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%11", "atc", ace.id),
+    )
+    assignment, _ = await assign_task(db, task.id, ace.id, f"ace:{task.id}")
+    await update_task_assignment_dispatch(
+        db,
+        assignment.assignment_id,
+        dispatch_delivery_state="accepted_active",
+        dispatch_verified=True,
+        last_activity=True,
+    )
+
+    health = await ace_health(
+        db,
+        project.id,
+        ace.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=ace.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.BUSY,
+                summary="working",
+            )
+        ),
+    )
+
+    assert health.ace_dispatch["assignment_acceptance_state"] == "awaiting_ace_active_report"
+    assert health.operator_guidance["severity"] == "warning"
+    assert health.operator_guidance["recommended_action"] == (
+        "wait_for_ace_report_active_or_inspect_runtime"
+    )
 
 
 @pytest.mark.asyncio

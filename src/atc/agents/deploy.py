@@ -456,6 +456,8 @@ def _build_ace_instructions_md(spec: AceDeploySpec) -> str:
             "Use the `atc` CLI to report status back to the ATC tower:",
             "",
             "```bash",
+            f'atc ace report-active --project-id "{spec.project_id or '<project-id>'}" '
+            f'--ace-id "{spec.session_id}" --message "accepted task"',
             f'atc ace status "{spec.session_id}" working   # when actively working',
             f'atc ace status "{spec.session_id}" waiting   # when idle/waiting',
             f'atc ace done "{spec.session_id}"              # when task is complete',

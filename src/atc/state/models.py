@@ -240,6 +240,10 @@ class TaskAssignment:
     status: str = "assigned"  # assigned|working|done|failed
     dispatch_delivery_state: str = "queued_unverified"
     dispatch_verified: bool = False
+    ace_reported_active: bool = False
+    assignment_accepted: bool = False
+    assignment_accepted_at: str | None = None
+    acceptance_message: str | None = None
     last_activity_at: str | None = None
     assigned_task_id: str | None = None
     blocker_reason: str | None = None

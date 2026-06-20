@@ -111,10 +111,35 @@ These commands return stable task/session identifiers plus task/runtime/delivery
 ```
 GET    /api/projects/{id}/aces                → list ace sessions
 POST   /api/projects/{id}/aces                → spawn new ace
+GET    /api/projects/{id}/aces/{ace_id}/health → provider-neutral Ace runtime/assignment health
+POST   /api/projects/{id}/aces/{ace_id}/report-active → Ace reports assignment acceptance
+POST   /api/projects/{id}/aces/{ace_id}/recover → inspect-first Ace recovery dry-run/apply
 POST   /api/aces/{id}/start                   → start session
 POST   /api/aces/{id}/stop                    → stop session
 POST   /api/aces/{id}/message                 → send message to ace
 DELETE /api/aces/{id}                         → delete session
+```
+
+Leader → Ace handoff uses a separate assignment-acceptance truth contract so Leaders do not confuse session/assignment existence with active Ace work. `ace_dispatch.assignment_acceptance_state` distinguishes `queued_unverified`, `session_created`, `payload_written`, `submitted_pending_acceptance`, `awaiting_ace_active_report`, `assignment_accepted`, `accepted_active`, `blocked`, and `failed`.
+
+`POST /api/projects/{id}/aces/{ace_id}/report-active` records Ace-side acceptance evidence:
+
+```json
+{
+  "assignment_id": "optional-assignment-id",
+  "assignment_accepted": true,
+  "message": "accepted and working"
+}
+```
+
+The response includes `ace_reported_active`, `assignment_accepted`, `assignment_accepted_at`, `acceptance_message`, and the resulting `ace_dispatch` block. Leaders should treat `dispatch_verified=true` plus `assignment_accepted=true` as stronger evidence than delivery alone; delivery alone may remain `awaiting_ace_active_report`.
+
+CLI helpers:
+
+```bash
+atc ace health --project-id <project-id> --ace-id <ace-id>
+atc ace report-active --project-id <project-id> --ace-id <ace-id> --message "accepted task"
+atc ace recover --project-id <project-id> --ace-id <ace-id> --dry-run
 ```
 
 ## Tower

@@ -42,8 +42,19 @@ Ace reports should include enough evidence for Leader to update these provider-n
 - `runtime_state`
 - `delivery_state`
 - `dispatch_verified`
+- `assignment_acceptance_state`
+- `ace_reported_active`
+- `assignment_accepted`
 - `blocker_reason`
 - task-specific verification output
+
+At the start of an assignment, Ace should explicitly report acceptance with:
+
+```bash
+atc ace report-active --project-id <project-id> --ace-id <ace-id> --message "accepted task"
+```
+
+This creates Ace-side evidence that the assignment was accepted. Without `assignment_accepted=true`, Leader should treat delivered prompts as `awaiting_ace_active_report` rather than verified active work.
 
 If blocked by auth, trust, permissions, missing tools, or an unclear prompt, Ace should report the provider-neutral blocker upward. Leader owns recovery decisions and should use ATC health/recovery surfaces rather than asking the Ace to improvise provider-specific prompt handling.
 

@@ -33,6 +33,10 @@ def test_api_docs_cover_leader_health_recovery_and_task_cli_contracts() -> None:
             "atc tasks create --project-id",
             "atc tasks assign --project-id",
             "atc leader bootstrap-tasks --project-id",
+            "GET    /api/projects/{id}/aces/{ace_id}/health",
+            "POST   /api/projects/{id}/aces/{ace_id}/report-active",
+            "assignment_acceptance_state",
+            "atc ace report-active --project-id",
         ],
     )
 
@@ -61,6 +65,9 @@ def test_role_docs_encode_runtime_truth_and_provider_boundary() -> None:
             "report-active",
             "local ATC API helper",
             "do not inspect OpenAPI as the first move",
+            "assignment_acceptance_state",
+            "atc ace report-active --project-id",
+            "session row or assignment row exists",
         ],
     )
     assert_contains_all(
@@ -69,6 +76,10 @@ def test_role_docs_encode_runtime_truth_and_provider_boundary() -> None:
             "dispatch_verified",
             "runtime_state",
             "delivery_state",
+            "assignment_acceptance_state",
+            "ace_reported_active",
+            "assignment_accepted",
+            "awaiting_ace_active_report",
             "Leader owns recovery decisions",
             "provider-neutral blocker",
         ],

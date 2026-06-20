@@ -161,6 +161,44 @@ def _leader_kickoff_health_state(
     return "working"
 
 
+def _ace_assignment_acceptance_state(
+    *,
+    has_assignment: bool,
+    dispatch_delivery_state: str,
+    dispatch_verified: bool,
+    ace_reported_active: bool,
+    assignment_accepted: bool,
+    blocker: str | None,
+    runtime_state: str,
+) -> str:
+    """Return provider-neutral Leader→Ace assignment acceptance state."""
+
+    if blocker:
+        return "blocked"
+    if not has_assignment:
+        return "not_assigned"
+    if runtime_state in {RuntimeState.MISSING.value, RuntimeState.STALE.value}:
+        return "runtime_missing"
+    if runtime_state == RuntimeState.FAILED.value:
+        return "failed"
+    if assignment_accepted and ace_reported_active and dispatch_verified:
+        return "accepted_active"
+    if assignment_accepted and ace_reported_active:
+        return "assignment_accepted"
+    if dispatch_delivery_state == DeliveryState.ACCEPTED_ACTIVE.value or dispatch_verified:
+        return "awaiting_ace_active_report"
+    if dispatch_delivery_state in {
+        DeliveryState.SUBMITTED_PENDING_ACCEPTANCE.value,
+        DeliveryState.SUBMIT_SENT.value,
+    }:
+        return "submitted_pending_acceptance"
+    if dispatch_delivery_state == DeliveryState.PAYLOAD_WRITTEN.value:
+        return "payload_written"
+    if dispatch_delivery_state == DeliveryState.RUNTIME_CREATED.value:
+        return "session_created"
+    return "queued_unverified"
+
+
 def _provider_details_from_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
     details = diagnostics.get("details")
     return details if isinstance(details, dict) else {}
@@ -293,6 +331,22 @@ def _operator_guidance_for(
             "recommended_action": "bootstrap_or_wait_for_task_graph",
             "command": f"atc leader bootstrap-tasks --project-id {project_id}",
             "details": "A task graph is required before Ace dispatch truth can be verified.",
+        }
+    if role == "ace" and dispatch.get("assignment_acceptance_state") in {
+        "queued_unverified",
+        "payload_written",
+        "submitted_pending_acceptance",
+        "awaiting_ace_active_report",
+    }:
+        return {
+            "severity": "warning",
+            "summary": "Ace assignment is not yet accepted as active work.",
+            "recommended_action": "wait_for_ace_report_active_or_inspect_runtime",
+            "command": health_command,
+            "details": (
+                "Leader should not treat this Ace as working until assignment_accepted "
+                "or accepted_active evidence is visible."
+            ),
         }
     if int(dispatch.get("blocked") or 0) > 0 or int(dispatch.get("unverified") or 0) > 0:
         return {
@@ -557,14 +611,38 @@ async def ace_health(
     )
     assignment_blocker = active_assignment.blocker_reason if active_assignment else None
     current_blocker = blocker or assignment_blocker
+    dispatch_delivery_state = (
+        active_assignment.dispatch_delivery_state
+        if active_assignment
+        else DeliveryState.NOT_STARTED.value
+    )
+    assignment_acceptance_state = _ace_assignment_acceptance_state(
+        has_assignment=active_assignment is not None,
+        dispatch_delivery_state=dispatch_delivery_state,
+        dispatch_verified=active_assignment.dispatch_verified if active_assignment else False,
+        ace_reported_active=active_assignment.ace_reported_active if active_assignment else False,
+        assignment_accepted=active_assignment.assignment_accepted if active_assignment else False,
+        blocker=current_blocker,
+        runtime_state=runtime_state,
+    )
     ace_dispatch = {
         "assignment_id": active_assignment.assignment_id if active_assignment else None,
         "task_graph_id": active_assignment.task_graph_id if active_assignment else None,
         "assignment_status": active_assignment.status if active_assignment else None,
-        "dispatch_delivery_state": active_assignment.dispatch_delivery_state
-        if active_assignment
-        else DeliveryState.NOT_STARTED.value,
+        "dispatch_delivery_state": dispatch_delivery_state,
         "dispatch_verified": active_assignment.dispatch_verified if active_assignment else False,
+        "assignment_acceptance_state": assignment_acceptance_state,
+        "ace_reported_active": (
+            active_assignment.ace_reported_active if active_assignment else False
+        ),
+        "assignment_accepted": (
+            active_assignment.assignment_accepted if active_assignment else False
+        ),
+        "assignment_accepted_at": (
+            active_assignment.assignment_accepted_at if active_assignment else None
+        ),
+        "acceptance_message": active_assignment.acceptance_message if active_assignment else None,
+        "first_work_observed_at": active_assignment.last_activity_at if active_assignment else None,
         "assigned_task_id": active_assignment.assigned_task_id if active_assignment else None,
         "blocker_reason": assignment_blocker,
     }
@@ -574,7 +652,7 @@ async def ace_health(
         "assigned_ace_id": task.assigned_ace_id if task else None,
     }
     delivery_state = (
-        active_assignment.dispatch_delivery_state
+        dispatch_delivery_state
         if active_assignment is not None
         else _delivery_state_for_runtime(runtime_state)
     )

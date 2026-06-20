@@ -47,6 +47,16 @@ atc tasks assign --project-id <project-id> --task-id <task-id>
 atc leader bootstrap-tasks --project-id <project-id> --goal "..." --task "..."
 ```
 
+When assigning work to Aces, Leader must distinguish `dispatch_verified` delivery from Ace-side assignment acceptance. Delivery alone means the provider received or started the prompt; it is not proof the Ace accepted task ownership. Leader should monitor `ace_dispatch.assignment_acceptance_state` from `atc ace health --project-id <project-id> --ace-id <ace-id>` and wait for `assignment_accepted` or `accepted_active` before treating the Ace as actively working.
+
+Ace-managed workspaces should call:
+
+```bash
+atc ace report-active --project-id <project-id> --ace-id <ace-id> --message "accepted task"
+```
+
+Leader should recover unaccepted assignments through `atc ace recover --project-id <project-id> --ace-id <ace-id> --dry-run` rather than assuming the Ace is working because a session row or assignment row exists.
+
 When the kickoff goal is accepted, Leader should call the canonical report-active path so Tower can distinguish goal acceptance from a mere session row:
 
 ```text

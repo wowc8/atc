@@ -64,6 +64,12 @@ class RecoveryRequest(BaseModel):
     policy: str = "inspect_first"
 
 
+class AceActiveReportRequest(BaseModel):
+    assignment_id: str | None = None
+    assignment_accepted: bool = True
+    message: str | None = None
+
+
 async def _require_project_ace(db, project_id: str, session_id: str):
     session = await db_ops.get_session(db, session_id)
     if session is None or session.project_id != project_id or session.session_type != "ace":
@@ -170,7 +176,6 @@ async def get_ace_health(
     request: Request,
 ) -> dict[str, object]:
     """Return provider-neutral Ace runtime/dispatch health."""
-
     db = await _get_db(request)
     project = await db_ops.get_project(db, project_id)
     if project is None:
@@ -178,6 +183,66 @@ async def get_ace_health(
     await _require_project_ace(db, project_id, session_id)
     health = await ace_health(db, project_id, session_id)
     return health.as_dict()
+
+
+@router.post("/projects/{project_id}/aces/{session_id}/report-active")
+async def report_ace_active(
+    project_id: str,
+    session_id: str,
+    body: AceActiveReportRequest,
+    request: Request,
+) -> dict[str, object]:
+    """Record Ace-side assignment acceptance before Leader treats work as active."""
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await _require_project_ace(db, project_id, session_id)
+    assignments = await db_ops.list_task_assignments(db, ace_session_id=session_id)
+    if body.assignment_id:
+        assignment = next((a for a in assignments if a.assignment_id == body.assignment_id), None)
+    else:
+        assignment = next((a for a in assignments if a.status in {"assigned", "working"}), None)
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Active Ace assignment not found")
+
+    report = await db_ops.report_ace_assignment_active(
+        db,
+        assignment.assignment_id,
+        accepted=body.assignment_accepted,
+        message=body.message,
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="Ace assignment not found")
+    if body.assignment_accepted:
+        await db_ops.update_session_status(db, session_id, "working")
+    acceptance_state = "assignment_accepted" if report.assignment_accepted else "active_unaccepted"
+    dispatch = {
+        "assignment_id": report.assignment_id,
+        "task_graph_id": report.task_graph_id,
+        "assignment_status": report.status,
+        "dispatch_delivery_state": report.dispatch_delivery_state,
+        "dispatch_verified": report.dispatch_verified,
+        "assignment_acceptance_state": acceptance_state,
+        "ace_reported_active": report.ace_reported_active,
+        "assignment_accepted": report.assignment_accepted,
+        "assignment_accepted_at": report.assignment_accepted_at,
+        "acceptance_message": report.acceptance_message,
+        "first_work_observed_at": report.last_activity_at,
+        "assigned_task_id": report.assigned_task_id,
+        "blocker_reason": report.blocker_reason,
+    }
+    return {
+        "status": "accepted",
+        "project_id": project_id,
+        "ace_id": session_id,
+        "assignment_id": report.assignment_id,
+        "assignment_accepted": report.assignment_accepted,
+        "ace_reported_active": report.ace_reported_active,
+        "assignment_accepted_at": report.assignment_accepted_at,
+        "assignment_acceptance_state": dispatch.get("assignment_acceptance_state"),
+        "ace_dispatch": dispatch,
+    }
 
 
 @router.post("/projects/{project_id}/aces/{session_id}/recover")

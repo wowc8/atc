@@ -99,6 +99,26 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     )
     list_parser.set_defaults(handler=_handle_list)
 
+    # atc ace report-active --project-id <id> --ace-id <id>
+    report_parser = ace_sub.add_parser(
+        "report-active", help="Report assignment acceptance / active work"
+    )
+    report_parser.add_argument("--project-id", required=True, help="Project UUID")
+    report_parser.add_argument("--ace-id", required=True, help="Ace session UUID")
+    report_parser.add_argument("--assignment-id", default=None, help="Assignment idempotency key")
+    report_parser.add_argument("--message", default=None, help="Acceptance/status message")
+    report_parser.add_argument(
+        "--not-accepted",
+        action="store_true",
+        help="Report active reachability but do not mark assignment accepted",
+    )
+    report_parser.add_argument(
+        "--api",
+        default=_DEFAULT_API,
+        help="ATC API base URL",
+    )
+    report_parser.set_defaults(handler=_handle_report_active)
+
     # atc ace health --project-id <id> --ace-id <id>
     health_parser = ace_sub.add_parser("health", help="Inspect Ace runtime/dispatch health")
     health_parser.add_argument("--project-id", required=True, help="Project UUID")
@@ -370,6 +390,19 @@ def _handle_memory_get(args: argparse.Namespace) -> int:
 
 def _handle_health(args: argparse.Namespace) -> int:
     return _api_get_json(f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/health")
+
+
+def _handle_report_active(args: argparse.Namespace) -> int:
+    payload = {
+        "assignment_accepted": not args.not_accepted,
+        "message": args.message,
+    }
+    if args.assignment_id:
+        payload["assignment_id"] = args.assignment_id
+    return _api_post_json(
+        f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/report-active",
+        payload,
+    )
 
 
 def _handle_recover(args: argparse.Namespace) -> int:
