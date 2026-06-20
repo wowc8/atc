@@ -471,11 +471,22 @@ async def start_leader(
         response.update(verification.as_dict())
         response["kickoff_payload_persisted"] = kickoff_payload is not None
         response["leader_state"] = health_kickoff.get("kickoff_state")
-        response["recommended_action"] = (
-            "wait_for_leader_active_report_or_run_leader_health"
-            if response.get("leader_state") == "kickoff_unverified"
-            else health.recovery_recommendation
+        response["startup_expectation"] = {
+            "folder_trust_prompt_expected": True,
+            "must_check_health_before_nudge": True,
+            "health_command": f"atc leader health --project-id {project_id} --summary",
+            "details": (
+                "After Leader start, Tower must expect a provider startup/folder trust "
+                "prompt and resolve classified startup blockers before checking progress "
+                "or sending a kickoff nudge."
+            ),
+        }
+        response["operator_guidance"] = health.operator_guidance
+        response["recommended_action"] = health.operator_guidance.get(
+            "recommended_action",
+            "check_startup_trust_prompt_before_nudge",
         )
+        response["recovery_recommendation"] = health.recovery_recommendation
         return response
     return {
         "status": "queued",

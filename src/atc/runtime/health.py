@@ -289,6 +289,19 @@ def _operator_guidance_for(
     )
 
     if current_blocker:
+        if current_blocker == BlockerReason.RUNTIME_TRUST_REQUIRED.value:
+            return {
+                "severity": "blocked",
+                "summary": "Leader startup is blocked on a managed-workspace trust prompt.",
+                "recommended_action": "resolve_startup_trust_prompt_before_nudge",
+                "command": command,
+                "details": (
+                    "Treat the folder trust prompt as an expected Leader-start branch. "
+                    "Run dry-run recovery first; apply only when provider diagnostics mark "
+                    "the current managed-workspace trust prompt safe to resolve. Do not send "
+                    "goal nudges until this startup prompt is cleared."
+                ),
+            }
         if current_blocker == BlockerReason.PROMPT_NOT_SUBMITTED.value:
             return {
                 "severity": "blocked",
@@ -319,10 +332,14 @@ def _operator_guidance_for(
     if role == "leader" and leader_state == "kickoff_unverified":
         return {
             "severity": "warning",
-            "summary": "Leader session exists but goal acceptance is not verified yet.",
-            "recommended_action": "wait_or_check_health",
+            "summary": "Leader session exists but startup/kickoff is not verified yet.",
+            "recommended_action": "check_startup_trust_prompt_before_nudge",
             "command": health_command,
-            "details": "Normal monitoring should wait for active report or actionable progress.",
+            "details": (
+                "Hard expectation: a folder trust/startup prompt may appear after Leader "
+                "start. Check Leader health and resolve classified startup blockers before "
+                "sending any kickoff nudge or using progress=0 as the main signal."
+            ),
         }
     if role == "leader" and leader_state == "task_graph_empty":
         return {
