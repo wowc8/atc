@@ -494,3 +494,61 @@ class TestAceList:
         req = _StubHandler.requests[0]
         assert req["method"] == "GET"
         assert req["path"] == "/api/projects/proj-1/aces"
+
+
+# ---------------------------------------------------------------------------
+# atc ace report-active
+# ---------------------------------------------------------------------------
+
+
+class TestAceReportActive:
+    def test_reports_assignment_acceptance(self, api_stub: str) -> None:
+        _StubHandler.response_body = {
+            "status": "accepted",
+            "assignment_acceptance_state": "assignment_accepted",
+        }
+        rc = cli(
+            [
+                "ace",
+                "report-active",
+                "--project-id",
+                "proj-1",
+                "--ace-id",
+                "ace-1",
+                "--assignment-id",
+                "assign-1",
+                "--message",
+                "accepted task",
+                "--api",
+                api_stub,
+            ]
+        )
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects/proj-1/aces/ace-1/report-active"
+        assert req["body"] == {
+            "assignment_id": "assign-1",
+            "assignment_accepted": True,
+            "message": "accepted task",
+        }
+
+    def test_can_report_active_without_acceptance(self, api_stub: str) -> None:
+        rc = cli(
+            [
+                "ace",
+                "report-active",
+                "--project-id",
+                "proj-1",
+                "--ace-id",
+                "ace-1",
+                "--not-accepted",
+                "--api",
+                api_stub,
+            ]
+        )
+        assert rc == 0
+        assert _StubHandler.requests[0]["body"] == {
+            "assignment_accepted": False,
+            "message": None,
+        }

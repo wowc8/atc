@@ -474,6 +474,10 @@ CREATE TABLE IF NOT EXISTS task_assignments (
     status                  TEXT NOT NULL DEFAULT 'assigned',
     dispatch_delivery_state TEXT NOT NULL DEFAULT 'queued_unverified',
     dispatch_verified       INTEGER NOT NULL DEFAULT 0,
+    ace_reported_active     INTEGER NOT NULL DEFAULT 0,
+    assignment_accepted     INTEGER NOT NULL DEFAULT 0,
+    assignment_accepted_at  TEXT,
+    acceptance_message      TEXT,
     last_activity_at        TEXT,
     assigned_task_id        TEXT,
     blocker_reason          TEXT,
@@ -580,6 +584,10 @@ async def run_migrations(db_path: str) -> None:
         task_assignment_columns = {
             "dispatch_delivery_state": "TEXT NOT NULL DEFAULT 'queued_unverified'",
             "dispatch_verified": "INTEGER NOT NULL DEFAULT 0",
+            "ace_reported_active": "INTEGER NOT NULL DEFAULT 0",
+            "assignment_accepted": "INTEGER NOT NULL DEFAULT 0",
+            "assignment_accepted_at": "TEXT",
+            "acceptance_message": "TEXT",
             "last_activity_at": "TEXT",
             "assigned_task_id": "TEXT",
             "blocker_reason": "TEXT",
@@ -646,6 +654,23 @@ async def _apply_file_migrations(db: aiosqlite.Connection) -> None:
             ]
             if all(
                 [await _has_column(db, "task_assignments", column) for column in dispatch_columns]
+            ):
+                logger.info("Migration skip: %s already applied structurally", path.name)
+                await db.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (path.name, _now()),
+                )
+                await db.commit()
+                continue
+        if path.name == "017_ace_assignment_acceptance.sql":
+            acceptance_columns = [
+                "ace_reported_active",
+                "assignment_accepted",
+                "assignment_accepted_at",
+                "acceptance_message",
+            ]
+            if all(
+                [await _has_column(db, "task_assignments", column) for column in acceptance_columns]
             ):
                 logger.info("Migration skip: %s already applied structurally", path.name)
                 await db.execute(
@@ -1285,8 +1310,9 @@ _ASSIGNMENT_TRANSITIONS: dict[str, set[str]] = {
 
 def _row_to_task_assignment(row: aiosqlite.Row) -> TaskAssignment:
     d = dict(row)
-    if "dispatch_verified" in d:
-        d["dispatch_verified"] = bool(d["dispatch_verified"])
+    for key in ("dispatch_verified", "ace_reported_active", "assignment_accepted"):
+        if key in d:
+            d[key] = bool(d[key])
     return TaskAssignment(**d)
 
 
@@ -1363,7 +1389,9 @@ async def assign_task(
         await db.execute(
             """UPDATE task_assignments
                SET ace_session_id = ?, status = ?, dispatch_delivery_state = ?,
-                   dispatch_verified = 0, last_activity_at = NULL,
+                   dispatch_verified = 0, ace_reported_active = 0,
+                   assignment_accepted = 0, assignment_accepted_at = NULL,
+                   acceptance_message = NULL, last_activity_at = NULL,
                    assigned_task_id = ?, blocker_reason = NULL, updated_at = ?
                WHERE assignment_id = ?""",
             (
@@ -1533,6 +1561,47 @@ async def update_task_assignment_dispatch(
     )
     await db.commit()
     return await get_task_assignment(db, assignment_id)
+
+
+async def report_ace_assignment_active(
+    db: aiosqlite.Connection,
+    assignment_id: str,
+    *,
+    accepted: bool = True,
+    message: str | None = None,
+    last_activity: bool = True,
+) -> TaskAssignment | None:
+    """Record provider-neutral Ace assignment acceptance reported by the Ace."""
+
+    existing = await get_task_assignment(db, assignment_id)
+    if existing is None:
+        return None
+    now = _now()
+    last_activity_at = now if last_activity else existing.last_activity_at
+    accepted_at = now if accepted else existing.assignment_accepted_at
+    await db.execute(
+        """UPDATE task_assignments
+           SET ace_reported_active = 1,
+               assignment_accepted = ?, assignment_accepted_at = ?,
+               acceptance_message = ?, last_activity_at = ?,
+               blocker_reason = NULL, updated_at = ?
+           WHERE assignment_id = ?""",
+        (
+            1 if accepted else 0,
+            accepted_at,
+            message,
+            last_activity_at,
+            now,
+            assignment_id,
+        ),
+    )
+    await db.commit()
+    return await get_task_assignment(db, assignment_id)
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat CRUD
+# ---------------------------------------------------------------------------
 
 
 async def register_heartbeat(
