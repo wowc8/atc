@@ -3,6 +3,7 @@
 Routes:
   POST   /api/projects/{project_id}/leader/decompose     → decompose goal into tasks
   POST   /api/projects/{project_id}/leader/spawn-aces     → spawn Aces for ready tasks
+  POST   /api/projects/{project_id}/leader/assign-task    → spawn one Ace for a task
   POST   /api/projects/{project_id}/leader/instruct       → send instruction to an Ace
   POST   /api/projects/{project_id}/leader/task-done      → mark a task as done
   POST   /api/projects/{project_id}/leader/task-failed    → mark a task as failed
@@ -50,6 +51,10 @@ class InstructRequest(BaseModel):
     instruction: str
 
 
+class AssignTaskRequest(BaseModel):
+    task_graph_id: str
+
+
 class TaskDoneRequest(BaseModel):
     task_graph_id: str
 
@@ -68,6 +73,11 @@ class DecomposeResponse(BaseModel):
 
 class SpawnAcesResponse(BaseModel):
     spawned: list[dict[str, Any]]
+
+
+class AssignTaskResponse(BaseModel):
+    assigned: dict[str, Any] | None = None
+    error: str | None = None
 
 
 class ProgressResponse(BaseModel):
@@ -265,9 +275,41 @@ async def spawn_aces(
                 "ace_session_id": a.ace_session_id,
                 "task_graph_id": a.task_graph_id,
                 "task_title": a.task_title,
+                "assignment_id": a.assignment_id,
+                "status": a.status,
             }
             for a in assignments
         ],
+    )
+
+
+@router.post(
+    "/projects/{project_id}/leader/assign-task",
+    response_model=AssignTaskResponse,
+)
+async def assign_task(
+    project_id: str,
+    body: AssignTaskRequest,
+    request: Request,
+) -> AssignTaskResponse:
+    """Spawn or reuse one Ace assignment for a specific ready task graph entry."""
+    orch = await _get_or_create_orchestrator(request, project_id)
+    try:
+        assignment = await orch.spawn_ace_for_task(body.task_graph_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    await _broadcast_tower_progress(request)
+
+    if assignment is None:
+        return AssignTaskResponse(error="assignment_not_created")
+    return AssignTaskResponse(
+        assigned={
+            "ace_session_id": assignment.ace_session_id,
+            "task_graph_id": assignment.task_graph_id,
+            "task_title": assignment.task_title,
+            "assignment_id": assignment.assignment_id,
+            "status": assignment.status,
+        }
     )
 
 

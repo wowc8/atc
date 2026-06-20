@@ -207,6 +207,30 @@ class TestSpawnAcesEndpoint:
         # Blocker is already assigned, blocked is waiting
         assert len(result.spawned) == 0
 
+    async def test_assign_task_endpoint_returns_single_assignment(
+        self,
+        mock_create: AsyncMock,
+        db,
+        project_with_leader,
+        mock_request,
+    ) -> None:
+        from atc.api.routers.leader import AssignTaskRequest, assign_task
+
+        project, _ = project_with_leader
+        tg = await create_task_graph(db, project.id, "Ready Task")
+
+        result = await assign_task(
+            project.id,
+            AssignTaskRequest(task_graph_id=tg.id),
+            mock_request,
+        )
+
+        assert result.assigned is not None
+        assert result.assigned["task_graph_id"] == tg.id
+        assert result.assigned["assignment_id"].endswith(f":{tg.id}")
+        assert result.assigned["status"] == "assigned"
+        mock_request.app.state.tower_controller.get_progress.assert_awaited()
+
 
 # ---------------------------------------------------------------------------
 # progress endpoint

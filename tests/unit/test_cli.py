@@ -322,6 +322,77 @@ class TestLeaderStart:
             cli(["leader", "start"])
 
 
+class TestLeaderBootstrapTasks:
+    def test_bootstrap_tasks_posts_decompose_specs(self, api_stub: str) -> None:
+        rc = cli([
+            "leader", "bootstrap-tasks",
+            "--project-id", "proj-1",
+            "--goal", "Ship phase 5",
+            "--task", "Create CLI",
+            "--task", "Validate CLI",
+            "--api", api_stub,
+        ])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects/proj-1/leader/decompose"
+        assert [task["title"] for task in req["body"]["task_specs"]] == [
+            "Create CLI",
+            "Validate CLI",
+        ]
+        assert req["body"]["task_specs"][0]["description"] == (
+            "Bootstrap task for goal: Ship phase 5"
+        )
+
+    def test_bootstrap_tasks_defaults_to_three_tasks(self, api_stub: str) -> None:
+        rc = cli(["leader", "bootstrap-tasks", "--project-id", "proj-1", "--api", api_stub])
+        assert rc == 0
+        assert len(_StubHandler.requests[0]["body"]["task_specs"]) == 3
+
+
+class TestTaskGraphCommands:
+    def test_lists_task_graphs(self, api_stub: str) -> None:
+        _StubHandler.response_body = []  # type: ignore[assignment]
+        rc = cli(["tasks", "list", "--project-id", "proj-1", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "GET"
+        assert req["path"] == "/api/projects/proj-1/task-graphs"
+
+    def test_creates_task_graph(self, api_stub: str) -> None:
+        rc = cli([
+            "tasks", "create",
+            "--project-id", "proj-1",
+            "--title", "Build UI",
+            "--description", "Implement the UI",
+            "--depends-on", "task-a",
+            "--depends-on", "task-b",
+            "--api", api_stub,
+        ])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects/proj-1/task-graphs"
+        assert req["body"] == {
+            "title": "Build UI",
+            "description": "Implement the UI",
+            "dependencies": ["task-a", "task-b"],
+        }
+
+    def test_assigns_task_graph(self, api_stub: str) -> None:
+        rc = cli([
+            "tasks", "assign",
+            "--project-id", "proj-1",
+            "--task-id", "tg-1",
+            "--api", api_stub,
+        ])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/projects/proj-1/leader/assign-task"
+        assert req["body"] == {"task_graph_id": "tg-1"}
+
+
 # ---------------------------------------------------------------------------
 # atc leader stop
 # ---------------------------------------------------------------------------

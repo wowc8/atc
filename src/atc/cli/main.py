@@ -6,6 +6,8 @@ Usage::
     atc ace done <session_id>
     atc ace create --project-id <id> --name '...'
     atc ace list --project-id <id>
+    atc tasks create --project-id <id> --title '...'
+    atc tasks assign --project-id <id> --task-id <task_graph_id>
     atc leader start --project-id <id>
     atc leader stop --project-id <id>
     atc projects list
@@ -19,7 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from atc.cli import ace, leader, projects, tower
+from atc.cli import ace, leader, projects, tasks, tower
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     ace.register(subparsers)
+    tasks.register(subparsers)
     leader.register(subparsers)
     projects.register(subparsers)
     tower.register(subparsers)

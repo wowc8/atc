@@ -60,6 +60,22 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     recover_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
     recover_parser.set_defaults(handler=_handle_recover)
 
+    # atc leader bootstrap-tasks --project-id <id> --goal '...' [--task '...']
+    bootstrap_parser = leader_sub.add_parser(
+        "bootstrap-tasks",
+        help="Create an initial task graph without inspecting OpenAPI",
+    )
+    bootstrap_parser.add_argument("--project-id", required=True, help="Project UUID")
+    bootstrap_parser.add_argument("--goal", default=None, help="Goal to bootstrap")
+    bootstrap_parser.add_argument(
+        "--task",
+        action="append",
+        default=[],
+        help="Task title to create; repeat for multiple tasks",
+    )
+    bootstrap_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
+    bootstrap_parser.set_defaults(handler=_handle_bootstrap_tasks)
+
     leader_parser.set_defaults(handler=lambda _: leader_parser.print_help() or 1)
 
 
@@ -129,4 +145,24 @@ def _handle_recover(args: argparse.Namespace) -> int:
     return _post_json(
         f"{args.api}/api/projects/{args.project_id}/leader/recover",
         {"dry_run": not args.apply, "policy": args.policy},
+    )
+
+
+def _handle_bootstrap_tasks(args: argparse.Namespace) -> int:
+    goal = args.goal or "Deliver the Tower goal"
+    task_titles = args.task or [
+        "Plan delivery and acceptance criteria",
+        "Execute the implementation work",
+        "Validate and report completion evidence",
+    ]
+    task_specs = [
+        {
+            "title": title,
+            "description": f"Bootstrap task for goal: {goal}",
+        }
+        for title in task_titles
+    ]
+    return _post_json(
+        f"{args.api}/api/projects/{args.project_id}/leader/decompose",
+        {"task_specs": task_specs},
     )
