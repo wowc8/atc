@@ -224,6 +224,31 @@ class TestDeployAceFiles:
         settings = json.loads(local_path.read_text())
         assert settings["hasTrustDialogAccepted"] is True
 
+    def test_writes_local_api_capability_files(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+
+        assert result.local_api_capability_path.exists()
+        assert result.local_api_helper_path.exists()
+        assert result.local_api_helper_path.stat().st_mode & stat.S_IEXEC
+
+        capability = json.loads(result.local_api_capability_path.read_text())
+        assert capability["name"] == "local_atc_api_inspection"
+        assert capability["base_url"] == "http://127.0.0.1:8420"
+        assert capability["host_allowlist"] == ["127.0.0.1", "localhost"]
+        assert capability["external_network_allowed"] is False
+        assert "/openapi.json" in capability["path_prefixes"]
+
+    def test_claude_md_includes_local_api_capability_instructions(
+        self, ace_spec: AceDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_ace_files(ace_spec, staging_root=staging_root)
+        content = result.claude_md_path.read_text()
+        assert "Local ATC API Capability" in content
+        assert "/tmp/atc-agents/ace-001/.atc/local_api.sh" in content
+        assert "does not authorize external network access" in content
+
     def test_settings_has_enable_all_project_mcp_servers(
         self, ace_spec: AceDeploySpec, staging_root: Path
     ) -> None:
@@ -420,6 +445,18 @@ class TestDeployManagerFiles:
         assert local_path.exists()
         settings = json.loads(local_path.read_text())
         assert settings["hasTrustDialogAccepted"] is True
+
+    def test_manager_gets_local_api_capability(
+        self, manager_spec: ManagerDeploySpec, staging_root: Path
+    ) -> None:
+        result = deploy_manager_files(manager_spec, staging_root=staging_root)
+
+        capability = json.loads(result.local_api_capability_path.read_text())
+        assert capability["base_url"] == "http://127.0.0.1:8420"
+        assert "/openapi.json" in capability["path_prefixes"]
+        content = result.claude_md_path.read_text()
+        assert "/tmp/atc-agents/leader-bravo/.atc/local_api.sh" in content
+        assert "pre-authorized" in content
 
     def test_writes_user_level_trust_settings(
         self,
