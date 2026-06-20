@@ -12,11 +12,13 @@ Routes:
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from atc.api.delivery import delivery_response
 from atc.core.errors import CreationFailedError
@@ -80,6 +82,11 @@ class LeaderMessageRequest(BaseModel):
 class LeaderActiveReportRequest(BaseModel):
     goal_accepted: bool = True
     message: str | None = None
+
+
+class LeaderCompleteReportRequest(BaseModel):
+    summary: str | None = None
+    evidence: list[str] = Field(default_factory=list)
 
 
 class RecoveryRequest(BaseModel):
@@ -562,6 +569,70 @@ async def report_leader_active(
         "leader_state": health.kickoff_state.get("kickoff_state"),
         "kickoff_verified": health.kickoff_state.get("kickoff_verified"),
         "kickoff_state": health.kickoff_state,
+    }
+
+
+@router.post("/{project_id}/leader/report-complete")
+async def report_leader_complete(
+    project_id: str, body: LeaderCompleteReportRequest, request: Request
+) -> dict[str, object]:
+    """Leader-originated completion hook so Tower does not poll for done state."""
+
+    db = await _get_db(request)
+    project = await db_ops.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    leader = await db_ops.get_leader_by_project(db, project_id)
+    if leader is None:
+        raise HTTPException(status_code=404, detail=f"No leader found for project {project_id}")
+
+    context: dict[str, object] = {}
+    if isinstance(leader.context, dict):
+        context = dict(leader.context)
+    elif leader.context:
+        try:
+            parsed = json.loads(leader.context)
+            context = parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            context = {}
+
+    reported_at = datetime.now(UTC).isoformat()
+    report = {
+        "leader_reported_complete": True,
+        "summary": body.summary,
+        "evidence": body.evidence,
+        "reported_at": reported_at,
+    }
+    context["leader_completion_report"] = report
+    await db.execute(
+        (
+            "UPDATE leaders SET context = ?, status = 'complete', "
+            "updated_at = datetime('now') WHERE id = ?"
+        ),
+        (json.dumps(context), leader.id),
+    )
+    await db.commit()
+
+    event_bus = await _get_event_bus(request)
+    event_payload = {
+        "project_id": project_id,
+        "leader_id": leader.id,
+        "session_id": leader.session_id,
+        "summary": body.summary,
+        "evidence": body.evidence,
+        "reported_at": reported_at,
+    }
+    tower = getattr(request.app.state, "tower_controller", None)
+    if event_bus is not None:
+        await event_bus.publish("leader_project_completed", event_payload)
+    elif tower is not None:
+        await tower.on_leader_project_completed(**event_payload)
+
+    return {
+        "status": "completed",
+        **event_payload,
+        "tower_notified": event_bus is not None or tower is not None,
     }
 
 

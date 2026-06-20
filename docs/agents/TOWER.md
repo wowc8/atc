@@ -17,10 +17,10 @@ Tower should:
 - receive high-level goals from the operator
 - clarify or normalize goals into project-level objectives
 - decide whether work belongs to an existing project or requires a new project
-- create, start, stop, and monitor Leader sessions
-- help run planning and execution loops across projects
+- create, start, stop, and verify Leader startup sessions
+- hand project execution to the Leader once kickoff is verified
 - maintain cross-project awareness, priorities, budgets, and resource constraints
-- detect stalled Leaders and escalate or recover them
+- detect startup-blocked or explicitly failed Leaders and escalate or recover them
 - preserve operator intent and avoid losing goals across restarts
 - report aggregate status upward to the operator
 
@@ -30,7 +30,8 @@ Tower is expected to:
 
 - keep the operator-facing interface simple and high-level
 - create Leaders with enough context to manage their own project scope
-- ask Leaders for plans, task breakdowns, progress, blockers, and recovery status
+- verify Leader kickoff/startup readiness before handing off execution
+- after verified handoff, wait for the Leader completion hook instead of polling task progress
 - avoid micromanaging individual Ace implementation details unless debugging a failure
 - enforce system-level constraints before allowing more work to start
 - keep state durable and inspectable
@@ -64,6 +65,20 @@ atc leader message --project-id <project-id> --message "Please read your goal, i
 ```
 
 That nudge is a prompt-submission recovery, not a replacement for the original goal. Tower must not paste the full goal/context again unless a recovery path explicitly reports the original payload was lost.
+
+After the Leader reports active/goal accepted and begins project work, Tower must stop checking normal task progress. The Leader is the busy session and owns task graph/Ace monitoring. Tower should wait for the event-driven completion hook:
+
+```text
+POST /api/projects/{project_id}/leader/report-complete
+```
+
+or the CLI equivalent:
+
+```bash
+atc leader report-complete --project-id <project-id> --summary "..." --evidence "..."
+```
+
+Tower may still inspect health on explicit operator request, explicit Leader blocker/failure, missing Leader runtime, or a recovery threshold, but it must not continuously poll merely to discover completion.
 
 ## Must not do
 

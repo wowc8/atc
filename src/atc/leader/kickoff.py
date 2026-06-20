@@ -143,6 +143,8 @@ def build_leader_kickoff_message(
             f"3. Then instruct spawned Aces via POST /api/projects/{project_id}/leader/instruct.",
             f"4. Monitor progress via GET /api/projects/{project_id}/leader/progress.",
             "5. Drive the project to completion by delegating, not by coding directly.",
+            "6. When verified done, report completion via POST "
+            f"/api/projects/{project_id}/leader/report-complete.",
             "",
             f"Project ID: {project_id}",
             "Before decomposing or starting task work, report goal acceptance via POST "
@@ -156,9 +158,11 @@ def build_leader_kickoff_message(
             "1. Decompose the goal into well-scoped tasks using the API.",
             "2. Spawn Aces for each ready task.",
             "3. Monitor progress and drive to completion.",
-            "4. Report back to Tower when done.",
+            "4. When all work is verified, call the Leader completion hook; do not wait",
+            "   for Tower to poll.",
             "",
             "Before task work, report goal acceptance through the ATC Leader active-report API.",
+            "Complete handoff by reporting done through the ATC Leader completion API.",
             "Begin NOW. Do not ask for clarification — report active, then start decomposing.",
         ]
     return "\n".join(lines)

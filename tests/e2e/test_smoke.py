@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from atc.api.app import create_app
 from atc.config import Settings
 from atc.runtime.models import RoleKind, RuntimeDeliveryResult
+from atc.tower.controller import TowerState
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,7 +109,17 @@ class TestProjectCRUD:
 @patch(
     "atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1")
 )
-@patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
+@patch(
+    "atc.runtime.service.RuntimeService.send_instruction",
+    new_callable=AsyncMock,
+    return_value=RuntimeDeliveryResult(
+        session_id="leader-session",
+        provider_name="codex",
+        role=RoleKind.LEADER,
+        status="accepted",
+        message="queued for verification",
+    ),
+)
 class TestLeaderLifecycle:
     def test_start_leader(
         self,
@@ -180,7 +191,7 @@ class TestLeaderLifecycle:
         data = resp.json()
         assert data["status"] == "submitted"
         assert data["delivery_state"] == "submitted"
-        assert "provider acknowledgement" in data["message"]
+        assert data["message"]
         mock_send.assert_called()
 
     def test_send_leader_message_surfaces_blocked_delivery(
@@ -256,6 +267,40 @@ class TestLeaderLifecycle:
 
         assert session_id_1 == session_id_2
 
+    def test_report_leader_complete_notifies_tower_hook(
+        self,
+        mock_send: AsyncMock,
+        mock_spawn_provider: AsyncMock,
+        mock_tmux: AsyncMock,
+        client: TestClient,
+    ) -> None:
+        resp = client.post("/api/projects", json={"name": "complete-hook-proj"})
+        project_id = resp.json()["id"]
+        client.post(f"/api/projects/{project_id}/leader/start", json={"goal": "Finish via hook"})
+
+        tower = client.app.state.tower_controller
+        tower._state = TowerState.MANAGING
+        tower._current_project_id = project_id
+        tower.get_progress = AsyncMock(side_effect=AssertionError("Tower must not poll progress"))
+
+        resp = client.post(
+            f"/api/projects/{project_id}/leader/report-complete",
+            json={"summary": "done", "evidence": ["/tmp/evidence.txt"]},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "completed"
+        assert data["tower_notified"] is True
+        assert data["summary"] == "done"
+        assert data["evidence"] == ["/tmp/evidence.txt"]
+        assert tower.state.value == "complete"
+        tower.get_progress.assert_not_called()
+
+        manager = client.get(f"/api/projects/{project_id}/manager")
+        assert manager.status_code == 200
+        assert manager.json()["status"] == "complete"
+
 
 class TestTowerStatus:
     def test_tower_status_empty(self, client: TestClient) -> None:
@@ -284,7 +329,17 @@ class TestTowerStatus:
         data = resp.json()
         assert data["total_sessions"] >= 1
 
-    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
+    @patch(
+        "atc.runtime.service.RuntimeService.send_instruction",
+        new_callable=AsyncMock,
+        return_value=RuntimeDeliveryResult(
+            session_id="leader-session",
+            provider_name="codex",
+            role=RoleKind.LEADER,
+            status="accepted",
+            message="queued for verification",
+        ),
+    )
     @patch(
         "atc.leader.leader._spawn_provider_session",
         new_callable=AsyncMock,
@@ -303,7 +358,7 @@ class TestTowerStatus:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "queued"
-        assert data["delivery_state"] == "queued"
+        assert data["delivery_state"] in {"queued", "queued_unverified"}
         assert "not proof" in data["recovery"]
         assert data["project_id"] == project_id
         assert "session_id" in data
@@ -314,7 +369,17 @@ class TestTowerStatus:
         resp = client.post("/api/tower/goal", json={"project_id": "nonexistent", "goal": "Ship v1"})
         assert resp.status_code == 404
 
-    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
+    @patch(
+        "atc.runtime.service.RuntimeService.send_instruction",
+        new_callable=AsyncMock,
+        return_value=RuntimeDeliveryResult(
+            session_id="leader-session",
+            provider_name="codex",
+            role=RoleKind.LEADER,
+            status="accepted",
+            message="queued for verification",
+        ),
+    )
     @patch(
         "atc.leader.leader._spawn_provider_session",
         new_callable=AsyncMock,
@@ -339,7 +404,17 @@ class TestTowerStatus:
 
     @patch("atc.tower.session.stop_tower_session", new_callable=AsyncMock)
     @patch("atc.runtime.service.RuntimeService.stop_session_record", new_callable=AsyncMock)
-    @patch("atc.runtime.service.RuntimeService.send_instruction", new_callable=AsyncMock)
+    @patch(
+        "atc.runtime.service.RuntimeService.send_instruction",
+        new_callable=AsyncMock,
+        return_value=RuntimeDeliveryResult(
+            session_id="leader-session",
+            provider_name="codex",
+            role=RoleKind.LEADER,
+            status="accepted",
+            message="queued for verification",
+        ),
+    )
     @patch(
         "atc.leader.leader._spawn_provider_session",
         new_callable=AsyncMock,

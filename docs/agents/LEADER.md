@@ -78,6 +78,20 @@ When the kickoff goal is accepted, Leader should call the canonical report-activ
 POST /api/projects/{project_id}/leader/report-active
 ```
 
+When all tasks are complete and verified, Leader must report completion through the Leader→Tower hook instead of waiting for Tower to poll:
+
+```bash
+atc leader report-complete --project-id <project-id> --summary "What was completed" --evidence "/path/or/url"
+```
+
+or:
+
+```text
+POST /api/projects/{project_id}/leader/report-complete
+```
+
+This hook is the canonical way Tower learns the project is done after handoff.
+
 Leader may inspect the local ATC API helper/capability files generated into the managed workspace for approved local API access. The local ATC API helper is restricted to the configured localhost base URL and allowlisted paths; external network or secret-bearing approval decisions remain outside Leader control.
 
 ## Must not do

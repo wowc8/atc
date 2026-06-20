@@ -130,11 +130,18 @@ def _ace_startup_expectation(project_id: str, ace_id: str = "<ace-id>") -> dict[
 
 
 async def _broadcast_tower_progress(request: Request) -> None:
-    tower = getattr(request.app.state, "tower_controller", None)
-    if tower is None:
+    """Broadcast that Leader-owned task state changed without Tower polling it."""
+    ws_hub = getattr(request.app.state, "ws_hub", None)
+    if ws_hub is None:
         return
     with __import__("contextlib").suppress(Exception):
-        await tower.get_progress()
+        await ws_hub.broadcast(
+            "tower",
+            {
+                "type": "leader_task_activity",
+                "message": "Leader-owned task state changed; Tower is not polling after handoff.",
+            },
+        )
 
 
 async def _get_or_create_orchestrator(
