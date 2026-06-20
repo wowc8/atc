@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +18,7 @@ from atc.config import Settings, load_settings
 from atc.core.errors import ATCError
 from atc.core.events import EventBus
 from atc.core.sentry import init_sentry
-from atc.state.db import run_migrations, set_connection_app_state, clear_connection_app_state
+from atc.state.db import clear_connection_app_state, run_migrations, set_connection_app_state
 from atc.terminal.pty_stream import PtyStreamPool
 
 if TYPE_CHECKING:
@@ -200,6 +200,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         session_id = data.get("session_id", "")
         if session_id:
             await pty_pool.remove_session(session_id)
+            await ws_hub.broadcast(
+                "state",
+                {
+                    "session_destroyed": True,
+                    "session_id": session_id,
+                    "project_id": data.get("project_id"),
+                    "session_type": data.get("session_type"),
+                },
+            )
 
     event_bus.subscribe("session_created", _on_session_created)
     event_bus.subscribe("session_status_changed", _on_session_status_changed)
@@ -254,12 +263,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     import time as _time
 
     app.state.startup_at = _time.monotonic()
-    from atc.core.health import HealthResult as _HealthResult, run_startup_smoke_test
+    from atc.core.health import HealthResult as _HealthResult
+    from atc.core.health import run_startup_smoke_test
 
     try:
         health = await asyncio.wait_for(run_startup_smoke_test(), timeout=15.0)
-    except asyncio.TimeoutError:
-        health = _HealthResult(ok=False, message="smoke test timed out after 15s", duration_ms=15000.0)
+    except TimeoutError:
+        health = _HealthResult(
+            ok=False,
+            message="smoke test timed out after 15s",
+            duration_ms=15000.0,
+        )
     except Exception as _exc:
         health = _HealthResult(ok=False, message=f"smoke test error: {_exc}", duration_ms=0.0)
 
@@ -281,7 +295,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if results:
             ok = sum(1 for v in results.values() if v)
             logger.info("Reconnected %d/%d sessions on startup", ok, len(results))
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Session reconnection timed out after 20s — continuing startup")
     except Exception:
         logger.exception("Session reconnection failed on startup")
@@ -335,7 +349,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     current_provider = settings.agent_provider.default
                     if ts.provider != current_provider:
                         logger.warning(
-                            "Tower session %s provider mismatch on restore (session=%s current=%s) — refusing restore",
+                            "Tower session %s provider mismatch on restore "
+                            "(session=%s current=%s) — refusing restore",
                             ts.id,
                             ts.provider,
                             current_provider,
@@ -452,7 +467,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             from atc.state import db as db_ops
             user_projects = await db_ops.list_projects(db, include_system=False)
             if not user_projects:
-                logger.info("Tower idle with no user projects — skipping auto-start (first run or cleared DB)")
+                logger.info(
+                    "Tower idle with no user projects — skipping auto-start "
+                    "(first run or cleared DB)"
+                )
                 return
 
             logger.info("Tower is idle with no session — auto-starting session")
@@ -520,11 +538,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     # Log auth mode warning
-    from atc.agents.auth import get_auth_mode, claude_credentials_exist
+    from atc.agents.auth import get_auth_mode
 
     _auth_mode = get_auth_mode()
     if _auth_mode == "oauth":
-        _key = os.environ.get("ATC_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+        _key = (
+            os.environ.get("ATC_ANTHROPIC_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+        )
         if _key:
             logger.warning(
                 "Running in OAuth mode — cost tracking disabled, concurrent sessions may conflict. "
@@ -571,7 +593,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await db.close()
 
 
-def _resolve_claude_binary(settings: "Settings") -> None:
+def _resolve_claude_binary(settings: Settings) -> None:
     """Resolve the absolute path to the claude binary and update settings.
 
     On macOS with nvm, tmux panes spawn without sourcing shell RC files, so the
@@ -619,7 +641,6 @@ def _resolve_claude_binary(settings: "Settings") -> None:
                 settings.agent_provider.claude_command = new_cmd
             except Exception:
                 # If the model is frozen, rebuild agent_provider
-                from atc.config import AgentProviderConfig
                 object.__setattr__(
                     settings,
                     "agent_provider",
@@ -725,8 +746,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "version": __version__,
             }
         from atc.agents.auth import get_auth_mode
-        from atc.core.health import HealthResult as _HR
-        assert isinstance(smoke, _HR)
+        from atc.core.health import HealthResult
+
+        assert isinstance(smoke, HealthResult)
         return {
             "status": "ok" if smoke.ok else "degraded",
             "message": smoke.message,
