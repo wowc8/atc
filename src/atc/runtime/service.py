@@ -40,6 +40,7 @@ from atc.state.db import get_connection_app_state
 _STARTUP_INITIAL_DELAY_SECONDS = 2.0
 _STARTUP_RESOLVE_DELAY_SECONDS = 1.0
 _STARTUP_FINAL_DELAY_SECONDS = 1.0
+_ASSIGNMENT_READY_SETTLE_DELAY_SECONDS = 1.0
 if TYPE_CHECKING:
     from atc.providers.base import ProviderRuntime
 
@@ -294,7 +295,9 @@ class RuntimeService:
         provider = self.get_provider(handle.provider_name)
         readiness = await provider.inspect_session(handle)
         request.metadata["ace_startup_readiness_state"] = self._startup_readiness_state(readiness)
-        self._append_assignment_readiness_event(handle, request, trace_id, readiness)
+        self._append_assignment_readiness_event(
+            handle, request, trace_id, readiness, phase="initial"
+        )
         if readiness.readiness is not ReadinessState.READY:
             request.metadata["runtime_truth"] = self._runtime_truth_from_inspection(
                 readiness
@@ -308,6 +311,28 @@ class RuntimeService:
                     "is not input-ready"
                 ),
             )
+        if _ASSIGNMENT_READY_SETTLE_DELAY_SECONDS > 0:
+            await asyncio.sleep(_ASSIGNMENT_READY_SETTLE_DELAY_SECONDS)
+            readiness = await provider.inspect_session(handle)
+            request.metadata["ace_startup_readiness_state"] = self._startup_readiness_state(
+                readiness
+            )
+            self._append_assignment_readiness_event(
+                handle, request, trace_id, readiness, phase="post_ready_settle"
+            )
+            if readiness.readiness is not ReadinessState.READY:
+                request.metadata["runtime_truth"] = self._runtime_truth_from_inspection(
+                    readiness
+                )
+                return self._result_from_metadata(
+                    handle,
+                    request.metadata,
+                    status="blocked",
+                    message=(
+                        "Ace assignment was not submitted because the provider runtime "
+                        "was no longer input-ready after startup settle"
+                    ),
+                )
         try:
             await provider.assign_task(handle, request)
         except Exception as exc:
@@ -630,6 +655,8 @@ class RuntimeService:
         request: TaskAssignmentRequest,
         trace_id: str,
         inspection: RuntimeInspection,
+        *,
+        phase: str = "initial",
     ) -> None:
         ready = inspection.readiness is ReadinessState.READY
         if ready:
@@ -668,6 +695,7 @@ class RuntimeService:
                 details={
                     "startup_readiness_state": RuntimeService._startup_readiness_state(inspection),
                     "summary": inspection.summary,
+                    "readiness_phase": phase,
                     "task_id": request.task_id,
                     "assignment_id": request.assignment_id,
                     "block_reason": inspection.block_reason.value

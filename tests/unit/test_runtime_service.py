@@ -24,6 +24,7 @@ from atc.state.db import clear_connection_app_state, set_connection_app_state
 runtime_service_module._STARTUP_INITIAL_DELAY_SECONDS = 0.0
 runtime_service_module._STARTUP_RESOLVE_DELAY_SECONDS = 0.0
 runtime_service_module._STARTUP_FINAL_DELAY_SECONDS = 0.0
+runtime_service_module._ASSIGNMENT_READY_SETTLE_DELAY_SECONDS = 0.0
 
 
 class DummyProviderRuntime:
@@ -696,3 +697,68 @@ def test_runtime_service_assign_task_blocks_until_ace_input_ready() -> None:
     assert result.status == "blocked"
     assert result.blocker_reason.value == "runtime_trust_required"
     assert result.details["startup_readiness_state"] == "awaiting_startup_confirmation"
+
+
+def test_runtime_service_assign_task_rechecks_after_ready_settle(monkeypatch) -> None:
+    class ReadyThenPromptBlockedProvider(DummyProviderRuntime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.inspect_count = 0
+
+        async def inspect_session(self, handle: RuntimeSessionHandle) -> RuntimeInspection:
+            self.inspect_count += 1
+            if self.inspect_count <= 3:
+                return RuntimeInspection(
+                    session_id=handle.session_id,
+                    provider_name=handle.provider_name,
+                    alive=True,
+                    readiness=ReadinessState.READY,
+                    summary="Ready",
+                )
+            return RuntimeInspection(
+                session_id=handle.session_id,
+                provider_name=handle.provider_name,
+                alive=True,
+                readiness=ReadinessState.BLOCKED,
+                block_reason=RuntimeBlockReason.PERMISSION,
+                summary="Startup prompt still settling",
+            )
+
+    monkeypatch.setattr(
+        runtime_service_module, "_ASSIGNMENT_READY_SETTLE_DELAY_SECONDS", 0.01
+    )
+    register_provider_runtime(
+        "dummy_runtime_ace_ready_then_blocked", ReadyThenPromptBlockedProvider
+    )
+    service = RuntimeService()
+    handle = asyncio.run(
+        service.start_ace(
+            StartRoleRequest(
+                session_id="sess-ace-ready-then-blocked-1",
+                provider_name="dummy_runtime_ace_ready_then_blocked",
+                role=RoleKind.ACE,
+            )
+        )
+    )
+    assignment = TaskAssignmentRequest(
+        session_id=handle.session_id,
+        task_id="task-ready-then-blocked",
+        message="Do the work",
+        assignment_id="assign-ready-then-blocked",
+    )
+
+    result = asyncio.run(service.assign_task_to_ace(handle, assignment))
+
+    provider = service.get_provider("dummy_runtime_ace_ready_then_blocked")
+    assert provider.assignments == []
+    assert result.status == "blocked"
+    assert result.blocker_reason.value == "runtime_permission_required"
+    readiness_events = [
+        event
+        for event in assignment.metadata["delivery_trace_events"]
+        if event["action"] == "task_assignment" and "readiness_phase" in event["details"]
+    ]
+    assert [event["details"]["readiness_phase"] for event in readiness_events] == [
+        "initial",
+        "post_ready_settle",
+    ]
