@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from atc.api.delivery import delivery_response
 from atc.core.errors import CreationFailedError, SessionNotFoundError, SessionStaleError
+from atc.orchestration.boundaries import enforce_boundary
 from atc.runtime.health import ace_health, apply_recovery_plan, build_recovery_plan
 from atc.session import ace as ace_ops
 from atc.session.state_machine import InvalidTransitionError
@@ -143,6 +144,13 @@ async def list_aces(project_id: str, request: Request) -> list[SessionResponse]:
 
 @router.post("/projects/{project_id}/aces", response_model=SessionResponse, status_code=201)
 async def create_ace(project_id: str, body: CreateAceRequest, request: Request) -> SessionResponse:
+    await enforce_boundary(
+        request,
+        action="ace.create",
+        target_role="ace",
+        project_id=project_id,
+        metadata={"ace_name": body.name, "task_id": body.task_id},
+    )
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
 
@@ -183,6 +191,13 @@ async def get_ace_health(
     request: Request,
 ) -> dict[str, object]:
     """Return provider-neutral Ace runtime/dispatch health."""
+    await enforce_boundary(
+        request,
+        action="ace.health",
+        target_role="ace",
+        project_id=project_id,
+        session_id=session_id,
+    )
     db = await _get_db(request)
     project = await db_ops.get_project(db, project_id)
     if project is None:
@@ -306,6 +321,14 @@ async def recover_ace(
 ) -> dict[str, object]:
     """Inspect-first Ace recovery plan; mutation is policy-gated."""
 
+    await enforce_boundary(
+        request,
+        action="ace.recover",
+        target_role="ace",
+        project_id=project_id,
+        session_id=session_id,
+        metadata={"policy": body.policy, "dry_run": body.dry_run},
+    )
     db = await _get_db(request)
     project = await db_ops.get_project(db, project_id)
     if project is None:
@@ -324,6 +347,13 @@ async def recover_ace(
 
 @router.post("/aces/{session_id}/start")
 async def start_ace(session_id: str, body: StartAceRequest, request: Request) -> dict[str, object]:
+    await enforce_boundary(
+        request,
+        action="ace.start",
+        target_role="ace",
+        session_id=session_id,
+        metadata={"has_instruction": body.instruction is not None},
+    )
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
     try:
@@ -353,6 +383,7 @@ async def start_ace(session_id: str, body: StartAceRequest, request: Request) ->
 
 @router.post("/aces/{session_id}/stop")
 async def stop_ace(session_id: str, request: Request) -> dict[str, str]:
+    await enforce_boundary(request, action="ace.stop", target_role="ace", session_id=session_id)
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
     try:
@@ -455,6 +486,13 @@ async def message_ace(
     body: MessageRequest,
     request: Request,
 ) -> dict[str, object]:
+    await enforce_boundary(
+        request,
+        action="ace.message",
+        target_role="ace",
+        session_id=session_id,
+        metadata={"message_length": len(body.message)},
+    )
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
 
@@ -490,6 +528,7 @@ async def message_ace(
 
 @router.delete("/aces/{session_id}", status_code=204)
 async def delete_ace(session_id: str, request: Request) -> None:
+    await enforce_boundary(request, action="ace.delete", target_role="ace", session_id=session_id)
     db = await _get_db(request)
     event_bus = await _get_event_bus(request)
     try:

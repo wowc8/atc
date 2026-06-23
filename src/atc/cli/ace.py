@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -19,6 +20,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_API = "http://127.0.0.1:8420"
+
+
+def _add_boundary_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--caller-role",
+        default=os.environ.get("ATC_AGENT_ROLE"),
+        choices=["tower", "leader", "ace", "operator"],
+        help="Calling ATC role for hierarchy boundary enforcement",
+    )
+    parser.add_argument(
+        "--break-glass-approved",
+        action="store_true",
+        help="Explicit operator-approved override for direct Tower→Ace action",
+    )
+    parser.add_argument(
+        "--break-glass-reason",
+        default=None,
+        help="Required reason when using --break-glass-approved",
+    )
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
@@ -88,6 +108,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
         default=_DEFAULT_API,
         help="ATC API base URL",
     )
+    _add_boundary_args(create_parser)
     create_parser.set_defaults(handler=_handle_create)
 
     # atc ace list --project-id <id>
@@ -149,6 +170,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
         default=_DEFAULT_API,
         help="ATC API base URL",
     )
+    _add_boundary_args(health_parser)
     health_parser.set_defaults(handler=_handle_health)
 
     # atc ace recover --project-id <id> --ace-id <id> [--dry-run|--apply]
@@ -166,6 +188,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
         default=_DEFAULT_API,
         help="ATC API base URL",
     )
+    _add_boundary_args(recover_parser)
     recover_parser.set_defaults(handler=_handle_recover)
 
     # atc ace memory <subcommand>
@@ -202,9 +225,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     memory_parser.set_defaults(handler=lambda _: memory_parser.print_help() or 1)
 
 
-def _api_get_json(url: str) -> int:
+def _api_get_json(url: str, headers: dict[str, str] | None = None) -> int:
     """GET a JSON endpoint and print the response."""
-    req = urllib.request.Request(url, method="GET")
+    req = urllib.request.Request(url, method="GET", headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read().decode())
@@ -219,14 +242,27 @@ def _api_get_json(url: str) -> int:
         return 1
 
 
-def _api_post_json(url: str, payload: dict) -> int:
+def _boundary_headers(args: argparse.Namespace) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    caller_role = getattr(args, "caller_role", None)
+    if caller_role:
+        headers["X-ATC-Caller-Role"] = caller_role
+    if getattr(args, "break_glass_approved", False):
+        headers["X-ATC-Break-Glass-Approved"] = "true"
+    reason = getattr(args, "break_glass_reason", None)
+    if reason:
+        headers["X-ATC-Break-Glass-Reason"] = reason
+    return headers
+
+
+def _api_post_json(url: str, payload: dict, headers: dict[str, str] | None = None) -> int:
     """POST JSON to a URL and print the response."""
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         url,
         data=data,
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **(headers or {})},
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -315,29 +351,14 @@ def _handle_notify(args: argparse.Namespace) -> int:
 
 def _handle_create(args: argparse.Namespace) -> int:
     """POST /api/projects/{project_id}/aces to create a new ace session."""
-    url = f"{args.api}/api/projects/{args.project_id}/aces"
     payload: dict = {"name": args.name}
     if args.task_id:
         payload["task_id"] = args.task_id
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/json"},
+    return _api_post_json(
+        f"{args.api}/api/projects/{args.project_id}/aces",
+        payload,
+        headers=_boundary_headers(args),
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = json.loads(resp.read().decode())
-            print(json.dumps(body, indent=2))
-            return 0
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode() if exc.fp else str(exc)
-        print(f"Error: {exc.code} — {detail}", file=sys.stderr)
-        return 1
-    except urllib.error.URLError as exc:
-        print(f"Error: cannot reach ATC API at {args.api} — {exc.reason}", file=sys.stderr)
-        return 1
 
 
 def _handle_list(args: argparse.Namespace) -> int:
@@ -408,7 +429,10 @@ def _handle_memory_get(args: argparse.Namespace) -> int:
 
 
 def _handle_health(args: argparse.Namespace) -> int:
-    return _api_get_json(f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/health")
+    return _api_get_json(
+        f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/health",
+        headers=_boundary_headers(args),
+    )
 
 
 def _handle_report_active(args: argparse.Namespace) -> int:
@@ -442,4 +466,5 @@ def _handle_recover(args: argparse.Namespace) -> int:
     return _api_post_json(
         f"{args.api}/api/projects/{args.project_id}/aces/{args.ace_id}/recover",
         {"dry_run": not args.apply, "policy": args.policy},
+        headers=_boundary_headers(args),
     )
