@@ -15,11 +15,16 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import aiosqlite  # type: ignore[import-not-found]
 
+from atc.orchestration.handoff import (
+    HandoffPayloadKind,
+    handoff_from_delivery_result,
+)
 from atc.runtime.models import (
     BlockerReason,
     DeliveryState,
     RecoveryRecommendation,
     RecoveryState,
+    RoleKind,
     RuntimeDeliveryResult,
     RuntimeState,
 )
@@ -69,6 +74,7 @@ class LeaderKickoffVerification:
     kickoff_blocker_reason: str | None = None
     kickoff_recovery_recommendation: dict[str, Any] | None = None
     delivery_trace_id: str | None = None
+    managed_handoff: dict[str, Any] | None = None
     blocker_reason: str | None = None
     message: str | None = None
 
@@ -90,6 +96,7 @@ class LeaderKickoffVerification:
             "kickoff_blocker_reason": self.kickoff_blocker_reason,
             "kickoff_recovery_recommendation": self.kickoff_recovery_recommendation,
             "delivery_trace_id": self.delivery_trace_id,
+            "managed_handoff": self.managed_handoff,
         }
         if self.blocker_reason:
             data["blocker_reason"] = self.blocker_reason
@@ -208,6 +215,12 @@ async def report_leader_goal_accepted(
         "message": message,
     }
     context["leader_active_report"] = report
+    existing_handoff = context.get("managed_handoff")
+    if isinstance(existing_handoff, dict):
+        existing_handoff["child_reported_active"] = True
+        existing_handoff["lifecycle_state"] = "child_reported_active"
+        existing_handoff["handoff_verified"] = False
+        context["managed_handoff"] = existing_handoff
     await conn.execute(
         (
             "UPDATE leaders SET context = ?, status = 'managing', "
@@ -255,6 +268,17 @@ async def persist_leader_kickoff_payload(
     )
     context["leader_kickoff_payload"] = payload.as_dict()
     context["leader_original_goal"] = goal
+    context["managed_handoff"] = {
+        "parent_role": RoleKind.TOWER.value,
+        "child_role": RoleKind.LEADER.value,
+        "payload_kind": HandoffPayloadKind.LEADER_GOAL.value,
+        "lifecycle_state": "session_created",
+        "project_id": project_id,
+        "payload_hash": payload.trace_id,
+        "trace_id": payload.trace_id,
+        "handoff_verified": False,
+        "child_reported_active": False,
+    }
     await conn.execute(
         "UPDATE leaders SET context = ?, goal = ?, updated_at = datetime('now') WHERE id = ?",
         (json.dumps(context), goal, leader.id),
@@ -346,6 +370,12 @@ def verify_leader_kickoff_delivery(
     """Classify a kickoff delivery result into explicit startup guarantees."""
 
     if result is None:
+        handoff = handoff_from_delivery_result(
+            None,
+            parent_role=RoleKind.TOWER,
+            child_role=RoleKind.LEADER,
+            payload_kind=HandoffPayloadKind.LEADER_GOAL,
+        )
         return LeaderKickoffVerification(
             kickoff_verified=False,
             kickoff_state="queued_unverified",
@@ -358,6 +388,7 @@ def verify_leader_kickoff_delivery(
             leader_began_work=False,
             startup_handshake_state="not_started",
             goal_acceptance_state="not_submitted",
+            managed_handoff=handoff.as_dict(),
             message="Kickoff delivery was queued but not observed",
         )
 
@@ -415,6 +446,20 @@ def verify_leader_kickoff_delivery(
         state = "runtime_created"
     else:
         state = "queued_unverified"
+    handoff = handoff_from_delivery_result(
+        result,
+        parent_role=RoleKind.TOWER,
+        child_role=RoleKind.LEADER,
+        payload_kind=HandoffPayloadKind.LEADER_GOAL,
+        child_reported_active=bool(leader_reported_active and goal_accepted),
+        first_actionable_step_observed=canonical_work_observed,
+        verified_at=first_actionable_step_observed_at or task_graph_created_at,
+        recovery_recommendation=(
+            result.recovery_recommendation.as_dict()
+            if result.recovery_recommendation
+            else _recovery_recommendation(blocker)
+        ),
+    )
 
     return LeaderKickoffVerification(
         kickoff_verified=kickoff_verified,
@@ -445,6 +490,7 @@ def verify_leader_kickoff_delivery(
             else _recovery_recommendation(blocker)
         ),
         delivery_trace_id=result.trace_id,
+        managed_handoff=handoff.as_dict(),
         blocker_reason=blocker.value if isinstance(blocker, BlockerReason) else None,
         message=result.message,
     )

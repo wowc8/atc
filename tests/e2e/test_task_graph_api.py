@@ -374,6 +374,28 @@ class TestIdempotentAssignment:
         assert len(data) == 1
         assert data[0]["assignment_id"] == "key-list"
 
+    def test_runtime_truth_includes_managed_handoff_context(self, client: TestClient) -> None:
+        project_id = _create_project(client)
+        create_resp = client.post(
+            f"/api/projects/{project_id}/task-graphs",
+            json={"title": "Runtime truth handoff"},
+        )
+        tg_id = create_resp.json()["id"]
+
+        client.post(
+            f"/api/task-graphs/{tg_id}/assign",
+            json={"ace_session_id": "ace-1", "assignment_id": "key-handoff"},
+        )
+
+        resp = client.get(f"/api/task-graphs/{tg_id}")
+        assert resp.status_code == 200
+        handoff = resp.json()["runtime_truth"]["evidence"]["managed_handoff"]
+        assert handoff["parent_role"] == "leader"
+        assert handoff["child_role"] == "ace"
+        assert handoff["payload_kind"] == "ace_assignment"
+        assert handoff["lifecycle_state"] == "not_started"
+        assert handoff["handoff_verified"] is False
+
     def test_assignment_status_transition(self, client: TestClient) -> None:
         project_id = _create_project(client)
         create_resp = client.post(
