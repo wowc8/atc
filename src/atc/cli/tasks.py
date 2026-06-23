@@ -8,6 +8,7 @@ curl payloads for common task graph operations.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -17,6 +18,38 @@ if TYPE_CHECKING:
     import argparse
 
 _DEFAULT_API = "http://127.0.0.1:8420"
+
+
+def _add_boundary_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--caller-role",
+        default=os.environ.get("ATC_AGENT_ROLE"),
+        choices=["tower", "leader", "ace", "operator"],
+        help="Calling ATC role for hierarchy boundary enforcement",
+    )
+    parser.add_argument(
+        "--break-glass-approved",
+        action="store_true",
+        help="Explicit operator-approved override for direct Tower→Ace assignment",
+    )
+    parser.add_argument(
+        "--break-glass-reason",
+        default=None,
+        help="Required reason when using --break-glass-approved",
+    )
+
+
+def _boundary_headers(args: argparse.Namespace) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    caller_role = getattr(args, "caller_role", None)
+    if caller_role:
+        headers["X-ATC-Caller-Role"] = caller_role
+    if getattr(args, "break_glass_approved", False):
+        headers["X-ATC-Break-Glass-Approved"] = "true"
+    reason = getattr(args, "break_glass_reason", None)
+    if reason:
+        headers["X-ATC-Break-Glass-Reason"] = reason
+    return headers
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
@@ -46,6 +79,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[ty
     assign_parser.add_argument("--project-id", required=True, help="Project UUID")
     assign_parser.add_argument("--task-id", required=True, help="Task graph UUID")
     assign_parser.add_argument("--api", default=_DEFAULT_API, help="ATC API base URL")
+    _add_boundary_args(assign_parser)
     assign_parser.set_defaults(handler=_handle_assign)
 
     tasks_parser.set_defaults(handler=lambda _: tasks_parser.print_help() or 1)
@@ -60,10 +94,17 @@ def _read_response(resp: Any) -> Any:
     return json.loads(raw) if raw else {}
 
 
-def _request_json(url: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> int:
+def _request_json(
+    url: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> int:
     data = json.dumps(payload).encode() if payload is not None else None
-    headers = {"Content-Type": "application/json"} if payload is not None else {}
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    request_headers = {"Content-Type": "application/json"} if payload is not None else {}
+    request_headers.update(headers or {})
+    req = urllib.request.Request(url, data=data, method=method, headers=request_headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             _print_json(_read_response(resp))
@@ -99,4 +140,5 @@ def _handle_assign(args: argparse.Namespace) -> int:
         f"{args.api}/api/projects/{args.project_id}/leader/assign-task",
         method="POST",
         payload={"task_graph_id": args.task_id},
+        headers=_boundary_headers(args),
     )

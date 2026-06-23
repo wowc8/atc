@@ -32,6 +32,7 @@ Tower is expected to:
 - create Leaders with enough context to manage their own project scope
 - verify Leader kickoff/startup readiness before handing off execution
 - after verified handoff, wait for the Leader completion hook instead of polling task progress
+- use direct Ace/task assignment commands only through an audited break-glass override when the operator explicitly approves it
 - avoid micromanaging individual Ace implementation details unless debugging a failure
 - enforce system-level constraints before allowing more work to start
 - keep state durable and inspectable
@@ -78,13 +79,14 @@ or the CLI equivalent:
 atc leader report-complete --project-id <project-id> --summary "..." --evidence "..."
 ```
 
-Tower may still inspect health on explicit operator request, explicit Leader blocker/failure, missing Leader runtime, or a recovery threshold, but it must not continuously poll merely to discover completion.
+Tower may still inspect Leader health on explicit operator request, explicit Leader blocker/failure, missing Leader runtime, or a recovery threshold, but it must not continuously poll merely to discover completion. Direct Tower→Ace commands are blocked by the API/CLI unless the operator approves an audited break-glass override with a reason.
 
 ## Must not do
 
 Tower must not:
 
 - bypass Leaders during normal operation to directly task Aces
+- run direct Ace health/recover/message/create/delete or task assignment commands from Tower context without `--break-glass-approved` plus an operator-approved `--break-glass-reason`
 - personally perform project implementation work that belongs to a Leader/Ace chain
 - hide Leader or Ace failures behind optimistic status
 - create unbounded parallel work without budget/resource checks

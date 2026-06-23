@@ -329,6 +329,48 @@ class TestTowerStatus:
         data = resp.json()
         assert data["total_sessions"] >= 1
 
+    def test_tower_direct_ace_health_requires_break_glass(self, client: TestClient) -> None:
+        resp = client.post("/api/projects", json={"name": "boundary-proj"})
+        project_id = resp.json()["id"]
+
+        resp = client.post(
+            f"/api/projects/{project_id}/aces",
+            json={"name": "blocked-direct-ace"},
+            headers={"X-ATC-Caller-Role": "tower"},
+        )
+        assert resp.status_code == 403
+        detail = resp.json()["detail"]
+        assert detail["reason"] == "tower_must_delegate_ace_operations_to_leader"
+        assert (
+            detail["recommended_action"]
+            == "nudge_or_recover_leader_instead_of_managing_ace_directly"
+        )
+
+    @patch("atc.session.ace._tmux_run", new_callable=AsyncMock, return_value="%1")
+    def test_tower_break_glass_ace_create_is_audited(
+        self, mock_tmux: AsyncMock, client: TestClient
+    ) -> None:
+        resp = client.post("/api/projects", json={"name": "break-glass-proj"})
+        project_id = resp.json()["id"]
+
+        resp = client.post(
+            f"/api/projects/{project_id}/aces",
+            json={"name": "break-glass-ace"},
+            headers={
+                "X-ATC-Caller-Role": "tower",
+                "X-ATC-Break-Glass-Approved": "true",
+                "X-ATC-Break-Glass-Reason": "operator requested direct Ace inspection",
+            },
+        )
+        assert resp.status_code == 201
+
+        events = client.get(
+            f"/api/app-events?project_id={project_id}&category=role_boundary"
+        ).json()
+        assert events
+        assert events[0]["level"] == "warning"
+        assert events[0]["category"] == "role_boundary"
+
     @patch(
         "atc.runtime.service.RuntimeService.send_instruction",
         new_callable=AsyncMock,

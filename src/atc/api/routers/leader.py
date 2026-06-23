@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from atc.api.delivery import delivery_response
 from atc.leader.decomposer import TaskSpec, decompose_goal
 from atc.leader.orchestrator import LeaderOrchestrator
+from atc.orchestration.boundaries import enforce_boundary
 from atc.state import db as db_ops
 from atc.state.transitions import LifecycleTransitionError
 
@@ -290,6 +291,13 @@ async def spawn_aces(
     request: Request,
 ) -> SpawnAcesResponse:
     """Spawn Ace sessions for all ready (unblocked) tasks."""
+    await enforce_boundary(
+        request,
+        action="tasks.assign",
+        target_role="ace",
+        project_id=project_id,
+        metadata={"bulk": True},
+    )
     orch = await _get_or_create_orchestrator(request, project_id)
     assignments = await orch.spawn_aces_for_ready_tasks()
     await _broadcast_tower_progress(request)
@@ -320,6 +328,13 @@ async def assign_task(
     request: Request,
 ) -> AssignTaskResponse:
     """Spawn or reuse one Ace assignment for a specific ready task graph entry."""
+    await enforce_boundary(
+        request,
+        action="tasks.assign",
+        target_role="ace",
+        project_id=project_id,
+        metadata={"task_graph_id": body.task_graph_id},
+    )
     orch = await _get_or_create_orchestrator(request, project_id)
     try:
         assignment = await orch.spawn_ace_for_task(body.task_graph_id)
