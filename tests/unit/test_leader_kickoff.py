@@ -67,6 +67,9 @@ async def test_persist_leader_kickoff_payload_is_recoverable(db) -> None:
     assert context["leader_kickoff_payload"]["message"] == message
     assert context["leader_kickoff_payload"]["source"] == "test"
     assert context["leader_kickoff_payload"]["trace_id"]
+    assert context["managed_handoff"]["payload_kind"] == "leader_goal"
+    assert context["managed_handoff"]["lifecycle_state"] == "session_created"
+    assert context["managed_handoff"]["handoff_verified"] is False
     assert payload.trace_id == context["leader_kickoff_payload"]["trace_id"]
     assert f"/api/projects/{project.id}/leader/report-active" in message
     assert f"/api/projects/{project.id}/leader/decompose" in message
@@ -109,6 +112,9 @@ def test_verify_leader_kickoff_accepts_active_delivery() -> None:
     assert verification.goal_accepted is True
     assert verification.leader_reported_active is True
     assert verification.leader_began_work is True
+    assert verification.managed_handoff is not None
+    assert verification.managed_handoff["lifecycle_state"] == "handoff_verified"
+    assert verification.managed_handoff["child_reported_active"] is True
 
 
 def test_verify_leader_kickoff_distinguishes_pending_submission() -> None:

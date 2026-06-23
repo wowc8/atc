@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from atc.orchestration.handoff import handoff_from_assignment
 from atc.runtime.models import DeliveryState, RuntimeState
 from atc.state import db as db_ops
 from atc.state.transitions import LifecycleTransitionError
@@ -130,6 +131,11 @@ def _runtime_truth_for_task(tg: Any, assignment: Any | None = None) -> RuntimeTr
     else:
         runtime_state = RuntimeState.IDLE.value
 
+    handoff = handoff_from_assignment(
+        assignment,
+        project_id=tg.project_id,
+        task_id=tg.id,
+    )
     return RuntimeTruthSummary(
         task_state=task_state,
         runtime_state=runtime_state,
@@ -142,6 +148,7 @@ def _runtime_truth_for_task(tg: Any, assignment: Any | None = None) -> RuntimeTr
             "assignment_id": assignment.assignment_id if assignment is not None else None,
             "ace_session_id": assignment.ace_session_id if assignment is not None else None,
             "assigned_task_id": assignment.assigned_task_id if assignment is not None else None,
+            "managed_handoff": handoff.as_dict(),
         },
     )
 
