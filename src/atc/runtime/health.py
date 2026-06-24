@@ -914,6 +914,33 @@ def build_recovery_plan(
     )
 
 
+async def _publish_recovery_audit(
+    event_bus: Any | None,
+    health: RuntimeHealth,
+    *,
+    policy: str,
+    status: str,
+    action: str | None = None,
+    blocker_reason: str | None = None,
+    refused_reason: str | None = None,
+) -> None:
+    if event_bus is None:
+        return
+    payload = {
+        "role": health.role,
+        "project_id": health.project_id,
+        "session_id": health.session_id,
+        "blocker_reason": blocker_reason if blocker_reason is not None else health.current_blocker,
+        "policy": policy,
+        "status": status,
+    }
+    if action:
+        payload["action"] = action
+    if refused_reason:
+        payload["refused_reason"] = refused_reason
+    await event_bus.publish("runtime_recovery_audit", payload)
+
+
 async def apply_recovery_plan(
     conn: aiosqlite.Connection,
     health: RuntimeHealth,
@@ -931,6 +958,13 @@ async def apply_recovery_plan(
 
     plan = build_recovery_plan(health, mode="apply", policy=policy)
     if plan.refused_reason:
+        await _publish_recovery_audit(
+            event_bus,
+            health,
+            policy=policy,
+            status="refused",
+            refused_reason=plan.refused_reason,
+        )
         return plan
 
     if health.current_blocker == BlockerReason.PROMPT_NOT_SUBMITTED.value and any(
@@ -941,6 +975,13 @@ async def apply_recovery_plan(
         if session is None:
             plan.refused_reason = "runtime_session_missing"
             plan.message = "Apply refused: runtime session is missing."
+            await _publish_recovery_audit(
+                event_bus,
+                health,
+                policy=policy,
+                status="refused",
+                refused_reason=plan.refused_reason,
+            )
             return plan
         inspection = await service.inspect_session_record(session)
         blocker = _blocker_from_inspection(inspection)
@@ -954,6 +995,15 @@ async def apply_recovery_plan(
                     "blocker_reason": blocker,
                 }
             )
+            await _publish_recovery_audit(
+                event_bus,
+                health,
+                policy=policy,
+                status="refused",
+                action="reinspect_runtime",
+                blocker_reason=blocker,
+                refused_reason=plan.refused_reason,
+            )
             return plan
         submitted = await service.submit_pending_prompt_for_session_record(session, inspection)
         if not submitted:
@@ -961,6 +1011,14 @@ async def apply_recovery_plan(
             plan.message = (
                 "Apply refused: provider adapter did not confirm safe pending "
                 "prompt submission."
+            )
+            await _publish_recovery_audit(
+                event_bus,
+                health,
+                policy=policy,
+                status="refused",
+                action="submit_pending_prompt",
+                refused_reason=plan.refused_reason,
             )
             return plan
         plan.actions.append(
@@ -972,6 +1030,13 @@ async def apply_recovery_plan(
             if health.role == "leader"
             else await ace_health(conn, health.project_id, session.id)
         ).as_dict()
+        await _publish_recovery_audit(
+            event_bus,
+            health,
+            policy=policy,
+            status="applied",
+            action="submit_pending_prompt",
+        )
         return plan
 
     if health.current_blocker == BlockerReason.RUNTIME_UPDATE_REQUIRED.value:

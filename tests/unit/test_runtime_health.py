@@ -69,6 +69,14 @@ class FakeRuntimeService:
         return True
 
 
+class FakeEventBus:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    async def publish(self, event_type: str, payload: dict) -> None:
+        self.events.append((event_type, payload))
+
+
 def _request(db):
     request = MagicMock()
     request.app.state.db = db
@@ -687,13 +695,68 @@ async def test_prompt_not_submitted_apply_reinspects_and_submits_via_provider(
 
     monkeypatch.setattr(health_module, "RuntimeService", lambda: fake_service)
     monkeypatch.setattr(health_module, "leader_health", fake_leader_health)
+    event_bus = FakeEventBus()
 
-    plan = await apply_recovery_plan(db, health, policy="submit_pending_prompt")
+    plan = await apply_recovery_plan(
+        db,
+        health,
+        policy="submit_pending_prompt",
+        event_bus=event_bus,
+    )
 
     assert plan.refused_reason is None
     assert fake_service.submitted is True
     assert plan.actions[-1]["action"] == "submit_pending_prompt"
     assert plan.actions[-1]["status"] == "applied"
+    assert event_bus.events == [
+        (
+            "runtime_recovery_audit",
+            {
+                "role": "leader",
+                "project_id": project.id,
+                "session_id": session.id,
+                "blocker_reason": "prompt_not_submitted",
+                "policy": "submit_pending_prompt",
+                "status": "applied",
+                "action": "submit_pending_prompt",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prompt_not_submitted_apply_audits_policy_refusal(db) -> None:
+    project = await create_project(db, "pending-prompt-refuse-audit")
+    health = RuntimeHealth(
+        role="leader",
+        project_id=project.id,
+        runtime_exists=True,
+        pane_attached=True,
+        provider="codex",
+        session_id="leader-session",
+        runtime_state=RuntimeState.BLOCKED.value,
+        current_blocker=BlockerReason.PROMPT_NOT_SUBMITTED.value,
+        kickoff_state={"pending_prompt_matches_persisted_payload": True},
+    )
+    event_bus = FakeEventBus()
+
+    plan = await apply_recovery_plan(db, health, policy="inspect_first", event_bus=event_bus)
+
+    assert plan.refused_reason == "apply_requires_submit_pending_prompt_policy"
+    assert event_bus.events == [
+        (
+            "runtime_recovery_audit",
+            {
+                "role": "leader",
+                "project_id": project.id,
+                "session_id": "leader-session",
+                "blocker_reason": "prompt_not_submitted",
+                "policy": "inspect_first",
+                "status": "refused",
+                "refused_reason": "apply_requires_submit_pending_prompt_policy",
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio

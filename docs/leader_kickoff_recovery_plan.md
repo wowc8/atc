@@ -1,6 +1,6 @@
 # Leader Kickoff Verification and Startup Prompt Recovery Plan
 
-**Status:** Planned
+**Status:** In progress — Phases 0–4 implemented through PR #320 follow-up; Phase 4 adds inspect-first `prompt_not_submitted` recovery with provider-owned submission and audit events.
 **Issue:** [#297](https://github.com/wowc8/atc/issues/297)
 **Last updated:** 2026-06-13
 **Scope:** Follow-up runtime/orchestration hardening for Leader startup, managed-workspace provider prompts, `prompt_not_submitted` recovery, task graph ergonomics, and local ATC API capability setup.
