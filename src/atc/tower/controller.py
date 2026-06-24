@@ -35,7 +35,10 @@ from atc.runtime.health import leader_health
 from atc.runtime.models import DeliveryState, RoleKind, RuntimeDeliveryResult, RuntimeState
 from atc.session.state_machine import SessionStatus
 from atc.state import db as db_ops
-from atc.tower.monitoring import decide_tower_monitoring_cadence
+from atc.tower.monitoring import (
+    decide_leader_blocker_escalation,
+    decide_tower_monitoring_cadence,
+)
 from atc.tower.session import send_tower_message, start_tower_session, stop_tower_session
 
 if TYPE_CHECKING:
@@ -101,6 +104,7 @@ class TowerController:
         # Track Leader output lines for monitoring
         self._leader_output_lines: list[str] = []
         self._max_output_lines = 200
+        self._leader_blocker_cycles: dict[str, dict[str, Any]] = {}
 
         # Budget constraint flag — set when budget_warning fires, cleared on budget_ok
         self._budget_constrained = False
@@ -139,6 +143,30 @@ class TowerController:
     @property
     def current_session_id(self) -> str | None:
         return self._current_session_id
+
+    def observe_leader_ace_blockers(
+        self,
+        project_id: str,
+        ace_blockers: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Track repeated Leader-owned Ace blockers and return Tower-safe policy.
+
+        Tower does not inspect or recover Aces here. It only tracks whether the
+        Leader is reporting the same blocker across cycles, then recommends
+        wait → nudge Leader once → escalate to operator.
+        """
+
+        previous = self._leader_blocker_cycles.get(project_id, {})
+        decision = decide_leader_blocker_escalation(
+            ace_blockers,
+            previous_signature=previous.get("signature"),
+            previous_cycle_count=int(previous.get("cycle_count") or 0),
+        )
+        self._leader_blocker_cycles[project_id] = {
+            "signature": decision.blocker_signature,
+            "cycle_count": decision.blocker_cycle_count,
+        }
+        return decision.as_dict()
 
     async def _transition(self, target: TowerState) -> None:
         """Validate and perform a tower state transition."""
@@ -247,6 +275,7 @@ class TowerController:
         self._current_project_id = None
         self._current_session_id = None
         self._leader_output_lines.clear()
+        self._leader_blocker_cycles.clear()
 
         await self._event_bus.publish(
             "tower_state_changed",
@@ -490,6 +519,7 @@ class TowerController:
         self._current_goal = None
         self._leader_session_id = None
         self._leader_output_lines.clear()
+        self._leader_blocker_cycles.pop(project_id, None)
 
         payload = {
             "type": "leader_project_completed",

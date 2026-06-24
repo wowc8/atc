@@ -946,3 +946,37 @@ async def test_monitor_ace_assignments_is_leader_owned_and_publishes_blockers(
     ]
     assert orchestrator.assignments["task-1"].blocker_reason == "ace_dispatch_failed"
     assert events and events[0]["leader_owned"] is True
+
+
+@pytest.mark.asyncio
+async def test_progress_surfaces_leader_owned_ace_blockers(
+    db,
+    orchestrator: LeaderOrchestrator,
+) -> None:
+    tg = await create_task_graph(db, orchestrator.project_id, "Blocked task")
+    orchestrator.assignments[tg.id] = AceAssignment(
+        ace_session_id="ace-blocked-1",
+        task_graph_id=tg.id,
+        task_title="Blocked task",
+        blocker_reason="prompt_not_submitted",
+    )
+
+    progress = await orchestrator.get_progress()
+
+    assert progress["leader_state"] == "ace_blocked"
+    assert progress["tower_recommended_action"] == "nudge_leader_to_resolve_ace_blockers"
+    assert "recover_ace_directly" in progress["tower_must_not"]
+    assert progress["ace_blockers"] == [
+        {
+            "ace_id": "ace-blocked-1",
+            "ace_session_id": "ace-blocked-1",
+            "task_id": tg.id,
+            "task_graph_id": tg.id,
+            "blocker_reason": "prompt_not_submitted",
+            "dispatch_verified": False,
+            "assignment_acceptance_state": "blocked",
+            "owner": "leader",
+            "leader_action": "inspect_or_recover_ace_assignment",
+            "tower_allowed_action": "nudge_leader_only",
+        }
+    ]
