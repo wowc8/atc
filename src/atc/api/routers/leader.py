@@ -93,6 +93,16 @@ class ProgressResponse(BaseModel):
     all_done: bool
     progress_pct: int
     assignments: list[dict[str, Any]]
+    leader_state: str = "working"
+    handoff_verified: bool = False
+    ace_blockers: list[dict[str, Any]] = Field(default_factory=list)
+    tower_recommended_action: str = "wait_for_leader_or_completion_hook"
+    tower_allowed_actions: list[str] = Field(default_factory=list)
+    tower_must_not: list[str] = Field(default_factory=list)
+    blocker_cycle_count: int = 0
+    should_nudge_leader: bool = False
+    should_escalate_to_operator: bool = False
+    escalation_reason: str | None = None
     blocked_transition_errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -437,6 +447,22 @@ async def get_progress(
     """Return a summary of the Leader's task graph progress."""
     orch = await _get_or_create_orchestrator(request, project_id)
     progress = await orch.get_progress()
+    tower = getattr(request.app.state, "tower_controller", None)
+    if tower is not None and hasattr(tower, "observe_leader_ace_blockers"):
+        policy = tower.observe_leader_ace_blockers(
+            project_id,
+            list(progress.get("ace_blockers") or []),
+        )
+        progress.update(
+            {
+                "tower_recommended_action": policy["tower_recommended_action"],
+                "tower_allowed_actions": policy["tower_allowed_actions"],
+                "blocker_cycle_count": policy["blocker_cycle_count"],
+                "should_nudge_leader": policy["should_nudge_leader"],
+                "should_escalate_to_operator": policy["should_escalate_to_operator"],
+                "escalation_reason": policy["reason"],
+            }
+        )
     return ProgressResponse(**progress)
 
 

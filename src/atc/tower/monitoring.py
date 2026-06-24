@@ -31,6 +31,106 @@ class MonitoringCadenceDecision:
     reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class LeaderBlockerEscalationDecision:
+    """Three-cycle Tower policy for Leader-owned Ace blocker summaries."""
+
+    blocker_signature: str
+    blocker_cycle_count: int
+    tower_recommended_action: str
+    tower_allowed_actions: list[str]
+    should_nudge_leader: bool
+    should_escalate_to_operator: bool
+    reason: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "blocker_signature": self.blocker_signature,
+            "blocker_cycle_count": self.blocker_cycle_count,
+            "tower_recommended_action": self.tower_recommended_action,
+            "tower_allowed_actions": self.tower_allowed_actions,
+            "should_nudge_leader": self.should_nudge_leader,
+            "should_escalate_to_operator": self.should_escalate_to_operator,
+            "reason": self.reason,
+        }
+
+
+def _blocker_signature(ace_blockers: list[dict[str, Any]]) -> str:
+    parts = [
+        ":".join(
+            [
+                str(blocker.get("ace_id") or blocker.get("ace_session_id") or ""),
+                str(blocker.get("task_id") or blocker.get("task_graph_id") or ""),
+                str(blocker.get("blocker_reason") or ""),
+            ]
+        )
+        for blocker in ace_blockers
+    ]
+    return "|".join(sorted(parts))
+
+
+def decide_leader_blocker_escalation(
+    ace_blockers: list[dict[str, Any]],
+    *,
+    previous_signature: str | None = None,
+    previous_cycle_count: int = 0,
+) -> LeaderBlockerEscalationDecision:
+    """Apply Tower's three-cycle policy without making Tower manage Aces.
+
+    Cycle 1: wait/report that Leader owns resolution.
+    Cycle 2: Tower may nudge Leader once.
+    Cycle 3+: Tower escalates to the operator with break-glass/restart options.
+    """
+
+    if not ace_blockers:
+        return LeaderBlockerEscalationDecision(
+            blocker_signature="",
+            blocker_cycle_count=0,
+            tower_recommended_action="wait_for_leader_or_completion_hook",
+            tower_allowed_actions=["wait", "inspect_leader_health"],
+            should_nudge_leader=False,
+            should_escalate_to_operator=False,
+            reason="no_leader_reported_ace_blockers",
+        )
+
+    signature = _blocker_signature(ace_blockers)
+    cycle_count = previous_cycle_count + 1 if signature == previous_signature else 1
+    if cycle_count == 1:
+        return LeaderBlockerEscalationDecision(
+            blocker_signature=signature,
+            blocker_cycle_count=cycle_count,
+            tower_recommended_action="wait_for_leader_to_resolve_ace_blockers",
+            tower_allowed_actions=["wait", "inspect_leader_health"],
+            should_nudge_leader=False,
+            should_escalate_to_operator=False,
+            reason="leader_reported_ace_blocker_first_cycle",
+        )
+    if cycle_count == 2:
+        return LeaderBlockerEscalationDecision(
+            blocker_signature=signature,
+            blocker_cycle_count=cycle_count,
+            tower_recommended_action="nudge_leader_to_resolve_ace_blockers",
+            tower_allowed_actions=["nudge_leader_once", "inspect_leader_health"],
+            should_nudge_leader=True,
+            should_escalate_to_operator=False,
+            reason="leader_reported_same_ace_blocker_second_cycle",
+        )
+    return LeaderBlockerEscalationDecision(
+        blocker_signature=signature,
+        blocker_cycle_count=cycle_count,
+        tower_recommended_action="escalate_ace_blockers_to_operator",
+        tower_allowed_actions=[
+            "wait",
+            "ask_leader_to_recover",
+            "operator_approved_break_glass",
+            "stop_or_restart_leader",
+        ],
+        should_nudge_leader=False,
+        should_escalate_to_operator=True,
+        reason="leader_reported_same_ace_blocker_three_cycles",
+    )
+
+
 def _parse_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None

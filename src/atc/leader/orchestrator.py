@@ -725,7 +725,7 @@ class LeaderOrchestrator:
         status = get_completion_status(task_graphs)
         persisted_assignments = await db_ops.list_task_assignments(self.conn)
         assignment_rows = persisted_assignments or list(self.assignments.values())
-        status["assignments"] = [
+        assignments = [
             {
                 "task_graph_id": a.task_graph_id,
                 "ace_session_id": a.ace_session_id,
@@ -751,11 +751,65 @@ class LeaderOrchestrator:
             }
             for a in assignment_rows
         ]
+        ace_blockers = self._build_ace_blocker_summaries(assignments)
+        status["assignments"] = assignments
         status["leader_id"] = self.leader_id
         status["project_id"] = self.project_id
+        status["leader_state"] = self._leader_state(status, ace_blockers)
+        status["handoff_verified"] = bool(status.get("total") or assignments)
+        status["ace_blockers"] = ace_blockers
+        status["tower_must_not"] = [
+            "inspect_ace_pane",
+            "recover_ace_directly",
+            "message_ace_directly",
+            "mark_ace_done_directly",
+        ]
+        status["tower_recommended_action"] = (
+            "nudge_leader_to_resolve_ace_blockers"
+            if ace_blockers
+            else "wait_for_leader_or_completion_hook"
+        )
         status["blocked_transition_errors"] = list(self.blocked_transition_errors)
 
         return status
+
+    @staticmethod
+    def _leader_state(status: dict[str, Any], ace_blockers: list[dict[str, Any]]) -> str:
+        if status.get("all_done"):
+            return "complete"
+        if ace_blockers:
+            return "ace_blocked"
+        if status.get("in_progress") or status.get("todo") or status.get("total"):
+            return "working"
+        return "waiting_for_task_graph"
+
+    @staticmethod
+    def _build_ace_blocker_summaries(assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        blockers: list[dict[str, Any]] = []
+        for assignment in assignments:
+            blocker_reason = assignment.get("blocker_reason")
+            acceptance_state = assignment.get("assignment_acceptance_state")
+            dispatch_verified = bool(assignment.get("dispatch_verified"))
+            is_blocked = bool(blocker_reason) or (
+                acceptance_state in {"blocked", "startup_blocked"}
+            )
+            if not is_blocked:
+                continue
+            blockers.append(
+                {
+                    "ace_id": assignment.get("ace_session_id"),
+                    "ace_session_id": assignment.get("ace_session_id"),
+                    "task_id": assignment.get("task_graph_id"),
+                    "task_graph_id": assignment.get("task_graph_id"),
+                    "blocker_reason": blocker_reason or acceptance_state or "ace_blocked",
+                    "dispatch_verified": dispatch_verified,
+                    "assignment_acceptance_state": acceptance_state,
+                    "owner": "leader",
+                    "leader_action": "inspect_or_recover_ace_assignment",
+                    "tower_allowed_action": "nudge_leader_only",
+                }
+            )
+        return blockers
 
     @staticmethod
     def _assignment_acceptance_state(assignment: Any) -> str:

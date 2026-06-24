@@ -12,7 +12,10 @@ from atc.runtime.health import RuntimeHealth
 from atc.runtime.models import RuntimeState
 from atc.state.db import _SCHEMA_SQL, get_connection, run_migrations
 from atc.tower.controller import TowerController, TowerState
-from atc.tower.monitoring import decide_tower_monitoring_cadence
+from atc.tower.monitoring import (
+    decide_leader_blocker_escalation,
+    decide_tower_monitoring_cadence,
+)
 
 
 @pytest.fixture
@@ -130,3 +133,52 @@ async def test_tower_startup_verification_uses_leader_health_no_ace_inspection(
     health_mock.assert_awaited_once_with(db, project_id)
     nudge_mock.assert_not_called()
     assert tower.state == TowerState.MANAGING
+
+
+def _ace_blocker() -> dict[str, object]:
+    return {
+        "ace_id": "ace-1",
+        "task_id": "task-1",
+        "blocker_reason": "blocked_on_provider_startup_prompt",
+        "owner": "leader",
+        "tower_allowed_action": "nudge_leader_only",
+    }
+
+
+def test_leader_blocker_escalation_three_cycle_policy() -> None:
+    first = decide_leader_blocker_escalation([_ace_blocker()])
+    assert first.blocker_cycle_count == 1
+    assert first.tower_recommended_action == "wait_for_leader_to_resolve_ace_blockers"
+    assert first.should_nudge_leader is False
+    assert first.should_escalate_to_operator is False
+
+    second = decide_leader_blocker_escalation(
+        [_ace_blocker()],
+        previous_signature=first.blocker_signature,
+        previous_cycle_count=first.blocker_cycle_count,
+    )
+    assert second.blocker_cycle_count == 2
+    assert second.tower_recommended_action == "nudge_leader_to_resolve_ace_blockers"
+    assert second.should_nudge_leader is True
+
+    third = decide_leader_blocker_escalation(
+        [_ace_blocker()],
+        previous_signature=second.blocker_signature,
+        previous_cycle_count=second.blocker_cycle_count,
+    )
+    assert third.blocker_cycle_count == 3
+    assert third.tower_recommended_action == "escalate_ace_blockers_to_operator"
+    assert third.should_escalate_to_operator is True
+    assert "operator_approved_break_glass" in third.tower_allowed_actions
+
+
+@pytest.mark.asyncio
+async def test_tower_controller_tracks_repeated_leader_blocker_cycles(db, event_bus) -> None:
+    tower = TowerController(db, event_bus)
+    first = tower.observe_leader_ace_blockers("project-1", [_ace_blocker()])
+    second = tower.observe_leader_ace_blockers("project-1", [_ace_blocker()])
+    third = tower.observe_leader_ace_blockers("project-1", [_ace_blocker()])
+
+    assert first["blocker_cycle_count"] == 1
+    assert second["tower_recommended_action"] == "nudge_leader_to_resolve_ace_blockers"
+    assert third["should_escalate_to_operator"] is True

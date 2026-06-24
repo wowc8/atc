@@ -67,7 +67,13 @@ atc leader message --project-id <project-id> --message "Please read your goal, i
 
 That nudge is a prompt-submission recovery, not a replacement for the original goal. Tower must not paste the full goal/context again unless a recovery path explicitly reports the original payload was lost.
 
-After the Leader reports active/goal accepted and begins project work, Tower must stop checking normal task progress. The Leader is the busy session and owns task graph/Ace monitoring. Tower should wait for the event-driven completion hook:
+After the Leader reports active/goal accepted and begins project work, Tower must stop checking normal task progress. The Leader is the busy session and owns task graph/Ace monitoring. If Leader progress surfaces `ace_blockers`, Tower applies a three-cycle policy without directly managing Aces:
+
+1. first identical blocker cycle: wait and report that Leader owns the Ace recovery;
+2. second identical blocker cycle: send one Leader nudge/request for Leader-owned recovery;
+3. third identical blocker cycle: escalate to the operator with choices such as wait, ask Leader to recover, stop/restart Leader, or operator-approved break-glass.
+
+Tower should then wait for the event-driven completion hook:
 
 ```text
 POST /api/projects/{project_id}/leader/report-complete
