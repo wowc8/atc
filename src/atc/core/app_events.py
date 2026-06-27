@@ -1,6 +1,6 @@
 """Structured app-level event logging.
 
-Records queryable events (session lifecycle, task completion, errors, cost
+Records queryable events (session lifecycle, task completion, errors, usage
 changes) to the ``app_events`` SQLite table.
 """
 

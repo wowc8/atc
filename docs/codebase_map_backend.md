@@ -19,7 +19,7 @@ ATC’s backend is a single-process FastAPI app that keeps durable state in SQLi
 - `api/app.py`: app factory and lifespan. Most important composition root.
 - `api/routers/`
   - `aces.py`: CRUD/start/stop/message/status for Ace sessions.
-  - `tower.py`: Tower session start/stop, goal submission, progress, memory, cost reporting.
+  - `tower.py`: Tower session start/stop, goal submission, progress, memory, token usage reporting.
   - `leader.py`: Leader decomposition, Ace spawning, task completion/failure, cleanup.
   - `context.py`: context hub CRUD and broadcast.
   - plus support routers for projects, memory, backup, usage, failure logs, heartbeat, settings, QA, system, etc.
@@ -68,7 +68,7 @@ ATC’s backend is a single-process FastAPI app that keeps durable state in SQLi
 - `core/events.py`: simple in-process async pub/sub.
 - `core/heartbeat.py`: stale-session monitor.
 - `core/cleanup.py`: startup cleanup of orphaned state.
-- `tracking/`: resource monitor, cost tracker, GitHub tracker, budget enforcer.
+- `tracking/`: resource monitor, token usage tracker, GitHub tracker, budget enforcer.
 - `memory/cron.py`, `memory/consolidation.py`, `memory/ace_stm.py`, `memory/ltm.py`: memory services.
 - `qa/loop.py`: QA feedback loop driven off GitHub PR rows.
 - `backup/`: local/cloud backup services.
@@ -92,7 +92,7 @@ Central file: `src/atc/api/app.py`.
 9. Runs startup cleanup and smoke test.
 10. Reconnects persisted sessions and restarts PTY readers.
 11. Restores TowerController state from DB if tower/leader sessions survived restart.
-12. Starts resource/cost/github/budget/memory/backup background services.
+12. Starts resource/token/github/token-limit/memory/backup background services.
 13. Optionally auto-starts Tower if there are user projects and no restored tower session.
 
 This file is effectively the service container and operational playbook.

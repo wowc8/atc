@@ -13,12 +13,8 @@ type ViewMode = "grid" | "row" | "board";
 
 const VIEW_PREF_KEY = "atc_dashboard_view";
 
-function formatCost(cost: number | null | undefined): string {
-  return cost == null ? "unavailable" : `$${cost.toFixed(2)}`;
-}
-
 function loadViewPref(): ViewMode {
-  const stored = localStorage.getItem(VIEW_PREF_KEY);
+  const stored = globalThis.localStorage?.getItem(VIEW_PREF_KEY);
   if (stored === "grid" || stored === "row" || stored === "board") return stored;
   return "grid";
 }
@@ -40,7 +36,7 @@ export default function Dashboard() {
 
   const handleViewChange = (v: ViewMode) => {
     setView(v);
-    localStorage.setItem(VIEW_PREF_KEY, v);
+    globalThis.localStorage?.setItem(VIEW_PREF_KEY, v);
   };
 
   const handleDelete = async (projectId: string) => {
@@ -85,24 +81,6 @@ export default function Dashboard() {
       </div>
 
       <div className="dashboard__grid">
-        {/* Cost summary card */}
-        <div className="panel dashboard__card">
-          <h3 className="dashboard__card-title">Cost</h3>
-          <div className="dashboard__stat">
-            <span className="dashboard__stat-value">
-              {formatCost(usage.today_cost)}
-            </span>
-            <span className="dashboard__stat-label">today</span>
-          </div>
-          <div className="dashboard__stat">
-            <span className="dashboard__stat-value">
-              {formatCost(usage.month_cost)}
-            </span>
-            <span className="dashboard__stat-label">this month</span>
-          </div>
-        </div>
-
-        {/* Token summary card */}
         <div className="panel dashboard__card">
           <h3 className="dashboard__card-title">Tokens</h3>
           <div className="dashboard__stat">

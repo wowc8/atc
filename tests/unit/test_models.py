@@ -149,7 +149,6 @@ class TestProjectBudget:
     def test_defaults(self) -> None:
         b = ProjectBudget(project_id="p1")
         assert b.daily_token_limit is None
-        assert b.monthly_cost_limit is None
         assert b.warn_threshold == 0.8
         assert b.current_status == "ok"
 
@@ -159,7 +158,6 @@ class TestUsageEvent:
         e = UsageEvent(id="u1", event_type="ai_tokens", recorded_at="2026-01-01")
         assert e.project_id is None
         assert e.model is None
-        assert e.cost_usd is None
 
 
 class TestGitHubPR:

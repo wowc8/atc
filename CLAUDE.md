@@ -62,7 +62,7 @@ src/atc/leader/       → Leader session type + context package
 src/atc/core/         → Event bus, orchestrator, state manager, failure logger
 src/atc/session/      → State machine, ace lifecycle, reconnect, tunnels
 src/atc/terminal/     → PTY stream, output parser, monitor
-src/atc/tracking/     → Cost, resources, GitHub, budget enforcer
+src/atc/tracking/     → Token usage, resources, GitHub, token limit enforcer
 src/atc/state/        → DB connection, models, migrations
 src/atc/config.py     → Pydantic settings from config.yaml
 frontend/src/         → React 19 + TypeScript UI
@@ -99,7 +99,7 @@ docs/                 → Architecture, patterns, API reference
 
 ## Architecture Quick Reference
 
-- **Tower**: singleton controller, spawns Leaders, enforces budgets
+- **Tower**: singleton controller, spawns Leaders, enforces token limits
 - **Leader**: one per project, decomposes goals into task graphs, spawns Aces
 - **Ace**: task-scoped Claude Code session, reports via hooks
 - **Event Bus**: in-process pub/sub connecting all subsystems

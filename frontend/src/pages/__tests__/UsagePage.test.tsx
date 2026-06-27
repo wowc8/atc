@@ -20,9 +20,9 @@ describe("UsagePage", () => {
     expect(screen.getByText("Usage")).toBeInTheDocument();
   });
 
-  it("shows cost overview card", () => {
+  it("shows token overview card", () => {
     renderWithProviders(<UsagePage />);
-    expect(screen.getByText("Cost Overview")).toBeInTheDocument();
+    expect(screen.getByText("Token Usage")).toBeInTheDocument();
   });
 
   it("shows token usage card", () => {
@@ -38,10 +38,10 @@ describe("UsagePage", () => {
   it("shows chart placeholders", () => {
     renderWithProviders(<UsagePage />);
     expect(
-      screen.getByText(/Cost chart placeholder/),
+      screen.getByText(/No token data/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Token chart placeholder/),
+      screen.getByText(/No resource data yet/),
     ).toBeInTheDocument();
   });
 });

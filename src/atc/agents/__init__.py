@@ -10,7 +10,7 @@ Public API::
 
 from atc.agents.base import (
     AgentProvider,
-    CostModel,
+    TokenUsageModel,
     OutputChunk,
     PromptResult,
     ProviderCapabilities,
@@ -29,7 +29,7 @@ from atc.agents.factory import (
 
 __all__ = [
     "AgentProvider",
-    "CostModel",
+    "TokenUsageModel",
     "OutputChunk",
     "PromptResult",
     "ProviderCapabilities",

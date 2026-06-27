@@ -1,11 +1,10 @@
-"""Usage analytics and budget management REST endpoints.
+"""Usage analytics REST endpoints.
 
 Usage routes:
-  GET /api/usage/cost?project_id=&period=7d      → [{date, cost_usd}]
   GET /api/usage/tokens?project_id=&period=30d   → [{date, input_tokens, output_tokens, model}]
   GET /api/usage/resources?project_id=           → [{timestamp, cpu_pct, ram_mb}]
   GET /api/usage/github?project_id=              → [{date, api_calls}]
-  GET /api/usage/summary                         → aggregate across all projects
+  GET /api/usage/summary                         → aggregate token counts across all projects
 """
 
 from __future__ import annotations
@@ -43,11 +42,6 @@ def _period_start(period: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-class CostDataPoint(BaseModel):
-    date: str
-    cost_usd: float
-
-
 class TokenDataPoint(BaseModel):
     date: str
     input_tokens: int
@@ -67,8 +61,6 @@ class GitHubApiDataPoint(BaseModel):
 
 
 class UsageSummaryResponse(BaseModel):
-    today_cost: float | None
-    month_cost: float | None
     today_tokens: int
     month_tokens: int
     oauth_mode: bool = False
@@ -89,90 +81,28 @@ def _is_oauth_mode() -> bool:
 
 @router.get("/summary", response_model=UsageSummaryResponse)
 async def get_usage_summary(request: Request) -> UsageSummaryResponse:
-    """Aggregate cost and token totals across all projects for today and this month."""
-    if _is_oauth_mode():
-        return UsageSummaryResponse(
-            today_cost=None,
-            month_cost=None,
-            today_tokens=0,
-            month_tokens=0,
-            oauth_mode=True,
-            message=(
-                "Cost tracking unavailable — using OAuth authentication. "
-                "Add an Anthropic API key to enable."
-            ),
-        )
-
+    """Aggregate token totals across all projects for today and this month."""
     db = request.app.state.db
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     month_start = datetime.now(UTC).strftime("%Y-%m-01")
 
     tok = "COALESCE(input_tokens,0)+COALESCE(output_tokens,0)"
-    cost_cond = "CASE WHEN recorded_at >= ? THEN cost_usd ELSE 0 END"
     tok_cond = f"CASE WHEN recorded_at >= ? THEN {tok} ELSE 0 END"
     cursor = await db.execute(
         f"""SELECT
-             COALESCE(SUM({cost_cond}), 0) as today_cost,
-             COALESCE(SUM({cost_cond}), 0) as month_cost,
              COALESCE(SUM({tok_cond}), 0) as today_tokens,
              COALESCE(SUM({tok_cond}), 0) as month_tokens
            FROM usage_events
-           WHERE event_type = 'ai_cost'""",
-        (today, month_start, today, month_start),
+           WHERE event_type = 'ai_tokens'""",
+        (today, month_start),
     )
     row = await cursor.fetchone()
     if row is None:
-        return UsageSummaryResponse(
-            today_cost=0.0, month_cost=0.0, today_tokens=0, month_tokens=0, oauth_mode=False
-        )
+        return UsageSummaryResponse(today_tokens=0, month_tokens=0)
     return UsageSummaryResponse(
-        today_cost=float(row[0]),
-        month_cost=float(row[1]),
-        today_tokens=int(row[2]),
-        month_tokens=int(row[3]),
+        today_tokens=int(row[0]),
+        month_tokens=int(row[1]),
     )
-
-
-# ---------------------------------------------------------------------------
-# GET /api/usage/cost
-# ---------------------------------------------------------------------------
-
-
-@router.get("/cost", response_model=list[CostDataPoint])
-async def get_cost_over_time(
-    request: Request,
-    project_id: str | None = None,
-    period: str = "7d",
-) -> list[CostDataPoint]:
-    """Daily cost totals for the given period, optionally filtered by project."""
-    db = request.app.state.db
-    since = _period_start(period)
-
-    if project_id:
-        cursor = await db.execute(
-            """SELECT substr(recorded_at, 1, 10) as date,
-                      COALESCE(SUM(cost_usd), 0) as cost_usd
-               FROM usage_events
-               WHERE event_type = 'ai_cost'
-                 AND project_id = ?
-                 AND recorded_at >= ?
-               GROUP BY date
-               ORDER BY date""",
-            (project_id, since),
-        )
-    else:
-        cursor = await db.execute(
-            """SELECT substr(recorded_at, 1, 10) as date,
-                      COALESCE(SUM(cost_usd), 0) as cost_usd
-               FROM usage_events
-               WHERE event_type = 'ai_cost'
-                 AND recorded_at >= ?
-               GROUP BY date
-               ORDER BY date""",
-            (since,),
-        )
-    rows = await cursor.fetchall()
-    return [CostDataPoint(date=str(r[0]), cost_usd=float(r[1])) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +127,7 @@ async def get_token_usage(
                       COALESCE(SUM(input_tokens), 0) as input_tokens,
                       COALESCE(SUM(output_tokens), 0) as output_tokens
                FROM usage_events
-               WHERE event_type = 'ai_cost'
+               WHERE event_type = 'ai_tokens'
                  AND project_id = ?
                  AND recorded_at >= ?
                GROUP BY date, model
@@ -211,7 +141,7 @@ async def get_token_usage(
                       COALESCE(SUM(input_tokens), 0) as input_tokens,
                       COALESCE(SUM(output_tokens), 0) as output_tokens
                FROM usage_events
-               WHERE event_type = 'ai_cost'
+               WHERE event_type = 'ai_tokens'
                  AND recorded_at >= ?
                GROUP BY date, model
                ORDER BY date, model""",

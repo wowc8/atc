@@ -1,7 +1,7 @@
 /**
  * Comprehensive QA test suite for all features shipped today:
  * - Grid/Row/Board view toggle with drag-to-reorder (#85)
- * - Section 15 resolutions: rolling budget, Tower slowdown, dual cost attribution (#84)
+ * - Section 15 resolutions: rolling budget, Tower slowdown, token usage attribution (#84)
  * - Backup service (#83)
  * - Memory system (#82)
  * - QA loop controller (#81)
@@ -68,13 +68,13 @@ test("3: Usage page — charts render, no placeholder text", async ({ page }) =>
   await expect(page.locator('[data-testid="usage-page"]')).toBeVisible();
 
   // All four sections render
-  await expect(page.locator("text=Cost Overview")).toBeVisible();
+  await expect(page.locator("text=Token Usage Overview")).toBeVisible();
   await expect(page.locator("text=Token Usage")).toBeVisible();
   await expect(page.locator("text=CPU / RAM")).toBeVisible();
   await expect(page.locator("text=Budget Utilization")).toBeVisible();
 
   // No placeholder text
-  expect(await page.locator("text=Cost chart placeholder").count()).toBe(0);
+  expect(await page.locator("text=Token chart placeholder").count()).toBe(0);
   expect(await page.locator("text=placeholder").count()).toBe(0);
 });
 
@@ -511,7 +511,7 @@ test("20: Projects budget CRUD works", async ({ page }) => {
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ daily_token_limit: 10000, monthly_cost_limit: 50.0 }),
+      body: JSON.stringify({ daily_token_limit: 10000 }),
     }
   );
   expect(putRes.ok).toBe(true);

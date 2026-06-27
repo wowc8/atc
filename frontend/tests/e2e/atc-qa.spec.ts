@@ -69,10 +69,10 @@ test("Test 1: App loads without JS errors", async ({ page }) => {
   // TowerBar is visible
   await expect(page.locator('[data-testid="tower-bar"]')).toBeVisible();
 
-  // Cost and token metrics in TowerBar
-  const costSummary = page.locator('[data-testid="cost-summary"]');
-  await expect(costSummary).toBeVisible();
-  await expect(costSummary).toContainText("$");
+  // Token metrics in TowerBar
+  const tokenSummary = page.locator('[data-testid="token-summary"]');
+  await expect(tokenSummary).toBeVisible();
+  await expect(tokenSummary).toContainText("tokens");
 
   const tokenSummary = page.locator('[data-testid="token-summary"]');
   await expect(tokenSummary).toBeVisible();
@@ -96,12 +96,12 @@ test("Test 2: Dashboard page renders correctly", async ({ page }) => {
   await expect(page.locator('[data-testid="dashboard-page"]')).toBeVisible();
 
   // Stats cards are visible (using specific heading selectors)
-  await expect(page.locator(".dashboard__card-title", { hasText: "Cost" })).toBeVisible();
+  await expect(page.locator(".dashboard__card-title", { hasText: "Token" })).toBeVisible();
   await expect(page.locator(".dashboard__card-title", { hasText: "Tokens" })).toBeVisible();
   await expect(page.locator(".dashboard__card-title", { hasText: "Sessions" })).toBeVisible();
 
-  // No stub divs like "Cost chart placeholder"
-  const placeholderText = await page.locator("text=Cost chart placeholder").count();
+  // No stub divs like "Token chart placeholder"
+  const placeholderText = await page.locator("text=Token chart placeholder").count();
   expect(placeholderText).toBe(0);
 
   // Project list section exists
@@ -132,13 +132,13 @@ test("Test 3: Usage page renders all chart sections", async ({ page }) => {
   await expect(page.locator('[data-testid="usage-page"]')).toBeVisible();
 
   // All four sections render
-  await expect(page.locator("text=Cost Overview")).toBeVisible();
+  await expect(page.locator("text=Token Usage Overview")).toBeVisible();
   await expect(page.locator("text=Token Usage")).toBeVisible();
   await expect(page.locator("text=CPU / RAM")).toBeVisible();
   await expect(page.locator("text=Budget Utilization")).toBeVisible();
 
   // No placeholder text from old stub code
-  const oldPlaceholder = await page.locator("text=Cost chart placeholder").count();
+  const oldPlaceholder = await page.locator("text=Token chart placeholder").count();
   expect(oldPlaceholder).toBe(0);
 
   // Period selector buttons exist
@@ -168,7 +168,7 @@ test("Test 4: Budget API CRUD operations", async ({ page }) => {
   const budget = (await apiGet(`/api/projects/${projectId}/budget`)) as {
     project_id: string;
     daily_token_limit: number | null;
-    monthly_cost_limit: number | null;
+    daily_token_limit: number | null;
     warn_threshold: number;
     current_status: string;
     updated_at: string;
@@ -177,7 +177,7 @@ test("Test 4: Budget API CRUD operations", async ({ page }) => {
   expect(budget).toHaveProperty("project_id");
   expect(budget.project_id).toBe(projectId);
   expect(budget).toHaveProperty("daily_token_limit");
-  expect(budget).toHaveProperty("monthly_cost_limit");
+  expect(budget).toHaveProperty("daily_token_limit");
   expect(budget).toHaveProperty("warn_threshold");
   expect(budget).toHaveProperty("current_status");
   expect(budget).toHaveProperty("updated_at");
@@ -185,28 +185,28 @@ test("Test 4: Budget API CRUD operations", async ({ page }) => {
   // PUT budget - update limits
   const updated = (await apiPut(`/api/projects/${projectId}/budget`, {
     daily_token_limit: 5000,
-    monthly_cost_limit: 25.0,
+    daily_token_limit: 25000,
     warn_threshold: 0.9,
   })) as {
     project_id: string;
     daily_token_limit: number;
-    monthly_cost_limit: number;
+    daily_token_limit: number;
     warn_threshold: number;
   };
 
   expect(updated.daily_token_limit).toBe(5000);
-  expect(updated.monthly_cost_limit).toBe(25.0);
+  expect(updated.daily_token_limit).toBe(25000);
   expect(updated.warn_threshold).toBe(0.9);
 
   // GET again to verify saved
   const verified = (await apiGet(`/api/projects/${projectId}/budget`)) as {
     daily_token_limit: number;
-    monthly_cost_limit: number;
+    daily_token_limit: number;
     warn_threshold: number;
   };
 
   expect(verified.daily_token_limit).toBe(5000);
-  expect(verified.monthly_cost_limit).toBe(25.0);
+  expect(verified.daily_token_limit).toBe(25000);
   expect(verified.warn_threshold).toBe(0.9);
 });
 
@@ -260,24 +260,15 @@ test("Test 5: Project page sections and Leader tabs render correctly", async ({ 
 test("Test 6: API endpoints return correct structure", async ({ page }) => {
   // GET /api/usage/summary
   const summary = (await apiGet("/api/usage/summary")) as {
-    today_cost: number | null;
-    month_cost: number | null;
     today_tokens: number;
     month_tokens: number;
     oauth_mode?: boolean;
     message?: string | null;
   };
-  expect(summary).toHaveProperty("today_cost");
-  expect(summary).toHaveProperty("month_cost");
   expect(summary).toHaveProperty("today_tokens");
   expect(summary).toHaveProperty("month_tokens");
-  expect(summary.today_cost === null || typeof summary.today_cost === "number").toBe(true);
-  expect(summary.month_cost === null || typeof summary.month_cost === "number").toBe(true);
   expect(typeof summary.today_tokens).toBe("number");
-
-  // GET /api/usage/cost?period=7d - should return array
-  const costData = (await apiGet("/api/usage/cost?period=7d")) as unknown[];
-  expect(Array.isArray(costData)).toBe(true);
+  expect(typeof summary.month_tokens).toBe("number");
 
   // GET /api/usage/tokens?period=7d - should return array
   const tokenData = (await apiGet("/api/usage/tokens?period=7d")) as unknown[];
@@ -317,17 +308,11 @@ test("Test 7: TowerBar shows correct initial metrics", async ({ page }) => {
   await page.waitForLoadState("domcontentloaded");
   await page.waitForSelector('[data-testid="tower-bar"]', { timeout: 10000 });
 
-  const costEl = page.locator('[data-testid="cost-summary"]');
   const tokenEl = page.locator('[data-testid="token-summary"]');
   const projectCountEl = page.locator('[data-testid="project-count"]');
 
-  await expect(costEl).toBeVisible();
   await expect(tokenEl).toBeVisible();
   await expect(projectCountEl).toBeVisible();
-
-  // Should show $0.00 today (no usage yet)
-  const costText = await costEl.textContent();
-  expect(costText).toContain("$");
 
   const tokenText = await tokenEl.textContent();
   expect(tokenText).toContain("tokens");

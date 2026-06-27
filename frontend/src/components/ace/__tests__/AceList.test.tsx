@@ -163,14 +163,16 @@ describe("AceList", () => {
     renderWithProviders(
       <AceList projectId="proj-1" sessions={[]} onRefresh={vi.fn()} compact />,
     );
-    expect(screen.getByText("No aces yet.")).toBeInTheDocument();
+    expect(screen.getByText("No aces yet")).toBeInTheDocument();
   });
 
-  it("shows create form in compact mode", () => {
+  it("shows create form in compact mode after clicking add", async () => {
+    const user = userEvent.setup();
     renderWithProviders(
       <AceList projectId="proj-1" sessions={[]} onRefresh={vi.fn()} compact />,
     );
-    expect(screen.getByPlaceholderText("New ace name...")).toBeInTheDocument();
+    await user.click(screen.getByTitle("Add ace"));
+    expect(screen.getByPlaceholderText("Ace name…")).toBeInTheDocument();
   });
 
   it("shows session count in compact mode", () => {

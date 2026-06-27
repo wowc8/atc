@@ -212,7 +212,7 @@ See `docs/mcp.md` for example request/response envelopes and usage notes.
 ## Usage & Budget
 
 ```
-GET    /api/usage/cost                        → cost history (query: project_id, period)
+GET    /api/usage/tokens                      → token usage history (query: project_id, period)
 GET    /api/usage/tokens                      → token history
 GET    /api/usage/resources                   → resource samples
 GET    /api/usage/github                      → GitHub API usage
@@ -253,7 +253,7 @@ GET    /api/logs/export?ids=a,b,c             → export as formatted text
 Connect to `ws://127.0.0.1:8420/ws` and subscribe to channels:
 
 ```json
-{"channel": "subscribe", "data": ["state", "costs", "manager:proj-123"]}
+{"channel": "subscribe", "data": ["state", "usage", "manager:proj-123"]}
 ```
 
 ### Channels
@@ -263,7 +263,7 @@ Connect to `ws://127.0.0.1:8420/ws` and subscribe to channels:
 | `state` | Server → Client | Full state snapshot + delta events |
 | `tower` | Server → Client | Tower status, goal updates |
 | `manager:{project_id}` | Server → Client | Leader status, task graph |
-| `costs` | Server → Client | AI usage events |
+| `usage` | Server → Client | AI token usage events |
 | `budget:{project_id}` | Server → Client | Budget status changes |
 | `resources` | Server → Client | CPU/RAM/disk samples |
 | `github:{project_id}` | Server → Client | PR status, CI results |

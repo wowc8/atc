@@ -116,7 +116,7 @@ Files:
 - `components/dashboard/ProjectBoardView.tsx`
 
 Responsibilities:
-- top summary cards for cost, tokens, sessions, notifications
+- top summary cards for tokens, sessions, notifications
 - create project entry point
 - three project list modes: grid, row, board
 - localStorage persistence for preferred dashboard view
@@ -190,9 +190,9 @@ Capabilities:
 
 ## 3. Usage page
 Main file: `pages/UsagePage.tsx`
-- Uses Recharts for cost, token, and CPU/RAM charts.
+- Uses Recharts for token and CPU/RAM charts.
 - Pulls summary numbers from app context, but chart series are fetched locally.
-- Period selector drives cost/token refetch.
+- Period selector drives token refetch.
 - Budget utilization list reads `budgets` from app context.
 
 Important note:
@@ -207,7 +207,7 @@ Main file: `pages/ContextPage.tsx`
 `components/tower/TowerBar.tsx`
 - Primary app chrome and nav
 - status dot from tower state
-- cost/token/project metrics
+- token/project metrics
 - notification badge
 - failure log badge
 - opens `LogViewer` and `SettingsPane`
@@ -331,7 +331,7 @@ Good refactor seam:
 This creates duplicated loading/error logic and manual invalidation.
 
 ### 3. Imperative fetches inside render
-Several components use patterns like `if (!loaded) void fetchPrs()` or `if (!costLoaded) void fetchCost(period)` inside component bodies.
+Several components use patterns like `if (!loaded) void fetchPrs()` or `if (!usageLoaded) void fetchTokenUsage(period)` inside component bodies.
 This is risky under StrictMode and makes render side-effectful.
 Targets include:
 - `UsagePage.tsx`

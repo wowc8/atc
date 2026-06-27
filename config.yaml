@@ -24,7 +24,7 @@ github:
 budget:
   check_interval_seconds: 30
 
-cost_tracker:
+token_tracker:
   poll_interval_seconds: 30
 
 sentry:

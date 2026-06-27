@@ -193,7 +193,6 @@ class TestContextEntriesMigration:
                     model TEXT,
                     input_tokens INTEGER,
                     output_tokens INTEGER,
-                    cost_usd REAL,
                     cpu_pct REAL,
                     ram_mb REAL,
                     api_calls INTEGER,
@@ -202,7 +201,6 @@ class TestContextEntriesMigration:
                 CREATE TABLE IF NOT EXISTS project_budgets (
                     project_id TEXT PRIMARY KEY,
                     daily_token_limit INTEGER,
-                    monthly_cost_limit REAL,
                     warn_threshold REAL NOT NULL DEFAULT 0.8,
                     current_status TEXT NOT NULL DEFAULT 'ok',
                     updated_at TEXT NOT NULL
@@ -217,13 +215,24 @@ class TestContextEntriesMigration:
                     url TEXT,
                     updated_at TEXT NOT NULL
                 );
-                -- Mark migrations 1-7 as applied so only 008 runs
+                -- Mark other migrations as applied so only 008 runs in this focused fixture.
                 INSERT INTO _migrations (version, filename) VALUES (1, '001_initial_schema.sql');
                 INSERT INTO _migrations (version, filename) VALUES (2, '002_task_graphs.sql');
                 INSERT INTO _migrations (version, filename) VALUES (3, '003_project_agent_provider.sql');
                 INSERT INTO _migrations (version, filename) VALUES (5, '005_app_events.sql');
                 INSERT INTO _migrations (version, filename) VALUES (6, '006_task_assignments.sql');
                 INSERT INTO _migrations (version, filename) VALUES (7, '007_feature_flags.sql');
+                INSERT INTO _migrations (version, filename) VALUES (9, '009_budget_constraints.sql');
+                INSERT INTO _migrations (version, filename) VALUES (10, '010_qa_loop.sql');
+                INSERT INTO _migrations (version, filename) VALUES (100, '010a_tower_memory_ensure.sql');
+                INSERT INTO _migrations (version, filename) VALUES (11, '011_memory_system.sql');
+                INSERT INTO _migrations (version, filename) VALUES (12, '012_backup_log.sql');
+                INSERT INTO _migrations (version, filename) VALUES (13, '013_project_position.sql');
+                INSERT INTO _migrations (version, filename) VALUES (14, '014_orchestration_operations.sql');
+                INSERT INTO _migrations (version, filename) VALUES (15, '015_session_provider_scope.sql');
+                INSERT INTO _migrations (version, filename) VALUES (16, '016_task_assignment_dispatch_truth.sql');
+                INSERT INTO _migrations (version, filename) VALUES (17, '017_ace_assignment_acceptance.sql');
+                INSERT INTO _migrations (version, filename) VALUES (18, '018_ace_startup_artifact_parity.sql');
             """)
             conn.commit()
 

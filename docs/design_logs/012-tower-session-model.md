@@ -13,7 +13,7 @@ Two models were considered:
 
 1. **Persistent Claude Code session** — Tower runs as a long-lived Claude Code terminal (like a Leader or Ace), receives events via hooks, and reasons continuously. Rejected for two reasons: (a) idle token burn — a persistent session waiting for the next goal consumes tokens even when doing nothing, which compounds across all projects; (b) restart complexity — if the Tower session crashes or times out, the entire orchestration layer must be rebuilt, and session state recovery is fragile.
 
-2. **Rule-based Python controller with on-demand Claude calls** — Tower logic is deterministic Python code. Claude is invoked only when a goal arrives that requires decomposition or planning, then the connection closes. Accepted: zero idle cost, straightforward restartability (the controller is a plain Python object recreated on startup from DB state), and full observability through normal logging.
+2. **Rule-based Python controller with on-demand Claude calls** — Tower logic is deterministic Python code. Claude is invoked only when a goal arrives that requires decomposition or planning, then the connection closes. Accepted: zero idle overhead, straightforward restartability (the controller is a plain Python object recreated on startup from DB state), and full observability through normal logging.
 
 The Leader and Ace tiers do use persistent Claude Code sessions because they need sustained context across a multi-step task. The Tower's role is coordination and enforcement, not sustained reasoning, so the trade-off is different.
 

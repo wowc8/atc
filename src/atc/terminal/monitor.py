@@ -118,11 +118,10 @@ class SessionMonitor:
                         "alternate_on": result.alternate_on,
                     })
 
-                # Publish cost events when detected
-                if result.cost_dollars is not None:
-                    await self._event_bus.publish("session_cost_update", {
+                # Publish token usage events when detected
+                if result.tokens_in is not None or result.tokens_out is not None:
+                    await self._event_bus.publish("session_token_update", {
                         "session_id": self._session_id,
-                        "cost_dollars": result.cost_dollars,
                         "tokens_in": result.tokens_in,
                         "tokens_out": result.tokens_out,
                     })

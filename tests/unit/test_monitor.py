@@ -95,24 +95,25 @@ class TestSessionMonitor:
         assert "working" in statuses
         assert "waiting" in statuses
 
-    async def test_publishes_cost_event(
+    async def test_publishes_token_event(
         self, monitor: SessionMonitor, event_bus: EventBus
     ) -> None:
-        costs: list[dict] = []
+        tokens: list[dict] = []
 
         async def handler(data: dict) -> None:
-            costs.append(data)
+            tokens.append(data)
 
-        event_bus.subscribe("session_cost_update", handler)
+        event_bus.subscribe("session_token_update", handler)
 
         await monitor.start()
-        monitor.enqueue("sess-1", b"Cost: $0.15 | Tokens: 2.0k in, 1.5k out")
+        monitor.enqueue("sess-1", b"Tokens: 2.0k in, 1.5k out")
         await asyncio.sleep(0.2)
         await monitor.stop()
 
-        assert len(costs) >= 1
-        assert costs[0]["cost_dollars"] == 0.15
-        assert costs[0]["session_id"] == "sess-1"
+        assert len(tokens) >= 1
+        assert tokens[0]["tokens_in"] == 2000
+        assert tokens[0]["tokens_out"] == 1500
+        assert tokens[0]["session_id"] == "sess-1"
 
     async def test_publishes_error_event(
         self, monitor: SessionMonitor, event_bus: EventBus

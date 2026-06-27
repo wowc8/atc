@@ -48,7 +48,7 @@ The codebase is organized around keeping that product hierarchy separate from ru
 | State DB | `src/atc/state/db.py`, `src/atc/state/migrations/` | SQLite/WAL durable state and append-only migrations. |
 | State transitions | `src/atc/state/transitions.py` | Explicit task/session lifecycle guards and stable transition errors. |
 | Reconciliation | `src/atc/session/reconcile.py` | Compares DB belief against actual runtime/tmux/provider state and performs safe repairs. |
-| Tracking | `src/atc/tracking/` | Cost, budgets, resources, GitHub/CI tracking. |
+| Tracking | `src/atc/tracking/` | Token usage, token limits, resources, GitHub/CI tracking. |
 | Memory | `src/atc/memory/` | Ace STM, project log, long-term memory, consolidation. |
 | Backup | `src/atc/backup/` | Local/cloud backup and restore services. |
 | QA | `src/atc/qa/` | Autonomous QA/test/fix/retest support. |

@@ -684,7 +684,6 @@ async def recover_leader(
 class BudgetResponse(BaseModel):
     project_id: str
     daily_token_limit: int | None = None
-    monthly_cost_limit: float | None = None
     warn_threshold: float
     current_status: str
     updated_at: str
@@ -692,7 +691,6 @@ class BudgetResponse(BaseModel):
 
 class UpdateBudgetRequest(BaseModel):
     daily_token_limit: int | None = None
-    monthly_cost_limit: float | None = None
     warn_threshold: float = 0.8
 
 
@@ -708,7 +706,6 @@ async def get_budget(project_id: str, request: Request) -> BudgetResponse:
         return BudgetResponse(
             project_id=project_id,
             daily_token_limit=None,
-            monthly_cost_limit=None,
             warn_threshold=0.8,
             current_status="ok",
             updated_at=datetime.now(UTC).isoformat(),
@@ -731,7 +728,6 @@ async def update_budget(
         db,
         project_id,
         daily_token_limit=body.daily_token_limit,
-        monthly_cost_limit=body.monthly_cost_limit,
         warn_threshold=body.warn_threshold,
     )
     return BudgetResponse(**budget.__dict__)

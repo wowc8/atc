@@ -5,7 +5,7 @@
 
 ## Decision
 
-ATC will be a hierarchical AI orchestration platform with a four-tier chain of command: User → Tower → Leader → Ace. It combines terminal-first session management with cost tracking, GitHub integration, and dashboard analytics.
+ATC will be a hierarchical AI orchestration platform with a four-tier chain of command: User → Tower → Leader → Ace. It combines terminal-first session management with token usage telemetry, GitHub integration, and dashboard analytics.
 
 ## Context
 

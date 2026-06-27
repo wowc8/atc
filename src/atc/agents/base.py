@@ -58,12 +58,13 @@ class OutputChunk:
 
 
 @dataclass(frozen=True)
-class CostModel:
-    """Describes the cost structure for a provider."""
+class TokenUsageModel:
+    """Describes token telemetry dimensions reported by a provider."""
 
-    input_cost_per_token: float = 0.0
-    output_cost_per_token: float = 0.0
-    currency: str = "USD"
+    tracks_input_tokens: bool = True
+    tracks_output_tokens: bool = True
+    tracks_cached_input_tokens: bool = False
+    tracks_reasoning_tokens: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,7 @@ class ProviderCapabilities:
     supports_tool_use: bool = False
     context_window: int = 0
     model: str = ""
-    cost_model: CostModel | None = None
+    token_usage_model: TokenUsageModel | None = None
 
 
 @dataclass(frozen=True)

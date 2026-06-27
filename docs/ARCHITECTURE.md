@@ -50,7 +50,7 @@ Design rule:
 | `core/` | Event bus, orchestrator, state manager, failure logger |
 | `session/` | Session state machine, ace lifecycle, reconnect, SSH tunnels |
 | `terminal/` | PTY streaming (tmux pipe-pane → FIFO → WS), output parser, monitor |
-| `tracking/` | AI cost tracker, system resources (psutil), GitHub PR/CI, budget enforcer |
+| `tracking/` | AI token usage tracker, system resources (psutil), GitHub PR/CI, budget enforcer |
 | `rws/` | Remote Ace Server daemon for remote hosts |
 | `agents/` | Agent deployment SOT — writes config files to /tmp |
 
@@ -75,14 +75,14 @@ QueryClientProvider → AppProvider (WebSocket state) → Router
 
 | Route | Component | Description |
 |---|---|---|
-| `/dashboard` | Dashboard | Cost charts, resource charts, project cards |
+| `/dashboard` | Dashboard | Token usage charts, resource charts, project cards |
 | `/projects/:id` | ProjectView | Leader console + ace terminals + task board |
 | `/settings` | SettingsPage | Configuration management |
 | `/usage` | UsagePage | Full analytics charts |
 
 ### Layout (Option A)
 
-- **TowerBar**: always-visible top bar with status, costs, notifications
+- **TowerBar**: always-visible top bar with status, token usage, notifications
 - **Left Panel**: project list + ace list
 - **Right Panel**: Leader console with tabs (tasks, context, GitHub, budget)
 - **Bottom Panel**: ace terminal tabs with keep-alive off-screen pattern
@@ -98,7 +98,7 @@ Single WebSocket endpoint at `/ws` with channel-based pub/sub.
 | `state` | Full state snapshot + delta events |
 | `tower` | Tower status, goal updates |
 | `manager:{project_id}` | Leader status, task graph updates |
-| `costs` | AI usage events |
+| `usage` | AI token usage events |
 | `budget:{project_id}` | Budget status changes |
 | `resources` | CPU/RAM/disk samples |
 | `github:{project_id}` | PR status, CI results |

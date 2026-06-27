@@ -1,4 +1,4 @@
-"""Unit tests for cost tracker — calculate_cost and delta computation."""
+"""Unit tests for token tracker delta computation and recording."""
 
 from __future__ import annotations
 
@@ -12,55 +12,7 @@ from atc.state.db import (
     get_connection,
     run_migrations,
 )
-from atc.tracking.costs import CostTracker, calculate_cost
-
-# ---------------------------------------------------------------------------
-# calculate_cost
-# ---------------------------------------------------------------------------
-
-
-class TestCalculateCost:
-    def test_sonnet_input_cost(self) -> None:
-        cost = calculate_cost("claude-sonnet-4-6", 1_000_000, 0)
-        assert abs(cost - 3.00) < 0.001
-
-    def test_sonnet_output_cost(self) -> None:
-        cost = calculate_cost("claude-sonnet-4-6", 0, 1_000_000)
-        assert abs(cost - 15.00) < 0.001
-
-    def test_opus_input_cost(self) -> None:
-        cost = calculate_cost("claude-opus-4-6", 1_000_000, 0)
-        assert abs(cost - 15.00) < 0.001
-
-    def test_opus_output_cost(self) -> None:
-        cost = calculate_cost("claude-opus-4-6", 0, 1_000_000)
-        assert abs(cost - 75.00) < 0.001
-
-    def test_haiku_input_cost(self) -> None:
-        cost = calculate_cost("claude-haiku-4-5", 1_000_000, 0)
-        assert abs(cost - 0.80) < 0.001
-
-    def test_haiku_output_cost(self) -> None:
-        cost = calculate_cost("claude-haiku-4-5", 0, 1_000_000)
-        assert abs(cost - 4.00) < 0.001
-
-    def test_unknown_model_falls_back_to_sonnet(self) -> None:
-        cost_unknown = calculate_cost("unknown-model-xyz", 1_000_000, 0)
-        cost_sonnet = calculate_cost("claude-sonnet-4-6", 1_000_000, 0)
-        assert abs(cost_unknown - cost_sonnet) < 0.001
-
-    def test_combined_input_output(self) -> None:
-        cost = calculate_cost("claude-sonnet-4-6", 1_000_000, 1_000_000)
-        assert abs(cost - 18.00) < 0.001  # $3 in + $15 out
-
-    def test_zero_tokens(self) -> None:
-        assert calculate_cost("claude-sonnet-4-6", 0, 0) == 0.0
-
-    def test_small_token_count(self) -> None:
-        # 1000 input tokens of sonnet = $3 / 1000 = $0.003
-        cost = calculate_cost("claude-sonnet-4-6", 1000, 0)
-        assert abs(cost - 0.003) < 0.0001
-
+from atc.tracking.tokens import TokenTracker
 
 # ---------------------------------------------------------------------------
 # _compute_delta
@@ -80,9 +32,9 @@ def ws_hub() -> MagicMock:
 
 
 class TestComputeDelta:
-    def _make_tracker(self, event_bus: EventBus) -> CostTracker:
+    def _make_tracker(self, event_bus: EventBus) -> TokenTracker:
         db = MagicMock()
-        return CostTracker(db, event_bus)
+        return TokenTracker(db, event_bus)
 
     def test_empty_snapshots_no_delta(self, event_bus: EventBus) -> None:
         tracker = self._make_tracker(event_bus)
@@ -184,7 +136,7 @@ async def db():
 
 
 @pytest.mark.asyncio
-class TestCostTrackerPoll:
+class TestTokenTrackerPoll:
     async def test_poll_writes_usage_event(
         self, db, event_bus: EventBus, ws_hub: MagicMock, tmp_path
     ) -> None:
@@ -193,11 +145,11 @@ class TestCostTrackerPoll:
             '{"models": {"claude-sonnet-4-6": {"input_tokens": 1000, "output_tokens": 100}}}'
         )
 
-        tracker = CostTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
+        tracker = TokenTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
         # First poll loads initial snapshot
         await tracker._poll_once()
 
-        cursor = await db.execute("SELECT * FROM usage_events WHERE event_type = 'ai_cost'")
+        cursor = await db.execute("SELECT * FROM usage_events WHERE event_type = 'ai_tokens'")
         rows = await cursor.fetchall()
         assert len(rows) == 1
         assert rows[0]["model"] == "claude-sonnet-4-6"
@@ -212,7 +164,7 @@ class TestCostTrackerPoll:
             '{"models": {"claude-sonnet-4-6": {"input_tokens": 1000, "output_tokens": 100}}}'
         )
 
-        tracker = CostTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
+        tracker = TokenTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
         await tracker._poll_once()  # snapshot = 1000/100
 
         # Simulate new tokens
@@ -223,7 +175,7 @@ class TestCostTrackerPoll:
 
         cursor = await db.execute(
             "SELECT input_tokens FROM usage_events"
-            " WHERE event_type = 'ai_cost' ORDER BY recorded_at"
+            " WHERE event_type = 'ai_tokens' ORDER BY recorded_at"
         )
         rows = await cursor.fetchall()
         assert len(rows) == 2
@@ -233,7 +185,7 @@ class TestCostTrackerPoll:
         self, db, event_bus: EventBus, ws_hub: MagicMock, tmp_path
     ) -> None:
         stats_file = tmp_path / "nonexistent-stats.json"
-        tracker = CostTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
+        tracker = TokenTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
         await tracker._poll_once()
 
         cursor = await db.execute("SELECT COUNT(*) FROM usage_events")
@@ -248,9 +200,9 @@ class TestCostTrackerPoll:
             '{"models": {"claude-sonnet-4-6": {"input_tokens": 100, "output_tokens": 10}}}'
         )
 
-        tracker = CostTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
+        tracker = TokenTracker(db, event_bus, ws_hub=ws_hub, stats_path=stats_file)
         await tracker._poll_once()
 
         ws_hub.broadcast.assert_called_once()
         channel = ws_hub.broadcast.call_args[0][0]
-        assert channel == "costs"
+        assert channel == "tokens"

@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS app_events (
     id          TEXT PRIMARY KEY,
     level       TEXT NOT NULL,           -- debug|info|warning|error|critical
-    category    TEXT NOT NULL,           -- session|task|error|cost|system
+    category    TEXT NOT NULL,           -- session|task|error|usage|system
     message     TEXT NOT NULL,
     detail      TEXT,                    -- JSON: arbitrary event-specific data
     project_id  TEXT,

@@ -12,7 +12,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_project_type
 CREATE INDEX IF NOT EXISTS idx_usage_events_recorded_at
     ON usage_events(recorded_at);
 
--- Index for model-level aggregation (token/cost by model)
+-- Index for model-level aggregation (token usage by model)
 CREATE INDEX IF NOT EXISTS idx_usage_events_model
     ON usage_events(model, event_type);
 

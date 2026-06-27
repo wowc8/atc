@@ -177,4 +177,4 @@ Leader and Ace replacement must preserve goal/task/project context, but should n
 
 This design makes provider switching easier to explain and reason about. Provider choice becomes a session lifecycle concern instead of a misleading project-property trap. Tower regains a data model that matches its product meaning. Restore behavior becomes more robust because scope and provider compatibility are checked explicitly instead of being inferred from a reused project id or sentinel row.
 
-The main cost is temporary schema and compatibility complexity: `sessions.project_id` and `projects.agent_provider` may both need to coexist with newer fields during the migration. That is acceptable because it lowers rollout risk and keeps the refactor honest.
+The main tradeoff is temporary schema and compatibility complexity: `sessions.project_id` and `projects.agent_provider` may both need to coexist with newer fields during the migration. That is acceptable because it lowers rollout risk and keeps the refactor honest.

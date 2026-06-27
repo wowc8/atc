@@ -23,7 +23,7 @@ const EMPTY_PROVIDER_CONFIG: AgentProviderConfig = {
 export default function SettingsPane({ onClose }: Props) {
   const { state } = useAppContext();
   const [githubOrg, setGithubOrg] = useState(
-    () => localStorage.getItem(GITHUB_ORG_KEY) ?? "",
+    () => globalThis.localStorage?.getItem(GITHUB_ORG_KEY) ?? "",
   );
   const [providerConfig, setProviderConfig] = useState<AgentProviderConfig>(EMPTY_PROVIDER_CONFIG);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -64,9 +64,9 @@ export default function SettingsPane({ onClose }: Props) {
   function handleGithubOrgChange(value: string) {
     setGithubOrg(value);
     if (value.trim()) {
-      localStorage.setItem(GITHUB_ORG_KEY, value.trim());
+      globalThis.localStorage?.setItem(GITHUB_ORG_KEY, value.trim());
     } else {
-      localStorage.removeItem(GITHUB_ORG_KEY);
+      globalThis.localStorage?.removeItem(GITHUB_ORG_KEY);
     }
   }
 

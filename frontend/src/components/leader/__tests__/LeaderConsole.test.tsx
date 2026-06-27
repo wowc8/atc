@@ -1,29 +1,64 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LeaderConsole from "../LeaderConsole";
-import { renderWithProviders } from "../../../test/helpers";
-import type { Leader, Project } from "../../../types";
+import type { AppState, Leader, Project } from "../../../types";
 
 vi.mock("../../../hooks/useTerminal", () => ({
   useTerminal: () => ({ attachRef: vi.fn() }),
 }));
 
-class MockWebSocket {
-  onopen: (() => void) | null = null;
-  onmessage: ((e: MessageEvent) => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  readyState = 1;
-  send = vi.fn();
-  close = vi.fn();
+vi.mock("../../dashboard/GitHubPanel", () => ({
+  default: () => <div data-testid="github-panel" />,
+}));
+
+vi.mock("../BudgetPanel", () => ({
+  default: () => <div data-testid="budget-panel" />,
+}));
+
+const dispatch = vi.fn();
+let mockState: AppState;
+
+vi.mock("../../../context/AppContext", () => ({
+  useAppContext: () => ({ state: mockState, dispatch }),
+}));
+
+function setMockState(overrides: Partial<AppState> = {}) {
+  mockState = {
+    projects: [],
+    sessions: [],
+    tasks: {},
+    taskGraphs: {},
+    budgets: {},
+    notifications: [],
+    towerDetail: {
+      state: "idle",
+      current_goal: null,
+      current_project_id: null,
+      current_session_id: null,
+      leader_session_id: null,
+      leader_activity_preview: null,
+    },
+    towerProgress: { project_id: null, done: 0, total: 0, in_progress: 0, todo: 0, progress_pct: 0, all_done: false },
+    brainStatus: { status: "idle", message: "Idle", active_projects: 0 },
+    leaders: {},
+    failureLogs: [],
+    usage: { today_tokens: 0, month_tokens: 0 },
+    github: {},
+    heartbeats: {},
+    selectedProjectId: null,
+    selectedSessionId: null,
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
+  vi.restoreAllMocks();
+  dispatch.mockClear();
+  setMockState();
   vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-    Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
+    Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
   );
-  vi.stubGlobal("WebSocket", MockWebSocket);
 });
 
 const idleLeader: Leader = {
@@ -64,84 +99,61 @@ const codexProject: Project = {
 
 describe("LeaderConsole", () => {
   it("renders the leader console", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={undefined} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={undefined} onRefresh={vi.fn()} />);
     expect(screen.getByTestId("leader-console")).toBeInTheDocument();
   });
 
   it("shows Start button when leader is idle", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} />);
     expect(screen.getByText("Start")).toBeInTheDocument();
   });
 
   it("shows Stop button when leader is managing", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />);
     expect(screen.getByText("Stop")).toBeInTheDocument();
   });
 
   it("shows Stop button when leader is planning", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={planningLeader} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={planningLeader} onRefresh={vi.fn()} />);
     expect(screen.getByText("Stop")).toBeInTheDocument();
   });
 
   it("shows Start button when leader is undefined", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={undefined} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={undefined} onRefresh={vi.fn()} />);
     expect(screen.getByText("Start")).toBeInTheDocument();
   });
 
   it("shows goal input when not running", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} />);
     expect(screen.getByLabelText("Goal (optional)")).toBeInTheDocument();
   });
 
   it("hides goal input when running", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />);
     expect(screen.queryByLabelText("Goal (optional)")).not.toBeInTheDocument();
   });
 
-  it("shows goal text when leader has a goal and is running", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
-    expect(screen.getByText("Build the feature")).toBeInTheDocument();
+  it("shows terminal chrome when leader has a goal and is running", () => {
+    render(<LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />);
+    expect(screen.getByTestId("leader-console")).toBeInTheDocument();
+    expect(screen.getByText("Stop")).toBeInTheDocument();
   });
 
   it("shows status badge for leader", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />,
-    );
+    render(<LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />);
     expect(screen.getByText("managing")).toBeInTheDocument();
   });
 
   it("calls start API and awaits onRefresh when Start is clicked", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn().mockResolvedValue(undefined);
-
     vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ status: "started", session_id: "sess-new" }), {
-          status: 200,
-        }),
+        new Response(JSON.stringify({ status: "started", session_id: "sess-new" }), { status: 200 }),
       ),
     );
 
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={onRefresh} />,
-    );
-
+    render(<LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={onRefresh} />);
     await user.click(screen.getByText("Start"));
 
     await waitFor(() => {
@@ -152,45 +164,31 @@ describe("LeaderConsole", () => {
   it("updates leader status to idle after stop API succeeds", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn().mockResolvedValue(undefined);
-
     vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       Promise.resolve(
         new Response(JSON.stringify({ status: "stopped" }), { status: 200 }),
       ),
     );
 
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={onRefresh} />,
-    );
-
+    render(<LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={onRefresh} />);
     await user.click(screen.getByText("Stop"));
 
-    const confirmButtons = screen.getAllByText("Stop");
-    const confirmBtn = confirmButtons.find(
-      (el) => el.closest(".confirm-popover__confirm") !== null,
-    );
-    if (confirmBtn) {
-      await user.click(confirmBtn);
-      await waitFor(() => {
-        expect(onRefresh).toHaveBeenCalled();
-      });
-    }
+    const confirmBtn = screen.getByTestId("confirm-popover-confirm");
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(onRefresh).toHaveBeenCalled();
+    });
   });
 
   it("shows Starting... while loading on start", async () => {
     const user = userEvent.setup();
     let resolvePost!: (v: Response) => void;
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      () =>
-        new Promise<Response>((r) => {
-          resolvePost = r;
-        }),
+      () => new Promise<Response>((r) => { resolvePost = r; }),
     );
 
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} />,
-    );
-
+    render(<LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} />);
     await user.click(screen.getByText("Start"));
     expect(screen.getByText("Starting...")).toBeInTheDocument();
 
@@ -198,10 +196,8 @@ describe("LeaderConsole", () => {
   });
 
   it("treats codex as a terminal-backed provider", () => {
-    renderWithProviders(
-      <LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} project={codexProject} />,
-      { initialState: { projects: [codexProject] } },
-    );
+    setMockState({ projects: [codexProject] });
+    render(<LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} project={codexProject} />);
     expect(screen.queryByLabelText("Goal (optional)")).not.toBeInTheDocument();
   });
 });

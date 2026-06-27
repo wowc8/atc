@@ -50,7 +50,7 @@ class BudgetConfig(BaseModel):
     check_interval_seconds: int = 30
 
 
-class CostTrackerConfig(BaseModel):
+class TokenTrackerConfig(BaseModel):
     poll_interval_seconds: int = 30
 
 
@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     resource_monitor: ResourceMonitorConfig = ResourceMonitorConfig()
     github: GitHubConfig = GitHubConfig()
     budget: BudgetConfig = BudgetConfig()
-    cost_tracker: CostTrackerConfig = CostTrackerConfig()
+    token_tracker: TokenTrackerConfig = TokenTrackerConfig()
     heartbeat: HeartbeatConfig = HeartbeatConfig()
     logging: LoggingConfig = LoggingConfig()
     sentry: SentryConfig = SentryConfig()

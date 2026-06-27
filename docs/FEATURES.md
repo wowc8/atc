@@ -27,7 +27,7 @@ One per project. The Leader:
 - Decomposes goals into task graphs
 - Spawns and assigns Ace sessions
 - Monitors ace output and re-assigns on failure
-- Reports status and cost deltas back to Tower
+- Reports status and token usage deltas back to Tower
 
 ## Ace Sessions
 
@@ -43,18 +43,18 @@ Task-scoped Claude Code sessions that:
 **Status**: Stub
 
 Web UI showing:
-- TowerBar with live status, costs, notifications
+- TowerBar with live status, token usage, notifications
 - Project/Ace list with status indicators
 - Leader console with terminal + task board
 - Ace terminal tabs with keep-alive off-screen pattern
-- Cost, resource, and GitHub analytics charts
+- Token usage, resource, and GitHub analytics charts
 
 ## Budget Enforcement
 
 **Status**: Stub
 
 Per-project budget limits with:
-- Daily token limits and monthly cost limits
+- Daily token limits
 - Warning threshold notifications
 - Automatic session pause on budget exceeded
 

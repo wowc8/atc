@@ -1,7 +1,5 @@
 import { useState } from "react";
 import {
-  AreaChart,
-  Area,
   BarChart,
   Bar,
   LineChart,
@@ -20,11 +18,6 @@ import "./UsagePage.css";
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface CostDataPoint {
-  date: string;
-  cost_usd: number;
-}
 
 interface TokenDataPoint {
   date: string;
@@ -47,10 +40,6 @@ const PERIOD_LABELS: Record<Period, string> = {
   "30d": "30d",
   "90d": "90d",
 };
-
-function formatCost(cost: number | null | undefined): string {
-  return cost == null ? "unavailable" : `$${cost.toFixed(2)}`;
-}
 
 // ---------------------------------------------------------------------------
 // Period selector
@@ -88,10 +77,6 @@ export default function UsagePage() {
 
   const [period, setPeriod] = useState<Period>("7d");
 
-  // Cost data
-  const [costData, setCostData] = useState<CostDataPoint[]>([]);
-  const [costLoaded, setCostLoaded] = useState(false);
-
   // Token data
   const [tokenData, setTokenData] = useState<TokenDataPoint[]>([]);
   const [tokenLoaded, setTokenLoaded] = useState(false);
@@ -99,16 +84,6 @@ export default function UsagePage() {
   // Resource data
   const [resourceData, setResourceData] = useState<ResourceDataPoint[]>([]);
   const [resourceLoaded, setResourceLoaded] = useState(false);
-
-  async function fetchCost(p: Period) {
-    try {
-      const data = await api.get<CostDataPoint[]>(`/usage/cost?period=${p}`);
-      setCostData(data);
-      setCostLoaded(true);
-    } catch {
-      setCostData([]);
-    }
-  }
 
   async function fetchTokens(p: Period) {
     try {
@@ -130,22 +105,20 @@ export default function UsagePage() {
     }
   }
 
-  if (!costLoaded) void fetchCost(period);
   if (!tokenLoaded) void fetchTokens(period);
   if (!resourceLoaded) void fetchResources();
 
   function handlePeriodChange(p: Period) {
     setPeriod(p);
-    setCostLoaded(false);
     setTokenLoaded(false);
   }
 
   // Pivot token data for grouped bar (one entry per date+model)
-  const tokenByDate = tokenData.reduce<Record<string, Record<string, number>>>(
+  const tokenByDate = tokenData.reduce<Record<string, Record<string, string | number>>>(
     (acc, d) => {
-      if (!acc[d.date]) acc[d.date] = { date: d.date as unknown as number };
-      acc[d.date]![`${d.model}_in`] = (acc[d.date]![`${d.model}_in`] ?? 0) + d.input_tokens;
-      acc[d.date]![`${d.model}_out`] = (acc[d.date]![`${d.model}_out`] ?? 0) + d.output_tokens;
+      if (!acc[d.date]) acc[d.date] = { date: d.date };
+      acc[d.date]![`${d.model}_in`] = Number(acc[d.date]![`${d.model}_in`] ?? 0) + d.input_tokens;
+      acc[d.date]![`${d.model}_out`] = Number(acc[d.date]![`${d.model}_out`] ?? 0) + d.output_tokens;
       return acc;
     },
     {},
@@ -179,74 +152,6 @@ export default function UsagePage() {
       </div>
 
       <div className="usage-page__grid">
-        {/* Cost overview */}
-        <div className="panel usage-page__card">
-          <h3>Cost Overview</h3>
-          <div className="usage-page__stats">
-            <div className="usage-page__stat">
-              <span className="usage-page__stat-value">
-                {formatCost(usage.today_cost)}
-              </span>
-              <span className="usage-page__stat-label">Today</span>
-            </div>
-            <div className="usage-page__stat">
-              <span className="usage-page__stat-value">
-                {formatCost(usage.month_cost)}
-              </span>
-              <span className="usage-page__stat-label">This Month</span>
-            </div>
-          </div>
-          {costData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={140}>
-              <AreaChart
-                data={costData}
-                margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="costGradPage" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#58a6ff" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#58a6ff" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 9, fill: "var(--color-text-muted)" }}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 9, fill: "var(--color-text-muted)" }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v: number) => `$${v.toFixed(2)}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "6px",
-                    fontSize: "11px",
-                  }}
-                  formatter={(v: number) => [`$${v.toFixed(4)}`, "Cost"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="cost_usd"
-                  stroke="#58a6ff"
-                  fill="url(#costGradPage)"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="usage-page__chart-placeholder">
-              No cost data for this period.
-            </div>
-          )}
-        </div>
-
-        {/* Token usage */}
         <div className="panel usage-page__card">
           <h3>Token Usage</h3>
           <div className="usage-page__stats">
