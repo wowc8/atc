@@ -84,7 +84,7 @@ describe("ContextHub", () => {
     mockFetch([]);
     renderWithProviders(<ContextHub scope="global" />);
     await waitFor(() => {
-      expect(screen.getByText("No context entries yet.")).toBeInTheDocument();
+      expect(screen.getByText(/No context entries yet/)).toBeInTheDocument();
     });
   });
 

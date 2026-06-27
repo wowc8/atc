@@ -91,7 +91,6 @@ class Task:
 class ProjectBudget:
     project_id: str
     daily_token_limit: int | None = None
-    monthly_cost_limit: float | None = None
     warn_threshold: float = 0.8
     current_status: str = "ok"  # ok|warn|exceeded
     updated_at: str = ""
@@ -100,14 +99,13 @@ class ProjectBudget:
 @dataclass
 class UsageEvent:
     id: str
-    event_type: str  # ai_tokens|ai_cost|cpu|ram|disk|github_api
+    event_type: str  # ai_tokens|cpu|ram|disk|github_api
     recorded_at: str
     project_id: str | None = None
     session_id: str | None = None
     model: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
-    cost_usd: float | None = None
     cpu_pct: float | None = None
     ram_mb: float | None = None
     disk_mb: float | None = None
@@ -269,7 +267,7 @@ class SessionHeartbeat:
 class AppEvent:
     id: str
     level: str  # debug|info|warning|error|critical
-    category: str  # session|task|error|cost|system
+    category: str  # session|task|error|usage|system
     message: str
     created_at: str = ""
     detail: str | None = None  # JSON

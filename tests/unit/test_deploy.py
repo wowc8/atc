@@ -61,7 +61,6 @@ def manager_spec() -> ManagerDeploySpec:
             {"key": "deploy-target", "value": {"cloud": "aws", "region": "us-east-1"}},
         ],
         initial_tasks=["Set up CI", "Scaffold frontend", "Design DB schema"],
-        budget_ceiling_usd=50.0,
     )
 
 
@@ -347,13 +346,6 @@ class TestDeployManagerFiles:
         assert "If Asked 'What Is Your Role?'" in content
         assert "must not write code" in content
         assert (result.root / "AGENTS.md").read_text() == content
-
-    def test_claude_md_includes_budget(
-        self, manager_spec: ManagerDeploySpec, staging_root: Path
-    ) -> None:
-        result = deploy_manager_files(manager_spec, staging_root=staging_root)
-        content = result.claude_md_path.read_text()
-        assert "$50.00" in content
 
     def test_claude_md_includes_initial_tasks(
         self, manager_spec: ManagerDeploySpec, staging_root: Path

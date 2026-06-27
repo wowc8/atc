@@ -30,7 +30,6 @@ class ParseResult:
     prompt_detected: bool = False
     prompt_text: str = ""
     alternate_on: bool = False
-    cost_dollars: float | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
     tool_name: str | None = None
@@ -86,10 +85,8 @@ _CLAUDE_WAITING_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Cost line from Claude Code output: e.g. "Cost: $0.12 | Tokens: 1.2k in, 0.8k out"
-_COST_RE = re.compile(
-    r"\$(\d+\.?\d*)"
-    r".*?"
+# Token usage line from agent output, e.g. "Tokens: 1.2k in, 0.8k out".
+_TOKEN_USAGE_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*k?\s*in"
     r".*?"
     r"(\d+(?:\.\d+)?)\s*k?\s*out",
@@ -185,14 +182,13 @@ class OutputParser:
         if len(self._buffer) > self._max_buffer:
             self._buffer = self._buffer[-self._max_buffer:]
 
-        # Extract cost info
-        cost_match = _COST_RE.search(clean)
-        if cost_match:
-            result.cost_dollars = float(cost_match.group(1))
-            raw_in = float(cost_match.group(2))
-            raw_out = float(cost_match.group(3))
-            # Handle "k" suffix — if < 100, assume it was in thousands
-            if "k" in cost_match.group(0).lower():
+        # Extract token usage info
+        token_match = _TOKEN_USAGE_RE.search(clean)
+        if token_match:
+            raw_in = float(token_match.group(1))
+            raw_out = float(token_match.group(2))
+            # Handle "k" suffix — if present, the value is in thousands.
+            if "k" in token_match.group(0).lower():
                 result.tokens_in = int(raw_in * 1000)
                 result.tokens_out = int(raw_out * 1000)
             else:

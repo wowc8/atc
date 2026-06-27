@@ -1,6 +1,6 @@
 /**
  * Dashboard views E2E tests:
- * - App loads, TowerBar visible with cost metrics
+ * - App loads, TowerBar visible with token metrics
  * - View toggle [Grid][Row][Board]
  * - Row view renders rows not cards
  * - Board view renders three columns
@@ -15,7 +15,7 @@ import { test, expect } from "@playwright/test";
 const BASE_URL = "http://127.0.0.1:5176";
 const API_URL = "http://127.0.0.1:8421";
 
-test("1: App loads and TowerBar is visible with cost metrics", async ({
+test("1: App loads and TowerBar is visible with token metrics", async ({
   page,
 }) => {
   const jsErrors: string[] = [];
@@ -27,7 +27,7 @@ test("1: App loads and TowerBar is visible with cost metrics", async ({
 
   await expect(page.locator('[data-testid="tower-bar"]')).toBeVisible();
 
-  // TowerBar should show cost metrics ($ sign or "Today" label)
+  // TowerBar should show token metrics ($ sign or "Today" label)
   const towerBarText = await page.locator('[data-testid="tower-bar"]').textContent();
   expect(towerBarText).toBeTruthy();
 
@@ -169,12 +169,12 @@ test("7: Usage page loads with charts — no 'placeholder' text", async ({
   await expect(page.locator('[data-testid="usage-page"]')).toBeVisible();
 
   // Key sections present
-  await expect(page.locator("text=Cost Overview")).toBeVisible();
+  await expect(page.locator("text=Token Usage Overview")).toBeVisible();
   await expect(page.locator("text=Token Usage")).toBeVisible();
 
   // No placeholder text anywhere on the page
   expect(await page.locator("text=placeholder").count()).toBe(0);
-  expect(await page.locator("text=Cost chart placeholder").count()).toBe(0);
+  expect(await page.locator("text=Token chart placeholder").count()).toBe(0);
 
   expect(jsErrors).toHaveLength(0);
 });

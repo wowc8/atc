@@ -26,7 +26,7 @@ export default function CreateProjectModal({
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
-  const defaultOrg = localStorage.getItem(GITHUB_ORG_KEY) ?? "";
+  const defaultOrg = globalThis.localStorage?.getItem(GITHUB_ORG_KEY) ?? "";
 
   useEffect(() => {
     let mounted = true;

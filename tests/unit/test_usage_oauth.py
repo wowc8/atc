@@ -1,4 +1,4 @@
-"""Tests for OAuth-mode cost tracking (Issue #128)."""
+"""Tests for OAuth-mode token telemetry behavior."""
 
 from __future__ import annotations
 
@@ -21,31 +21,27 @@ class TestIsOAuthMode:
         assert _is_oauth_mode() is True
 
     def test_no_key_is_oauth_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # With no key set, cost tracking is disabled (no real API key).
+        # With no key set, provider token telemetry from API-key paths is unavailable.
         monkeypatch.delenv("ATC_ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         assert _is_oauth_mode() is True
 
 
 class TestUsageSummaryResponseModel:
-    def test_accepts_null_costs_in_oauth_mode(self) -> None:
+    def test_accepts_oauth_metadata_without_billing_fields(self) -> None:
         resp = UsageSummaryResponse(
-            today_cost=None,
-            month_cost=None,
             today_tokens=0,
             month_tokens=0,
             oauth_mode=True,
-            message="Cost tracking unavailable — using OAuth authentication. Add an Anthropic API key to enable.",
+            message="Token usage unavailable from OAuth-only telemetry. Add an Anthropic API key to enable provider usage polling.",
         )
-        assert resp.today_cost is None
-        assert resp.month_cost is None
+        assert resp.today_tokens == 0
+        assert resp.month_tokens == 0
         assert resp.oauth_mode is True
         assert resp.message is not None
 
     def test_defaults_oauth_mode_to_false(self) -> None:
         resp = UsageSummaryResponse(
-            today_cost=1.23,
-            month_cost=4.56,
             today_tokens=100,
             month_tokens=500,
         )

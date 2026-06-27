@@ -70,6 +70,17 @@ def clear_connection_app_state(conn: Any) -> None:
     _CONNECTION_APP_STATE.pop(id(conn), None)
 
 
+def _filter_model_fields(model_cls: type[Any], values: dict[str, Any]) -> dict[str, Any]:
+    """Drop columns not represented by a dataclass model.
+
+    This keeps older SQLite databases with retired columns readable while new
+    application models omit those columns.
+    """
+
+    fields = getattr(model_cls, "__dataclass_fields__", {})
+    return {key: value for key, value in values.items() if key in fields}
+
+
 class AppStateCarrier:
     """Attachable holder for live app state alongside sqlite connections."""
 
@@ -322,7 +333,6 @@ CREATE TABLE IF NOT EXISTS failure_logs (
 CREATE TABLE IF NOT EXISTS project_budgets (
     project_id          TEXT PRIMARY KEY REFERENCES projects(id),
     daily_token_limit   INTEGER,
-    monthly_cost_limit  REAL,
     warn_threshold      REAL DEFAULT 0.8,
     current_status      TEXT DEFAULT 'ok',
     updated_at          TEXT NOT NULL
@@ -336,7 +346,6 @@ CREATE TABLE IF NOT EXISTS usage_events (
     model           TEXT,
     input_tokens    INTEGER,
     output_tokens   INTEGER,
-    cost_usd        REAL,
     cpu_pct         REAL,
     ram_mb          REAL,
     disk_mb         REAL,
@@ -2363,7 +2372,6 @@ async def write_usage_event(
     model: str | None = None,
     input_tokens: int | None = None,
     output_tokens: int | None = None,
-    cost_usd: float | None = None,
     cpu_pct: float | None = None,
     ram_mb: float | None = None,
     disk_mb: float | None = None,
@@ -2380,7 +2388,6 @@ async def write_usage_event(
         model=model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        cost_usd=cost_usd,
         cpu_pct=cpu_pct,
         ram_mb=ram_mb,
         disk_mb=disk_mb,
@@ -2389,9 +2396,9 @@ async def write_usage_event(
     await db.execute(
         """INSERT INTO usage_events
            (id, project_id, session_id, event_type, model,
-            input_tokens, output_tokens, cost_usd,
+            input_tokens, output_tokens,
             cpu_pct, ram_mb, disk_mb, api_calls, recorded_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             event.id,
             event.project_id,
@@ -2400,7 +2407,6 @@ async def write_usage_event(
             event.model,
             event.input_tokens,
             event.output_tokens,
-            event.cost_usd,
             event.cpu_pct,
             event.ram_mb,
             event.disk_mb,
@@ -2429,7 +2435,7 @@ async def get_project_budget(
     row = await cursor.fetchone()
     if row is None:
         return None
-    return ProjectBudget(**dict(row))
+    return ProjectBudget(**_filter_model_fields(ProjectBudget, dict(row)))
 
 
 async def upsert_project_budget(
@@ -2437,22 +2443,20 @@ async def upsert_project_budget(
     project_id: str,
     *,
     daily_token_limit: int | None = None,
-    monthly_cost_limit: float | None = None,
     warn_threshold: float = 0.8,
 ) -> ProjectBudget:
     """Insert or update a project budget row."""
     now = _now()
     await db.execute(
         """INSERT INTO project_budgets
-           (project_id, daily_token_limit, monthly_cost_limit, warn_threshold,
+           (project_id, daily_token_limit, warn_threshold,
             current_status, updated_at)
-           VALUES (?, ?, ?, ?, 'ok', ?)
+           VALUES (?, ?, ?, 'ok', ?)
            ON CONFLICT(project_id) DO UPDATE SET
              daily_token_limit  = excluded.daily_token_limit,
-             monthly_cost_limit = excluded.monthly_cost_limit,
              warn_threshold     = excluded.warn_threshold,
              updated_at         = excluded.updated_at""",
-        (project_id, daily_token_limit, monthly_cost_limit, warn_threshold, now),
+        (project_id, daily_token_limit, warn_threshold, now),
     )
     await db.commit()
     budget = await get_project_budget(db, project_id)
@@ -2478,7 +2482,7 @@ async def list_project_budgets(db: aiosqlite.Connection) -> list[ProjectBudget]:
     """Return all project budget rows."""
     cursor = await db.execute("SELECT * FROM project_budgets")
     rows = await cursor.fetchall()
-    return [ProjectBudget(**dict(r)) for r in rows]
+    return [ProjectBudget(**_filter_model_fields(ProjectBudget, dict(r))) for r in rows]
 
 
 # ---------------------------------------------------------------------------

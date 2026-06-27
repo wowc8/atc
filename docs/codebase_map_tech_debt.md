@@ -30,7 +30,7 @@ Evidence:
 
 Why it matters:
 - every boundary needs translation logic or tribal knowledge
-- it increases onboarding cost and makes bulk refactors riskier
+- it increases onboarding effort and makes bulk refactors riskier
 - it undermines the design-log claim that naming is consistent system-wide
 - it leaks into persistence, API, UI, test names, and agent deployment artifacts
 
@@ -82,7 +82,7 @@ Recommended refactor theme:
 - generate or derive API/WebSocket docs from router/channel definitions where possible
 - define one “runtime contract source of truth” and treat design logs as historical, not current API reference
 
-## P1, structural debt that raises change cost
+## P1, structural debt that raises change complexity
 
 ### 4. Several core modules are doing too many jobs
 
@@ -216,7 +216,7 @@ Do first, before major feature work:
 - settle `leader` vs `manager`
 - settle `task` vs `task_graph`
 - publish canonical enum/state vocabularies
-- add thin compatibility shims only where migration cost requires them
+- add thin compatibility shims only where migration complexity requires them
 
 ## Theme B, introduce explicit service boundaries
 

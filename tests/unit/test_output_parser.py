@@ -55,12 +55,12 @@ class TestOutputParserStateDetection:
         assert self.parser.last_state == TuiState.UNKNOWN
         assert not self.parser.alternate_on
 
-    def test_shell_prompt_dollar(self) -> None:
+    def test_shell_prompt_symbol(self) -> None:
         result = self.parser.feed("user@host$ ")
         assert result.state == TuiState.SHELL_PROMPT
         assert result.prompt_detected is True
 
-    def test_shell_prompt_bare_dollar(self) -> None:
+    def test_shell_prompt_bare_symbol(self) -> None:
         result = self.parser.feed("$ ")
         assert result.state == TuiState.SHELL_PROMPT
         assert result.prompt_detected is True
@@ -159,28 +159,25 @@ class TestOutputParserAlternateScreen:
 
 
 # ---------------------------------------------------------------------------
-# OutputParser — cost extraction
+# OutputParser — token extraction
 # ---------------------------------------------------------------------------
 
-class TestOutputParserCostExtraction:
+class TestOutputParserTokenExtraction:
     def setup_method(self) -> None:
         self.parser = OutputParser()
 
-    def test_cost_with_k_tokens(self) -> None:
-        result = self.parser.feed("Cost: $0.12 | Tokens: 1.2k in, 0.8k out")
-        assert result.cost_dollars == 0.12
+    def test_tokens_with_k_suffix(self) -> None:
+        result = self.parser.feed("Tokens: 1.2k in, 0.8k out")
         assert result.tokens_in == 1200
         assert result.tokens_out == 800
 
-    def test_cost_plain_tokens(self) -> None:
-        result = self.parser.feed("$0.05 usage 500 in 300 out")
-        assert result.cost_dollars == 0.05
+    def test_plain_tokens(self) -> None:
+        result = self.parser.feed("usage 500 in 300 out")
         assert result.tokens_in == 500
         assert result.tokens_out == 300
 
-    def test_no_cost(self) -> None:
-        result = self.parser.feed("just some text without cost")
-        assert result.cost_dollars is None
+    def test_no_tokens(self) -> None:
+        result = self.parser.feed("just some text without token usage")
         assert result.tokens_in is None
         assert result.tokens_out is None
 
@@ -306,7 +303,6 @@ class TestParseResult:
         assert r.prompt_detected is False
         assert r.prompt_text == ""
         assert r.alternate_on is False
-        assert r.cost_dollars is None
         assert r.tokens_in is None
         assert r.tokens_out is None
         assert r.tool_name is None

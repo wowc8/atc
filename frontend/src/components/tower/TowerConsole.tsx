@@ -55,9 +55,11 @@ export default function TowerConsole() {
     enabled: (isRunning || (isTerminalProvider && !!terminalChannel)) && !!terminalChannel,
   });
 
-  if (!projectId && projects.length > 0) {
-    if (activeProject) setProjectId(activeProject.id);
-  }
+  useEffect(() => {
+    if (!projectId && projects.length > 0 && activeProject) {
+      setProjectId(activeProject.id);
+    }
+  }, [activeProject, projectId, projects.length]);
 
   useEffect(() => {
     const onProviderSwitching = () => {

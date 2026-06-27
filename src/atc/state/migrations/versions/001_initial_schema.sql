@@ -59,7 +59,6 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS project_budgets (
     project_id          TEXT PRIMARY KEY REFERENCES projects(id),
     daily_token_limit   INTEGER,
-    monthly_cost_limit  REAL,
     warn_threshold      REAL DEFAULT 0.8,
     current_status      TEXT DEFAULT 'ok',
     updated_at          TEXT NOT NULL
@@ -73,7 +72,6 @@ CREATE TABLE IF NOT EXISTS usage_events (
     model           TEXT,
     input_tokens    INTEGER,
     output_tokens   INTEGER,
-    cost_usd        REAL,
     cpu_pct         REAL,
     ram_mb          REAL,
     disk_mb         REAL,

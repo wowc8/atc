@@ -1,9 +1,9 @@
-"""Budget enforcer — monitors project spend and pauses sessions when exceeded.
+"""Token budget enforcer — pauses project sessions when token limits are exceeded.
 
 Every ``check_interval`` seconds the enforcer compares each project's
-accumulated token/cost usage against its ``project_budgets`` limits,
-transitions the status field (ok → warn → exceeded), writes notifications,
-and pauses all sessions for the project when the budget is exceeded.
+accumulated token usage against its ``project_budgets`` limits, transitions
+the status field (ok → warn → exceeded), writes notifications, and pauses all
+sessions for the project when the token budget is exceeded.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -76,7 +76,6 @@ class BudgetEnforcer:
         for row in budgets:
             project_id = str(row["project_id"])
             daily_token_limit: int | None = row["daily_token_limit"]
-            monthly_cost_limit: float | None = row["monthly_cost_limit"]
             warn_threshold: float = float(row["warn_threshold"] or 0.8)
             current_status: str = str(row["current_status"] or "ok")
 
@@ -84,7 +83,6 @@ class BudgetEnforcer:
                 new_status = await self._compute_status(
                     project_id,
                     daily_token_limit,
-                    monthly_cost_limit,
                     warn_threshold,
                 )
             except Exception:
@@ -99,7 +97,6 @@ class BudgetEnforcer:
                 current_status,
                 new_status,
                 daily_token_limit,
-                monthly_cost_limit,
                 warn_threshold,
             )
 
@@ -107,11 +104,10 @@ class BudgetEnforcer:
         self,
         project_id: str,
         daily_token_limit: int | None,
-        monthly_cost_limit: float | None,
         warn_threshold: float,
     ) -> str:
         """Return the budget status that should apply given current usage."""
-        if daily_token_limit is None and monthly_cost_limit is None:
+        if daily_token_limit is None:
             return "ok"
 
         # Get today's token usage
@@ -124,29 +120,13 @@ class BudgetEnforcer:
                 """SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
                    FROM usage_events
                    WHERE project_id = ?
-                     AND event_type = 'ai_cost'
+                     AND event_type = 'ai_tokens'
                      AND recorded_at >= ?""",
                 (project_id, today),
             )
             row = await cursor.fetchone()
             today_tokens = int(row[0]) if row else 0
             fractions.append(today_tokens / daily_token_limit)
-
-        if monthly_cost_limit is not None and monthly_cost_limit > 0:
-            # Rolling 30-day window avoids month-end spend spike pattern.
-            # Computed in Python so the format matches recorded_at (ISO-8601 with tz).
-            rolling_start = (datetime.now(UTC) - timedelta(days=30)).isoformat()
-            cursor = await self._db.execute(
-                """SELECT COALESCE(SUM(COALESCE(cost_usd, 0)), 0)
-                   FROM usage_events
-                   WHERE project_id = ?
-                     AND event_type = 'ai_cost'
-                     AND recorded_at >= ?""",
-                (project_id, rolling_start),
-            )
-            row = await cursor.fetchone()
-            month_cost = float(row[0]) if row else 0.0
-            fractions.append(month_cost / monthly_cost_limit)
 
         if not fractions:
             return "ok"
@@ -164,7 +144,6 @@ class BudgetEnforcer:
         old_status: str,
         new_status: str,
         daily_token_limit: int | None,
-        monthly_cost_limit: float | None,
         warn_threshold: float,
     ) -> None:
         """Apply a status transition and take required actions."""
@@ -189,7 +168,7 @@ class BudgetEnforcer:
             await self._write_notification(
                 project_id,
                 "budget",
-                "Budget exceeded for project — all sessions paused.",
+                "Token budget exceeded for project — all sessions paused.",
             )
             await self._event_bus.publish(
                 "budget_exceeded",
@@ -201,7 +180,7 @@ class BudgetEnforcer:
             await self._write_notification(
                 project_id,
                 "warning",
-                f"Budget warning: {pct}% of limit reached.",
+                f"Token budget warning: {pct}% of limit reached.",
             )
             await self._event_bus.publish(
                 "budget_warning",

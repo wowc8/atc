@@ -488,12 +488,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await resource_monitor.start()
     app.state.resource_monitor = resource_monitor
 
-    # 10. Start cost tracker
-    from atc.tracking.costs import CostTracker
+    # 10. Start token tracker
+    from atc.tracking.tokens import TokenTracker
 
-    cost_tracker = CostTracker(db, event_bus, ws_hub=ws_hub)
-    await cost_tracker.start()
-    app.state.cost_tracker = cost_tracker
+    token_tracker = TokenTracker(db, event_bus, ws_hub=ws_hub)
+    await token_tracker.start()
+    app.state.token_tracker = token_tracker
 
     # 11. Start GitHub tracker
     from atc.tracking.github import GitHubTracker
@@ -549,8 +549,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         if _key:
             logger.warning(
-                "Running in OAuth mode — cost tracking disabled, concurrent sessions may conflict. "
-                "Set ATC_ANTHROPIC_API_KEY for full functionality."
+                "Running in OAuth mode — API-key-only provider features are disabled, "
+                "concurrent sessions may conflict. Set ATC_ANTHROPIC_API_KEY for full functionality."
             )
         else:
             # No env var — using Claude's own stored credentials (best case for local dev)
@@ -584,7 +584,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await memory_cron.stop()
     await budget_enforcer.stop()
     await github_tracker.stop()
-    await cost_tracker.stop()
+    await token_tracker.stop()
     await resource_monitor.stop()
     await heartbeat_monitor.stop()
     await pty_pool.stop()

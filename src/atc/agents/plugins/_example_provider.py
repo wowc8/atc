@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from atc.agents.base import (
-    CostModel,
+    TokenUsageModel,
     OutputChunk,
     PromptResult,
     ProviderCapabilities,
@@ -44,9 +44,9 @@ class ExampleProvider:
             supports_tool_use=True,
             context_window=128_000,
             model="example-model",
-            cost_model=CostModel(
-                input_cost_per_token=0.001,
-                output_cost_per_token=0.002,
+            token_usage_model=TokenUsageModel(
+                tracks_input_tokens=True,
+                tracks_output_tokens=True,
             ),
         )
 

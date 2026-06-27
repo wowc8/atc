@@ -163,7 +163,7 @@ The same lifecycle is partly owned by:
 
 That makes provider encapsulation incomplete.
 
-### 3. Terminology drift raises refactor cost
+### 3. Terminology drift raises refactor complexity
 The repo still mixes:
 - product term: `Leader`
 - runtime/storage/API term: `manager`

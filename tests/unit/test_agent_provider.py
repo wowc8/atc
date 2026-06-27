@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from atc.agents.base import (
     AgentProvider,
-    CostModel,
+    TokenUsageModel,
     OutputChunk,
     PromptResult,
     ProviderCapabilities,
@@ -683,21 +683,22 @@ class TestGetLaunchCommand:
         assert "opencode" in _LAUNCH_COMMANDS
 
 
-class TestCostModel:
+class TestTokenUsageModel:
     def test_defaults(self) -> None:
-        cost = CostModel()
-        assert cost.input_cost_per_token == 0.0
-        assert cost.currency == "USD"
+        model = TokenUsageModel()
+        assert model.tracks_input_tokens is True
+        assert model.tracks_output_tokens is True
+        assert model.tracks_cached_input_tokens is False
 
     def test_custom(self) -> None:
-        cost = CostModel(input_cost_per_token=0.003, output_cost_per_token=0.015, currency="EUR")
-        assert cost.input_cost_per_token == 0.003
-        assert cost.currency == "EUR"
+        model = TokenUsageModel(tracks_cached_input_tokens=True, tracks_reasoning_tokens=True)
+        assert model.tracks_cached_input_tokens is True
+        assert model.tracks_reasoning_tokens is True
 
     def test_frozen(self) -> None:
-        cost = CostModel()
+        model = TokenUsageModel()
         with pytest.raises(AttributeError):
-            cost.currency = "GBP"  # type: ignore[misc]
+            model.tracks_input_tokens = False  # type: ignore[misc]
 
 
 class TestProviderMetadataDataclass:
@@ -711,14 +712,14 @@ class TestProviderMetadataDataclass:
         assert meta.version == "2.1.0"
 
 
-class TestCapabilitiesWithCostModel:
+class TestCapabilitiesWithTokenUsageModel:
     def test_none_by_default(self) -> None:
-        assert ProviderCapabilities().cost_model is None
+        assert ProviderCapabilities().token_usage_model is None
 
     def test_attached(self) -> None:
-        caps = ProviderCapabilities(cost_model=CostModel(input_cost_per_token=0.01))
-        assert caps.cost_model is not None
-        assert caps.cost_model.input_cost_per_token == 0.01
+        caps = ProviderCapabilities(token_usage_model=TokenUsageModel(tracks_reasoning_tokens=True))
+        assert caps.token_usage_model is not None
+        assert caps.token_usage_model.tracks_reasoning_tokens is True
 
 
 class TestProviderInfoAndMetadata:

@@ -28,11 +28,6 @@ describe("TowerBar", () => {
     expect(screen.getByText("Usage")).toBeInTheDocument();
   });
 
-  it("renders cost summary", () => {
-    renderWithProviders(<TowerBar />);
-    expect(screen.getByTestId("cost-summary")).toHaveTextContent("$0.00 today");
-  });
-
   it("renders token summary", () => {
     renderWithProviders(<TowerBar />);
     expect(screen.getByTestId("token-summary")).toHaveTextContent("0 tokens");

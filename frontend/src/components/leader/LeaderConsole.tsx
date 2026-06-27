@@ -89,7 +89,9 @@ export default function LeaderConsole({
     setHealthLoading(true);
     try {
       const res = await api.get<LeaderRuntimeHealth>(`/projects/${projectId}/leader/health`);
-      setHealth(res);
+      if (res && !Array.isArray(res) && typeof res === "object" && "runtime_state" in res) {
+        setHealth(res);
+      }
     } catch (err) {
       console.error("Failed to load leader health:", err);
     } finally {
@@ -182,6 +184,13 @@ export default function LeaderConsole({
     }
   }
 
+  const healthGuidance = health?.operator_guidance ?? {
+    severity: "ok" as const,
+    summary: "No operator guidance available",
+    recommended_action: "none" as const,
+    command: null,
+  };
+
   return (
     <div className="leader-console" data-testid="leader-console">
       <div className="leader-console__header">
@@ -227,11 +236,11 @@ export default function LeaderConsole({
 
       {health && (
         <div
-          className={`leader-console__health leader-console__health--${health.operator_guidance.severity}`}
+          className={`leader-console__health leader-console__health--${healthGuidance.severity}`}
           data-testid="leader-health-guidance"
         >
           <div className="leader-console__health-topline">
-            <strong>Leader health:</strong> {health.operator_guidance.summary}
+            <strong>Leader health:</strong> {healthGuidance.summary}
           </div>
           <div className="leader-console__health-grid">
             <span>Runtime: {health.runtime_state}</span>
@@ -242,17 +251,17 @@ export default function LeaderConsole({
           {health.current_blocker && (
             <div className="leader-console__health-blocker">Blocker: {health.current_blocker}</div>
           )}
-          {health.operator_guidance.recommended_action !== "none" && (
+          {healthGuidance.recommended_action !== "none" && (
             <div className="leader-console__health-action">
-              Recommended: {health.operator_guidance.recommended_action}
-              {health.operator_guidance.command ? ` — ${health.operator_guidance.command}` : ""}
+              Recommended: {healthGuidance.recommended_action}
+              {healthGuidance.command ? ` — ${healthGuidance.command}` : ""}
             </div>
           )}
           <div className="leader-console__health-controls">
             <button className="btn btn-secondary btn-sm" onClick={refreshHealth} disabled={healthLoading}>
               {healthLoading ? "Refreshing..." : "Refresh health"}
             </button>
-            {health.operator_guidance.severity === "blocked" && (
+            {healthGuidance.severity === "blocked" && (
               <button className="btn btn-secondary btn-sm" onClick={handleRecoveryDryRun} disabled={loading}>
                 Inspect recovery
               </button>

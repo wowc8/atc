@@ -60,7 +60,7 @@ export const initialState: AppState = {
   },
   notifications: [],
   failureLogs: [],
-  usage: { today_cost: 0, month_cost: 0, today_tokens: 0, month_tokens: 0 },
+  usage: { today_tokens: 0, month_tokens: 0 },
   github: {},
   heartbeats: {},
   selectedProjectId: null,

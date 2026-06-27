@@ -175,7 +175,6 @@ class ManagerDeploySpec:
     constraints: list[str] = field(default_factory=list)
     context_entries: list[dict[str, Any]] = field(default_factory=list)
     initial_tasks: list[str] = field(default_factory=list)
-    budget_ceiling_usd: float | None = None
 
 
 @dataclass
@@ -675,16 +674,6 @@ def _build_manager_instructions_md(spec: ManagerDeploySpec) -> str:
                 "",
                 f"Output directory: `{spec.repo_path}`",
                 "Tell each Ace to write its output files to this directory.",
-                "",
-            ]
-        )
-
-    if spec.budget_ceiling_usd is not None:
-        lines.extend(
-            [
-                "## Budget",
-                "",
-                f"Ceiling: **${spec.budget_ceiling_usd:.2f} USD**",
                 "",
             ]
         )

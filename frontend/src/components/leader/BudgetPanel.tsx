@@ -4,7 +4,6 @@ import { api } from "../../utils/api";
 interface Budget {
   project_id: string;
   daily_token_limit: number | null;
-  monthly_cost_limit: number | null;
   warn_threshold: number;
   current_status: "ok" | "warn" | "exceeded";
   updated_at: string;
@@ -78,7 +77,6 @@ export default function BudgetPanel({ projectId }: Props) {
 
   // Form state
   const [dailyTokenLimit, setDailyTokenLimit] = useState("");
-  const [monthlyCostLimit, setMonthlyCostLimit] = useState("");
   const [warnThreshold, setWarnThreshold] = useState("80");
 
   async function fetchBudget() {
@@ -87,7 +85,6 @@ export default function BudgetPanel({ projectId }: Props) {
       const result = await api.get<Budget>(`/projects/${projectId}/budget`);
       setBudget(result);
       setDailyTokenLimit(result.daily_token_limit?.toString() ?? "");
-      setMonthlyCostLimit(result.monthly_cost_limit?.toString() ?? "");
       setWarnThreshold(String(Math.round(result.warn_threshold * 100)));
       setLoaded(true);
     } catch {
@@ -106,7 +103,6 @@ export default function BudgetPanel({ projectId }: Props) {
     try {
       const body = {
         daily_token_limit: dailyTokenLimit ? parseInt(dailyTokenLimit, 10) : null,
-        monthly_cost_limit: monthlyCostLimit ? parseFloat(monthlyCostLimit) : null,
         warn_threshold: parseInt(warnThreshold, 10) / 100,
       };
       const result = await api.put<Budget>(`/projects/${projectId}/budget`, body);
@@ -168,27 +164,11 @@ export default function BudgetPanel({ projectId }: Props) {
               />
             </div>
           )}
-          {budget.monthly_cost_limit !== null && (
-            <div className="budget-panel__stat">
-              <div className="budget-panel__stat-row">
-                <span className="budget-panel__stat-label">Monthly Cost</span>
-                <span className="budget-panel__stat-value">
-                  ${budget.monthly_cost_limit.toFixed(2)}
-                </span>
-              </div>
-              <ProgressBar
-                value={0}
-                max={budget.monthly_cost_limit}
-                status={budget.current_status}
-              />
-            </div>
+          {budget.daily_token_limit === null && (
+            <p className="budget-panel__no-limits">
+              No limits configured. Click Edit to set a token limit.
+            </p>
           )}
-          {budget.daily_token_limit === null &&
-            budget.monthly_cost_limit === null && (
-              <p className="budget-panel__no-limits">
-                No limits configured. Click Edit to set limits.
-              </p>
-            )}
         </div>
       )}
 
@@ -203,18 +183,6 @@ export default function BudgetPanel({ projectId }: Props) {
               value={dailyTokenLimit}
               onChange={(e) => setDailyTokenLimit(e.target.value)}
               placeholder="e.g. 100000 (leave blank for no limit)"
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="budget-monthly-cost">Monthly Cost Limit ($)</label>
-            <input
-              id="budget-monthly-cost"
-              type="number"
-              min="0"
-              step="0.01"
-              value={monthlyCostLimit}
-              onChange={(e) => setMonthlyCostLimit(e.target.value)}
-              placeholder="e.g. 50.00 (leave blank for no limit)"
             />
           </div>
           <div className="form-group">

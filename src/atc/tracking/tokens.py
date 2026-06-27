@@ -1,8 +1,8 @@
-"""AI cost tracker — polls ~/.claude/stats-cache.json for usage deltas.
+"""AI token tracker — polls ~/.claude/stats-cache.json for usage deltas.
 
 Every ``poll_interval`` seconds the tracker reads the cumulative token counts
 from Claude Code's stats cache, computes the delta against the previous
-snapshot, attributes cost to the most recently active session, and writes a
+snapshot, attributes tokens to the most recently active session, and writes a
 ``usage_events`` row to the database.
 """
 
@@ -27,26 +27,8 @@ logger = logging.getLogger(__name__)
 
 STATS_CACHE_PATH = Path.home() / ".claude" / "stats-cache.json"
 
-MODEL_PRICING: dict[str, dict[str, float]] = {
-    "claude-opus-4-6":   {"input": 15.00, "output": 75.00},
-    "claude-sonnet-4-6": {"input":  3.00, "output": 15.00},
-    "claude-haiku-4-5":  {"input":  0.80, "output":  4.00},
-}
-
-_FALLBACK_MODEL = "claude-sonnet-4-6"
-
-
-def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Return USD cost for token usage at published per-million-token rates.
-
-    Falls back to Sonnet pricing for unknown models.
-    """
-    pricing = MODEL_PRICING.get(model, MODEL_PRICING[_FALLBACK_MODEL])
-    return (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
-
-
-class CostTracker:
-    """Polls ~/.claude/stats-cache.json and attributes cost deltas to sessions."""
+class TokenTracker:
+    """Polls ~/.claude/stats-cache.json and attributes token deltas to sessions."""
 
     def __init__(
         self,
@@ -64,12 +46,12 @@ class CostTracker:
         self._stats_path = stats_path
         self._last_snapshot: dict[str, Any] = {}
         self._task: asyncio.Task[None] | None = None
-        # Sessions that report costs explicitly via atc-tower cost CLI.
+        # Sessions that report tokens explicitly via atc-tower tokens CLI.
         # Stats-cache polling is skipped for these to avoid double-counting.
         self._has_explicit_reporting: set[str] = set()
 
-        # Subscribe to explicit cost reports from the atc-tower cost CLI
-        self._event_bus.subscribe("cost_reported", self._on_cost_reported)
+        # Subscribe to explicit token reports from the atc-tower tokens CLI
+        self._event_bus.subscribe("tokens_reported", self._on_tokens_reported)
 
     async def start(self) -> None:
         """Start the background polling loop."""
@@ -77,7 +59,7 @@ class CostTracker:
             return
         self._task = asyncio.create_task(self._poll_loop())
         logger.info(
-            "CostTracker started (interval=%.0fs, path=%s)",
+            "TokenTracker started (interval=%.0fs, path=%s)",
             self._poll_interval,
             self._stats_path,
         )
@@ -89,14 +71,14 @@ class CostTracker:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
-            logger.info("CostTracker stopped")
+            logger.info("TokenTracker stopped")
 
     async def _poll_loop(self) -> None:
         while True:
             try:
                 await self._poll_once()
             except Exception:
-                logger.exception("CostTracker poll failed")
+                logger.exception("TokenTracker poll failed")
             await asyncio.sleep(self._poll_interval)
 
     async def _poll_once(self) -> None:
@@ -119,7 +101,7 @@ class CostTracker:
 
         session_id, project_id = await self._find_active_session()
 
-        # Skip attribution if this session reports costs explicitly — avoid double-counting
+        # Skip attribution if this session reports tokens explicitly — avoid double-counting
         if session_id is not None and session_id in self._has_explicit_reporting:
             logger.debug(
                 "Skipping stats-cache attribution for session %s (explicit reporting active)",
@@ -133,28 +115,27 @@ class CostTracker:
             if in_tok == 0 and out_tok == 0:
                 continue
 
-            cost = calculate_cost(model, in_tok, out_tok)
             now = datetime.now(UTC).isoformat()
             event_id = str(uuid.uuid4())
 
             await self._db.execute(
                 """INSERT INTO usage_events
                    (id, project_id, session_id, event_type, model,
-                    input_tokens, output_tokens, cost_usd, recorded_at)
-                   VALUES (?, ?, ?, 'ai_cost', ?, ?, ?, ?, ?)""",
-                (event_id, project_id, session_id, model, in_tok, out_tok, cost, now),
+                    input_tokens, output_tokens, recorded_at)
+                   VALUES (?, ?, ?, 'ai_tokens', ?, ?, ?, ?)""",
+                (event_id, project_id, session_id, model, in_tok, out_tok, now),
             )
             await self._db.commit()
 
             if self._ws_hub:
                 await self._ws_hub.broadcast(
-                    "costs",
+                    "tokens",
                     {
                         "event_id": event_id,
                         "model": model,
                         "input_tokens": in_tok,
                         "output_tokens": out_tok,
-                        "cost_usd": cost,
+                        "total_tokens": in_tok + out_tok,
                         "project_id": project_id,
                         "session_id": session_id,
                         "recorded_at": now,
@@ -162,16 +143,15 @@ class CostTracker:
                 )
 
             await self._event_bus.publish(
-                "cost_recorded",
-                {"model": model, "cost_usd": cost, "project_id": project_id},
+                "tokens_recorded",
+                {"model": model, "input_tokens": in_tok, "output_tokens": out_tok, "project_id": project_id},
             )
 
             logger.debug(
-                "Cost attributed: model=%s in=%d out=%d cost=$%.4f project=%s",
+                "Tokens attributed: model=%s in=%d out=%d project=%s",
                 model,
                 in_tok,
                 out_tok,
-                cost,
                 project_id,
             )
 
@@ -237,9 +217,8 @@ class CostTracker:
         input_tokens: int,
         output_tokens: int,
         model: str,
-        cost_usd: float,
     ) -> None:
-        """Record explicitly-reported cost from the atc-tower cost CLI.
+        """Record explicitly-reported token usage from the atc-tower tokens CLI.
 
         Marks the session as having explicit reporting so the stats-cache
         polling loop skips it and avoids double-counting.
@@ -256,7 +235,7 @@ class CostTracker:
                 project_id = str(row[0])
         except Exception:
             logger.debug(
-                "Failed to find project for explicit cost: session=%s", session_id
+                "Failed to find project for explicit token report: session=%s", session_id
             )
 
         now = datetime.now(UTC).isoformat()
@@ -265,21 +244,21 @@ class CostTracker:
         await self._db.execute(
             """INSERT INTO usage_events
                (id, project_id, session_id, event_type, model,
-                input_tokens, output_tokens, cost_usd, recorded_at)
-               VALUES (?, ?, ?, 'ai_cost', ?, ?, ?, ?, ?)""",
-            (event_id, project_id, session_id, model, input_tokens, output_tokens, cost_usd, now),
+                input_tokens, output_tokens, recorded_at)
+               VALUES (?, ?, ?, 'ai_tokens', ?, ?, ?, ?)""",
+            (event_id, project_id, session_id, model, input_tokens, output_tokens, now),
         )
         await self._db.commit()
 
         if self._ws_hub:
             await self._ws_hub.broadcast(
-                "costs",
+                "tokens",
                 {
                     "event_id": event_id,
                     "model": model,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "cost_usd": cost_usd,
+                    "total_tokens": input_tokens + output_tokens,
                     "project_id": project_id,
                     "session_id": session_id,
                     "recorded_at": now,
@@ -288,39 +267,35 @@ class CostTracker:
             )
 
         await self._event_bus.publish(
-            "cost_recorded",
+            "tokens_recorded",
             {
                 "model": model,
-                "cost_usd": cost_usd,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
                 "project_id": project_id,
                 "source": "explicit",
             },
         )
 
         logger.debug(
-            "Explicit cost recorded: session=%s model=%s in=%d out=%d cost=$%.4f",
+            "Explicit tokens recorded: session=%s model=%s in=%d out=%d",
             session_id,
             model,
             input_tokens,
             output_tokens,
-            cost_usd,
         )
 
-    async def _on_cost_reported(self, data: dict[str, Any]) -> None:
-        """Handle cost_reported event fired by the atc-tower cost CLI endpoint."""
+    async def _on_tokens_reported(self, data: dict[str, Any]) -> None:
+        """Handle tokens_reported event fired by the atc-tower tokens CLI endpoint."""
         session_id = data.get("session_id")
         input_tokens = int(data.get("input_tokens", 0))
         output_tokens = int(data.get("output_tokens", 0))
-        model = str(data.get("model", _FALLBACK_MODEL))
-        cost_usd = float(
-            data.get("cost_usd") or calculate_cost(model, input_tokens, output_tokens)
-        )
-
+        model = str(data.get("model", "unknown"))
         if not session_id:
-            logger.warning("cost_reported event missing session_id — ignoring")
+            logger.warning("tokens_reported event missing session_id — ignoring")
             return
 
-        await self.record_explicit(session_id, input_tokens, output_tokens, model, cost_usd)
+        await self.record_explicit(session_id, input_tokens, output_tokens, model)
 
     async def _find_active_session(self) -> tuple[str | None, str | None]:
         """Return (session_id, project_id) for the most recently active session."""
@@ -334,5 +309,5 @@ class CostTracker:
             if row:
                 return str(row[0]), str(row[1])
         except Exception:
-            logger.debug("Failed to find active session for cost attribution")
+            logger.debug("Failed to find active session for token attribution")
         return None, None

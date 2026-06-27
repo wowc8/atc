@@ -44,7 +44,7 @@ The biggest root causes are: (1) two session-control architectures coexisting, p
 - `src/atc/terminal/pty_stream.py`
   - `tmux pipe-pane` to FIFO, then event bus `pty_output`.
 - `src/atc/terminal/monitor.py`
-  - Parses PTY output into session status/cost/error events.
+  - Parses PTY output into session status/token-usage/error events.
 
 ### Startup and restore orchestration
 - `src/atc/api/app.py`

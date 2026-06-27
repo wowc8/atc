@@ -118,7 +118,6 @@ export interface TaskGraph {
 export interface Budget {
   project_id: string;
   daily_token_limit: number | null;
-  monthly_cost_limit: number | null;
   warn_threshold: number;
   current_status: "ok" | "warn" | "exceeded";
   updated_at: string;
@@ -134,8 +133,6 @@ export interface Notification {
 }
 
 export interface UsageSummary {
-  today_cost: number | null;
-  month_cost: number | null;
   today_tokens: number;
   month_tokens: number;
   oauth_mode?: boolean;
@@ -205,7 +202,7 @@ export interface SessionHeartbeat {
 export interface AppEvent {
   id: string;
   level: "debug" | "info" | "warning" | "error" | "critical";
-  category: "session" | "task" | "error" | "cost" | "system";
+  category: "session" | "task" | "error" | "usage" | "system";
   message: string;
   detail: Record<string, unknown> | null;
   project_id: string | null;

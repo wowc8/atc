@@ -20,9 +20,8 @@ describe("Dashboard", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
-  it("shows cost summary cards", () => {
+  it("shows summary cards", () => {
     renderWithProviders(<Dashboard />);
-    expect(screen.getByText("Cost")).toBeInTheDocument();
     expect(screen.getByText("Tokens")).toBeInTheDocument();
     expect(screen.getByText("Sessions")).toBeInTheDocument();
     expect(screen.getByText("Notifications")).toBeInTheDocument();

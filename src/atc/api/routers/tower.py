@@ -35,7 +35,7 @@ class MessageRequest(BaseModel):
     message: str
 
 
-class CostRequest(BaseModel):
+class TokenReportRequest(BaseModel):
     session_id: str
     input_tokens: int
     output_tokens: int
@@ -233,12 +233,12 @@ async def get_progress(request: Request) -> TowerProgressResponse:
     return TowerProgressResponse(**progress)
 
 
-@router.post("/cost")
-async def report_cost(body: CostRequest, request: Request) -> dict[str, str]:
-    """Record explicit cost for a session (primary source over stats-cache).
+@router.post("/tokens")
+async def report_tokens(body: TokenReportRequest, request: Request) -> dict[str, str]:
+    """Record explicit token usage for a session (primary source over stats-cache).
 
-    Called by ``atc tower cost <session_id> <input_tokens> <output_tokens> <model>``.
-    Fires a ``cost_reported`` event on the event bus so CostTracker records it
+    Called by ``atc tower tokens <session_id> <input_tokens> <output_tokens> <model>``.
+    Fires a ``tokens_reported`` event on the event bus so TokenTracker records it
     and suppresses double-counting from stats-cache polling.
     """
     event_bus = getattr(request.app.state, "event_bus", None)
@@ -246,7 +246,7 @@ async def report_cost(body: CostRequest, request: Request) -> dict[str, str]:
         raise HTTPException(status_code=503, detail="Event bus not initialized")
 
     await event_bus.publish(
-        "cost_reported",
+        "tokens_reported",
         {
             "session_id": body.session_id,
             "input_tokens": body.input_tokens,
