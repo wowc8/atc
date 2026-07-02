@@ -104,12 +104,37 @@ class UsageEvent:
     project_id: str | None = None
     session_id: str | None = None
     model: str | None = None
+    provider: str | None = None
+    source: str | None = None
     input_tokens: int | None = None
+    cached_input_tokens: int | None = None
     output_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
+    total_tokens: int | None = None
+    external_session_id: str | None = None
+    source_event_id: str | None = None
+    source_file: str | None = None
+    source_offset: int | None = None
+    raw_usage_json: str | None = None
     cpu_pct: float | None = None
     ram_mb: float | None = None
     disk_mb: float | None = None
     api_calls: int | None = None
+
+
+@dataclass
+class UsageSourceOffset:
+    provider: str
+    source_key: str
+    byte_offset: int = 0
+    external_session_id: str | None = None
+    last_input_tokens: int = 0
+    last_cached_input_tokens: int = 0
+    last_output_tokens: int = 0
+    last_reasoning_output_tokens: int = 0
+    last_total_tokens: int = 0
+    created_at: str = ""
+    updated_at: str = ""
 
 
 @dataclass
