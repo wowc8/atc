@@ -34,6 +34,7 @@ from atc.state.models import (
     TaskAssignment,
     TaskGraph,
     UsageEvent,
+    UsageSourceOffset,
 )
 from atc.state.transitions import (
     TASK_ASSIGNMENT_TRANSITIONS,
@@ -339,18 +340,43 @@ CREATE TABLE IF NOT EXISTS project_budgets (
 );
 
 CREATE TABLE IF NOT EXISTS usage_events (
-    id              TEXT PRIMARY KEY,
-    project_id      TEXT,
-    session_id      TEXT,
-    event_type      TEXT NOT NULL,
-    model           TEXT,
-    input_tokens    INTEGER,
-    output_tokens   INTEGER,
-    cpu_pct         REAL,
-    ram_mb          REAL,
-    disk_mb         REAL,
-    api_calls       INTEGER,
-    recorded_at     TEXT NOT NULL
+    id                       TEXT PRIMARY KEY,
+    project_id               TEXT,
+    session_id               TEXT,
+    event_type               TEXT NOT NULL,
+    model                    TEXT,
+    provider                 TEXT,
+    source                   TEXT,
+    input_tokens             INTEGER,
+    cached_input_tokens      INTEGER,
+    output_tokens            INTEGER,
+    reasoning_output_tokens  INTEGER,
+    total_tokens             INTEGER,
+    external_session_id      TEXT,
+    source_event_id          TEXT,
+    source_file              TEXT,
+    source_offset            INTEGER,
+    raw_usage_json           TEXT,
+    cpu_pct                  REAL,
+    ram_mb                   REAL,
+    disk_mb                  REAL,
+    api_calls                INTEGER,
+    recorded_at              TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage_source_offsets (
+    provider                      TEXT NOT NULL,
+    source_key                    TEXT NOT NULL,
+    external_session_id           TEXT,
+    byte_offset                   INTEGER NOT NULL DEFAULT 0,
+    last_input_tokens             INTEGER NOT NULL DEFAULT 0,
+    last_cached_input_tokens      INTEGER NOT NULL DEFAULT 0,
+    last_output_tokens            INTEGER NOT NULL DEFAULT 0,
+    last_reasoning_output_tokens  INTEGER NOT NULL DEFAULT 0,
+    last_total_tokens             INTEGER NOT NULL DEFAULT 0,
+    created_at                    TEXT NOT NULL,
+    updated_at                    TEXT NOT NULL,
+    PRIMARY KEY (provider, source_key)
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -692,6 +718,42 @@ async def _apply_file_migrations(db: aiosqlite.Connection) -> None:
                 [await _has_column(db, "task_assignments", column) for column in acceptance_columns]
             ):
                 logger.info("Migration skip: %s already applied structurally", path.name)
+                await db.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (path.name, _now()),
+                )
+                await db.commit()
+                continue
+
+        if path.name == "019_provider_neutral_token_usage.sql":
+            usage_columns = [
+                "provider",
+                "source",
+                "cached_input_tokens",
+                "reasoning_output_tokens",
+                "total_tokens",
+                "external_session_id",
+                "source_event_id",
+                "source_file",
+                "source_offset",
+                "raw_usage_json",
+            ]
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='usage_source_offsets'"
+            )
+            offset_table_exists = await cursor.fetchone() is not None
+            if offset_table_exists and all(
+                [await _has_column(db, "usage_events", column) for column in usage_columns]
+            ):
+                logger.info("Migration skip: %s already applied structurally", path.name)
+                await db.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_usage_events_tokens_recorded "
+                    "ON usage_events(event_type, recorded_at)"
+                )
+                await db.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_usage_events_provider_source "
+                    "ON usage_events(provider, source, external_session_id)"
+                )
                 await db.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                     (path.name, _now()),
@@ -2371,14 +2433,25 @@ async def write_usage_event(
     session_id: str | None = None,
     model: str | None = None,
     input_tokens: int | None = None,
+    cached_input_tokens: int | None = None,
     output_tokens: int | None = None,
+    reasoning_output_tokens: int | None = None,
+    total_tokens: int | None = None,
+    provider: str | None = None,
+    source: str | None = None,
+    external_session_id: str | None = None,
+    source_event_id: str | None = None,
+    source_file: str | None = None,
+    source_offset: int | None = None,
+    raw_usage_json: str | None = None,
     cpu_pct: float | None = None,
     ram_mb: float | None = None,
     disk_mb: float | None = None,
     api_calls: int | None = None,
+    recorded_at: str | None = None,
 ) -> UsageEvent:
     """Insert a usage_events row and return the dataclass."""
-    now = _now()
+    now = recorded_at or _now()
     event = UsageEvent(
         id=_uuid(),
         event_type=event_type,
@@ -2387,7 +2460,17 @@ async def write_usage_event(
         session_id=session_id,
         model=model,
         input_tokens=input_tokens,
+        cached_input_tokens=cached_input_tokens,
         output_tokens=output_tokens,
+        reasoning_output_tokens=reasoning_output_tokens,
+        total_tokens=total_tokens,
+        provider=provider,
+        source=source,
+        external_session_id=external_session_id,
+        source_event_id=source_event_id,
+        source_file=source_file,
+        source_offset=source_offset,
+        raw_usage_json=raw_usage_json,
         cpu_pct=cpu_pct,
         ram_mb=ram_mb,
         disk_mb=disk_mb,
@@ -2395,18 +2478,29 @@ async def write_usage_event(
     )
     await db.execute(
         """INSERT INTO usage_events
-           (id, project_id, session_id, event_type, model,
-            input_tokens, output_tokens,
-            cpu_pct, ram_mb, disk_mb, api_calls, recorded_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, project_id, session_id, event_type, model, provider, source,
+            input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens,
+            total_tokens, external_session_id, source_event_id, source_file, source_offset,
+            raw_usage_json, cpu_pct, ram_mb, disk_mb, api_calls, recorded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             event.id,
             event.project_id,
             event.session_id,
             event.event_type,
             event.model,
+            event.provider,
+            event.source,
             event.input_tokens,
+            event.cached_input_tokens,
             event.output_tokens,
+            event.reasoning_output_tokens,
+            event.total_tokens,
+            event.external_session_id,
+            event.source_event_id,
+            event.source_file,
+            event.source_offset,
+            event.raw_usage_json,
             event.cpu_pct,
             event.ram_mb,
             event.disk_mb,
@@ -2417,6 +2511,88 @@ async def write_usage_event(
     await db.commit()
     return event
 
+
+
+
+async def get_usage_source_offset(
+    db: aiosqlite.Connection,
+    *,
+    provider: str,
+    source_key: str,
+) -> UsageSourceOffset | None:
+    """Return durable high-water state for a provider source."""
+    cursor = await db.execute(
+        "SELECT * FROM usage_source_offsets WHERE provider = ? AND source_key = ?",
+        (provider, source_key),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return UsageSourceOffset(**_filter_model_fields(UsageSourceOffset, dict(row)))
+
+
+async def upsert_usage_source_offset(
+    db: aiosqlite.Connection,
+    *,
+    provider: str,
+    source_key: str,
+    external_session_id: str | None = None,
+    byte_offset: int = 0,
+    last_input_tokens: int = 0,
+    last_cached_input_tokens: int = 0,
+    last_output_tokens: int = 0,
+    last_reasoning_output_tokens: int = 0,
+    last_total_tokens: int = 0,
+) -> UsageSourceOffset:
+    """Insert/update durable provider source high-water state."""
+    now = _now()
+    offset = UsageSourceOffset(
+        provider=provider,
+        source_key=source_key,
+        external_session_id=external_session_id,
+        byte_offset=byte_offset,
+        last_input_tokens=last_input_tokens,
+        last_cached_input_tokens=last_cached_input_tokens,
+        last_output_tokens=last_output_tokens,
+        last_reasoning_output_tokens=last_reasoning_output_tokens,
+        last_total_tokens=last_total_tokens,
+        created_at=now,
+        updated_at=now,
+    )
+    existing = await get_usage_source_offset(db, provider=provider, source_key=source_key)
+    if existing is not None:
+        offset.created_at = existing.created_at
+    await db.execute(
+        """INSERT INTO usage_source_offsets
+           (provider, source_key, external_session_id, byte_offset,
+            last_input_tokens, last_cached_input_tokens, last_output_tokens,
+            last_reasoning_output_tokens, last_total_tokens, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(provider, source_key) DO UPDATE SET
+             external_session_id = excluded.external_session_id,
+             byte_offset = excluded.byte_offset,
+             last_input_tokens = excluded.last_input_tokens,
+             last_cached_input_tokens = excluded.last_cached_input_tokens,
+             last_output_tokens = excluded.last_output_tokens,
+             last_reasoning_output_tokens = excluded.last_reasoning_output_tokens,
+             last_total_tokens = excluded.last_total_tokens,
+             updated_at = excluded.updated_at""",
+        (
+            offset.provider,
+            offset.source_key,
+            offset.external_session_id,
+            offset.byte_offset,
+            offset.last_input_tokens,
+            offset.last_cached_input_tokens,
+            offset.last_output_tokens,
+            offset.last_reasoning_output_tokens,
+            offset.last_total_tokens,
+            offset.created_at,
+            offset.updated_at,
+        ),
+    )
+    await db.commit()
+    return offset
 
 # ---------------------------------------------------------------------------
 # ProjectBudget helpers

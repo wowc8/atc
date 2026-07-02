@@ -12,10 +12,12 @@ import asyncio
 import contextlib
 import json
 import logging
-import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from atc.state.db import write_usage_event
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -26,6 +28,127 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 STATS_CACHE_PATH = Path.home() / ".claude" / "stats-cache.json"
+
+
+@dataclass(frozen=True, slots=True)
+class TokenUsageIncrement:
+    """Provider-neutral, datetime-stamped token usage increment.
+
+    Provider-specific collectors may parse cumulative usage however they need to,
+    but they must cross the shared ATC boundary as positive increments. This
+    class intentionally contains no Codex/Claude filesystem or event-shape
+    knowledge.
+    """
+
+    session_id: str
+    project_id: str | None
+    provider: str
+    model: str | None
+    recorded_at: datetime
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    total_tokens: int = 0
+    source: str = "provider"
+    external_session_id: str | None = None
+    source_event_id: str | None = None
+    source_file: str | None = None
+    source_offset: int | None = None
+    raw_usage: dict[str, Any] | None = None
+
+    def effective_total_tokens(self) -> int:
+        """Return canonical total for aggregate displays/budgets."""
+        if self.total_tokens > 0:
+            return self.total_tokens
+        return self.input_tokens + self.output_tokens + self.reasoning_output_tokens
+
+
+class TokenUsageRecorder:
+    """Provider-neutral persistence/fanout for token usage increments."""
+
+    def __init__(
+        self,
+        db: aiosqlite.Connection,
+        event_bus: EventBus,
+        *,
+        ws_hub: WsHub | None = None,
+    ) -> None:
+        self._db = db
+        self._event_bus = event_bus
+        self._ws_hub = ws_hub
+
+    async def record_increment(self, increment: TokenUsageIncrement) -> str | None:
+        """Record a provider-neutral token usage increment.
+
+        Returns the inserted event id, or ``None`` when the increment has no
+        positive token usage. Negative token values are rejected to keep provider
+        collectors from crossing the boundary with cumulative counter resets.
+        """
+        values = {
+            "input_tokens": increment.input_tokens,
+            "cached_input_tokens": increment.cached_input_tokens,
+            "output_tokens": increment.output_tokens,
+            "reasoning_output_tokens": increment.reasoning_output_tokens,
+            "total_tokens": increment.total_tokens,
+        }
+        negative = {name: value for name, value in values.items() if value < 0}
+        if negative:
+            raise ValueError(f"Token usage increments cannot be negative: {negative}")
+
+        effective_total = increment.effective_total_tokens()
+        if effective_total == 0:
+            logger.debug(
+                "Ignoring zero token usage increment provider=%s source=%s session=%s",
+                increment.provider,
+                increment.source,
+                increment.session_id,
+            )
+            return None
+
+        event = await write_usage_event(
+            self._db,
+            "ai_tokens",
+            project_id=increment.project_id,
+            session_id=increment.session_id,
+            model=increment.model,
+            provider=increment.provider,
+            source=increment.source,
+            input_tokens=increment.input_tokens,
+            cached_input_tokens=increment.cached_input_tokens,
+            output_tokens=increment.output_tokens,
+            reasoning_output_tokens=increment.reasoning_output_tokens,
+            total_tokens=effective_total,
+            external_session_id=increment.external_session_id,
+            source_event_id=increment.source_event_id,
+            source_file=increment.source_file,
+            source_offset=increment.source_offset,
+            raw_usage_json=(
+                json.dumps(increment.raw_usage) if increment.raw_usage is not None else None
+            ),
+            recorded_at=increment.recorded_at.isoformat(),
+        )
+
+        payload = {
+            "event_id": event.id,
+            "model": increment.model,
+            "provider": increment.provider,
+            "source": increment.source,
+            "input_tokens": increment.input_tokens,
+            "cached_input_tokens": increment.cached_input_tokens,
+            "output_tokens": increment.output_tokens,
+            "reasoning_output_tokens": increment.reasoning_output_tokens,
+            "total_tokens": effective_total,
+            "project_id": increment.project_id,
+            "session_id": increment.session_id,
+            "external_session_id": increment.external_session_id,
+            "recorded_at": event.recorded_at,
+        }
+        if self._ws_hub:
+            await self._ws_hub.broadcast("tokens", payload)
+        await self._event_bus.publish("tokens_recorded", payload)
+        return event.id
+
 
 class TokenTracker:
     """Polls ~/.claude/stats-cache.json and attributes token deltas to sessions."""
@@ -45,6 +168,7 @@ class TokenTracker:
         self._poll_interval = poll_interval
         self._stats_path = stats_path
         self._last_snapshot: dict[str, Any] = {}
+        self._recorder = TokenUsageRecorder(db, event_bus, ws_hub=ws_hub)
         self._task: asyncio.Task[None] | None = None
         # Sessions that report tokens explicitly via atc-tower tokens CLI.
         # Stats-cache polling is skipped for these to avoid double-counting.
@@ -115,36 +239,17 @@ class TokenTracker:
             if in_tok == 0 and out_tok == 0:
                 continue
 
-            now = datetime.now(UTC).isoformat()
-            event_id = str(uuid.uuid4())
-
-            await self._db.execute(
-                """INSERT INTO usage_events
-                   (id, project_id, session_id, event_type, model,
-                    input_tokens, output_tokens, recorded_at)
-                   VALUES (?, ?, ?, 'ai_tokens', ?, ?, ?, ?)""",
-                (event_id, project_id, session_id, model, in_tok, out_tok, now),
-            )
-            await self._db.commit()
-
-            if self._ws_hub:
-                await self._ws_hub.broadcast(
-                    "tokens",
-                    {
-                        "event_id": event_id,
-                        "model": model,
-                        "input_tokens": in_tok,
-                        "output_tokens": out_tok,
-                        "total_tokens": in_tok + out_tok,
-                        "project_id": project_id,
-                        "session_id": session_id,
-                        "recorded_at": now,
-                    },
+            await self._recorder.record_increment(
+                TokenUsageIncrement(
+                    session_id=session_id or "unknown",
+                    project_id=project_id,
+                    provider="claude_code",
+                    model=model,
+                    recorded_at=datetime.now(UTC),
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                    source="claude_stats_cache",
                 )
-
-            await self._event_bus.publish(
-                "tokens_recorded",
-                {"model": model, "input_tokens": in_tok, "output_tokens": out_tok, "project_id": project_id},
             )
 
             logger.debug(
@@ -238,43 +343,17 @@ class TokenTracker:
                 "Failed to find project for explicit token report: session=%s", session_id
             )
 
-        now = datetime.now(UTC).isoformat()
-        event_id = str(uuid.uuid4())
-
-        await self._db.execute(
-            """INSERT INTO usage_events
-               (id, project_id, session_id, event_type, model,
-                input_tokens, output_tokens, recorded_at)
-               VALUES (?, ?, ?, 'ai_tokens', ?, ?, ?, ?)""",
-            (event_id, project_id, session_id, model, input_tokens, output_tokens, now),
-        )
-        await self._db.commit()
-
-        if self._ws_hub:
-            await self._ws_hub.broadcast(
-                "tokens",
-                {
-                    "event_id": event_id,
-                    "model": model,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "total_tokens": input_tokens + output_tokens,
-                    "project_id": project_id,
-                    "session_id": session_id,
-                    "recorded_at": now,
-                    "source": "explicit",
-                },
+        await self._recorder.record_increment(
+            TokenUsageIncrement(
+                session_id=session_id,
+                project_id=project_id,
+                provider="explicit",
+                model=model,
+                recorded_at=datetime.now(UTC),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                source="explicit",
             )
-
-        await self._event_bus.publish(
-            "tokens_recorded",
-            {
-                "model": model,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "project_id": project_id,
-                "source": "explicit",
-            },
         )
 
         logger.debug(

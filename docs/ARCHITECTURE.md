@@ -50,7 +50,7 @@ Design rule:
 | `core/` | Event bus, orchestrator, state manager, failure logger |
 | `session/` | Session state machine, ace lifecycle, reconnect, SSH tunnels |
 | `terminal/` | PTY streaming (tmux pipe-pane → FIFO → WS), output parser, monitor |
-| `tracking/` | AI token usage tracker, system resources (psutil), GitHub PR/CI, budget enforcer |
+| `tracking/` | Provider-neutral token usage recorder, provider usage trackers, system resources (psutil), GitHub PR/CI, budget enforcer |
 | `rws/` | Remote Ace Server daemon for remote hosts |
 | `agents/` | Agent deployment SOT — writes config files to /tmp |
 

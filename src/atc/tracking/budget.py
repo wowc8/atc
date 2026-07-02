@@ -117,7 +117,7 @@ class BudgetEnforcer:
 
         if daily_token_limit is not None and daily_token_limit > 0:
             cursor = await self._db.execute(
-                """SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0)
+                """SELECT COALESCE(SUM(COALESCE(total_tokens, COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(reasoning_output_tokens, 0))), 0)
                    FROM usage_events
                    WHERE project_id = ?
                      AND event_type = 'ai_tokens'

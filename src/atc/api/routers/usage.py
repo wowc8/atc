@@ -86,7 +86,7 @@ async def get_usage_summary(request: Request) -> UsageSummaryResponse:
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     month_start = datetime.now(UTC).strftime("%Y-%m-01")
 
-    tok = "COALESCE(input_tokens,0)+COALESCE(output_tokens,0)"
+    tok = "COALESCE(total_tokens, COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(reasoning_output_tokens,0))"
     tok_cond = f"CASE WHEN recorded_at >= ? THEN {tok} ELSE 0 END"
     cursor = await db.execute(
         f"""SELECT

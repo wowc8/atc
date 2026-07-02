@@ -58,6 +58,18 @@ Per-project budget limits with:
 - Warning threshold notifications
 - Automatic session pause on budget exceeded
 
+## Token Usage Telemetry
+
+**Status**: Foundation implemented
+
+Provider-neutral token usage infrastructure with:
+- Append-only `usage_events` token increment rows
+- Provider/model/source metadata for usage attribution
+- Separate cached-input and reasoning-output token fields for providers that expose them
+- Durable `usage_source_offsets` high-water state for provider collectors to avoid double-counting
+- Shared `TokenUsageRecorder` interface used by provider-specific collectors
+- Boundary rule: provider-specific parsing, filesystem paths, and event formats stay in provider modules; shared tracking only records normalized token increments
+
 ## GitHub Integration
 
 **Status**: Stub
