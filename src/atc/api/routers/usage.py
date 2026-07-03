@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,11 @@ class UsageSummaryResponse(BaseModel):
     message: str | None = None
 
 
+class CodexSyncResponse(BaseModel):
+    inserted_events: int
+    enabled: bool
+
+
 def _is_oauth_mode() -> bool:
     """Return True when not using a real API key (OAuth or no key configured)."""
     from atc.agents.auth import get_auth_mode
@@ -86,7 +91,10 @@ async def get_usage_summary(request: Request) -> UsageSummaryResponse:
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     month_start = datetime.now(UTC).strftime("%Y-%m-01")
 
-    tok = "COALESCE(total_tokens, COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(reasoning_output_tokens,0))"
+    tok = (
+        "COALESCE(total_tokens, COALESCE(input_tokens,0)+COALESCE(output_tokens,0)"
+        "+COALESCE(reasoning_output_tokens,0))"
+    )
     tok_cond = f"CASE WHEN recorded_at >= ? THEN {tok} ELSE 0 END"
     cursor = await db.execute(
         f"""SELECT
@@ -102,6 +110,20 @@ async def get_usage_summary(request: Request) -> UsageSummaryResponse:
     return UsageSummaryResponse(
         today_tokens=int(row[0]),
         month_tokens=int(row[1]),
+    )
+
+
+@router.post("/tokens/sync-codex", response_model=CodexSyncResponse)
+async def sync_codex_usage(request: Request) -> CodexSyncResponse:
+    """Run one deterministic Codex JSONL usage sync pass."""
+    settings = request.app.state.settings
+    service = getattr(request.app.state, "codex_usage_sync", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Codex usage sync service is unavailable")
+    inserted = await service.sync_once()
+    return CodexSyncResponse(
+        inserted_events=inserted,
+        enabled=bool(settings.token_tracker.codex_enabled),
     )
 
 

@@ -14,6 +14,7 @@ Usage::
     atc projects create --name '...' --description '...'
     atc projects show <id>
     atc tower status
+    atc usage sync-codex
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from atc.cli import ace, leader, projects, tasks, tower
+from atc.cli import ace, leader, projects, tasks, tower, usage
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     leader.register(subparsers)
     projects.register(subparsers)
     tower.register(subparsers)
+    usage.register(subparsers)
 
     return parser
 

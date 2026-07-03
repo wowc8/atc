@@ -122,6 +122,7 @@ See `src/atc/state/migrations/versions/` for the canonical schema.
 6. Start resource monitor
 7. Start GitHub tracker
 8. Start budget enforcer
-9. Reconnect active sessions from last shutdown
+9. Start provider usage sync services such as Codex JSONL token sync when enabled
+10. Reconnect active sessions from last shutdown
 
 Shutdown runs in reverse order, draining queues before closing DB.

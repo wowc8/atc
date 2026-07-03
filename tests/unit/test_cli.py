@@ -227,6 +227,17 @@ class TestTowerMemory:
         assert req["path"] == "/api/tower/memory"
 
 
+class TestUsageSyncCodex:
+    def test_posts_sync_codex(self, api_stub: str) -> None:
+        _StubHandler.response_body = {"inserted_events": 2, "enabled": True}
+        rc = cli(["usage", "sync-codex", "--api", api_stub])
+        assert rc == 0
+        req = _StubHandler.requests[0]
+        assert req["method"] == "POST"
+        assert req["path"] == "/api/usage/tokens/sync-codex"
+        assert req["body"] == {}
+
+
 # ---------------------------------------------------------------------------
 # atc projects list
 # ---------------------------------------------------------------------------

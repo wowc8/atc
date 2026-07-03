@@ -488,12 +488,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await resource_monitor.start()
     app.state.resource_monitor = resource_monitor
 
-    # 10. Start token tracker
+    # 10. Start token trackers
     from atc.tracking.tokens import TokenTracker
 
-    token_tracker = TokenTracker(db, event_bus, ws_hub=ws_hub)
+    token_cfg = settings.token_tracker
+    token_tracker = TokenTracker(
+        db,
+        event_bus,
+        ws_hub=ws_hub,
+        poll_interval=token_cfg.poll_interval_seconds,
+    )
     await token_tracker.start()
     app.state.token_tracker = token_tracker
+
+    from atc.agents.codex_usage import CodexUsageSyncService
+
+    codex_usage_sync = CodexUsageSyncService(
+        db,
+        event_bus,
+        ws_hub=ws_hub,
+        sessions_glob=token_cfg.codex_sessions_glob,
+        poll_interval=token_cfg.poll_interval_seconds,
+    )
+    if token_cfg.codex_enabled:
+        await codex_usage_sync.start()
+    else:
+        logger.info("Codex usage sync disabled by config")
+    app.state.codex_usage_sync = codex_usage_sync
 
     # 11. Start GitHub tracker
     from atc.tracking.github import GitHubTracker
@@ -550,7 +571,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if _key:
             logger.warning(
                 "Running in OAuth mode — API-key-only provider features are disabled, "
-                "concurrent sessions may conflict. Set ATC_ANTHROPIC_API_KEY for full functionality."
+                "concurrent sessions may conflict. Set ATC_ANTHROPIC_API_KEY "
+                "for full functionality."
             )
         else:
             # No env var — using Claude's own stored credentials (best case for local dev)
@@ -584,6 +606,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await memory_cron.stop()
     await budget_enforcer.stop()
     await github_tracker.stop()
+    await codex_usage_sync.stop()
     await token_tracker.stop()
     await resource_monitor.stop()
     await heartbeat_monitor.stop()
