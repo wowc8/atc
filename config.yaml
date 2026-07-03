@@ -26,6 +26,8 @@ budget:
 
 token_tracker:
   poll_interval_seconds: 30
+  codex_enabled: true
+  codex_sessions_glob: ~/.codex/sessions/**/*.jsonl
 
 sentry:
   enabled: false

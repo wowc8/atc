@@ -60,7 +60,7 @@ Per-project budget limits with:
 
 ## Token Usage Telemetry
 
-**Status**: Foundation + Codex provider parser implemented
+**Status**: Foundation + Codex provider runtime sync implemented
 
 Provider-neutral token usage infrastructure with:
 - Append-only `usage_events` token increment rows
@@ -76,6 +76,8 @@ Codex-specific collection lives in `src/atc/agents/codex_usage.py`:
 - Maps Codex session metadata/cwd back to ATC sessions without creating orphan usage rows
 - Converts cumulative Codex totals into provider-neutral token increments
 - Reuses shared high-water state so restart/re-read sync passes do not double-count
+- Starts with the backend when `token_tracker.codex_enabled` is true
+- Supports manual deterministic sync through `POST /api/usage/tokens/sync-codex` or `atc usage sync-codex`
 
 ## GitHub Integration
 

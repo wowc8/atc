@@ -52,6 +52,8 @@ class BudgetConfig(BaseModel):
 
 class TokenTrackerConfig(BaseModel):
     poll_interval_seconds: int = 30
+    codex_enabled: bool = True
+    codex_sessions_glob: str = "~/.codex/sessions/**/*.jsonl"
 
 
 class HeartbeatConfig(BaseModel):
