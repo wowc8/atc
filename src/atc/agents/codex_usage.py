@@ -63,6 +63,21 @@ class CodexTokenSnapshot:
         return str(self.source_file)
 
 
+@dataclass(frozen=True, slots=True)
+class CodexUsageSyncStatus:
+    """Operator-visible status for the Codex usage sync service."""
+
+    enabled: bool
+    running: bool
+    sessions_glob: str
+    poll_interval_seconds: float
+    last_started_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_inserted_events: int = 0
+    last_discovered_files: int = 0
+    last_error: str | None = None
+
+
 class CodexJsonlParser:
     """Parse Codex JSONL and yield token-count snapshots.
 
@@ -213,6 +228,11 @@ class CodexUsageSyncService:
         self._parser = parser or CodexJsonlParser()
         self._recorder = recorder or TokenUsageRecorder(db, event_bus, ws_hub=ws_hub)
         self._task: asyncio.Task[None] | None = None
+        self._last_started_at: datetime | None = None
+        self._last_finished_at: datetime | None = None
+        self._last_inserted_events = 0
+        self._last_discovered_files = 0
+        self._last_error: str | None = None
 
     async def start(self) -> None:
         """Start the Codex usage polling loop."""
@@ -240,10 +260,35 @@ class CodexUsageSyncService:
 
         Returns the number of usage-event rows inserted.
         """
+        self._last_started_at = datetime.now(UTC)
+        self._last_error = None
         inserted = 0
-        for path in self._discover_files():
-            inserted += await self._sync_file(path)
+        paths = self._discover_files()
+        self._last_discovered_files = len(paths)
+        try:
+            for path in paths:
+                inserted += await self._sync_file(path)
+        except Exception as exc:
+            self._last_error = str(exc)
+            raise
+        finally:
+            self._last_inserted_events = inserted
+            self._last_finished_at = datetime.now(UTC)
         return inserted
+
+    def status(self, *, enabled: bool = True) -> CodexUsageSyncStatus:
+        """Return current service status without triggering a sync."""
+        return CodexUsageSyncStatus(
+            enabled=enabled,
+            running=self._task is not None and not self._task.done(),
+            sessions_glob=self._sessions_glob,
+            poll_interval_seconds=self._poll_interval,
+            last_started_at=self._last_started_at,
+            last_finished_at=self._last_finished_at,
+            last_inserted_events=self._last_inserted_events,
+            last_discovered_files=self._last_discovered_files,
+            last_error=self._last_error,
+        )
 
     def _discover_files(self) -> list[Path]:
         expanded = str(Path(self._sessions_glob).expanduser())

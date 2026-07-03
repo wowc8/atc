@@ -197,6 +197,12 @@ class TestCodexUsageSyncService:
         assert row["total_tokens"] == 125
         assert row["external_session_id"] == "codex-external"
         assert row["source_file"] == str(path)
+        status = service.status(enabled=True)
+        assert status.last_inserted_events == 1
+        assert status.last_discovered_files == 1
+        assert status.last_started_at is not None
+        assert status.last_finished_at is not None
+        assert status.last_error is None
 
     async def test_subsequent_cumulative_snapshot_records_only_delta(
         self, migrated_db, tmp_path: Path

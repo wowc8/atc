@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
+from atc.agents.codex_usage import CodexUsageSyncStatus
 from atc.api.app import create_app
 from atc.config import Settings
 from atc.state import db as db_ops
@@ -43,6 +44,16 @@ class FakeCodexUsageSyncService:
     async def sync_once(self) -> int:
         self.sync_count += 1
         return 3
+
+    def status(self, *, enabled: bool = True) -> CodexUsageSyncStatus:
+        return CodexUsageSyncStatus(
+            enabled=enabled,
+            running=self.started and not self.stopped,
+            sessions_glob=self.sessions_glob,
+            poll_interval_seconds=self.poll_interval,
+            last_inserted_events=3 if self.sync_count else 0,
+            last_discovered_files=2,
+        )
 
 
 def settings_for(
@@ -105,6 +116,24 @@ def test_sync_codex_api_runs_one_service_pass(tmp_path: Path, monkeypatch) -> No
         assert response.status_code == 200
         assert response.json() == {"inserted_events": 3, "enabled": True}
         assert FakeCodexUsageSyncService.instances[0].sync_count == 1
+
+
+def test_sync_codex_status_api_reports_service_state(tmp_path: Path, monkeypatch) -> None:
+    from atc.agents import codex_usage
+
+    FakeCodexUsageSyncService.instances = []
+    monkeypatch.setattr(codex_usage, "CodexUsageSyncService", FakeCodexUsageSyncService)
+
+    app = create_app(settings_for(tmp_path, glob_value=str(tmp_path / "*.jsonl")))
+    with TestClient(app) as client:
+        response = client.get("/api/usage/tokens/sync-codex/status")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["enabled"] is True
+        assert body["running"] is True
+        assert body["sessions_glob"] == str(tmp_path / "*.jsonl")
+        assert body["poll_interval_seconds"] == 123
+        assert body["last_discovered_files"] == 2
 
 
 def write_jsonl(path: Path, *events: dict[str, Any]) -> None:

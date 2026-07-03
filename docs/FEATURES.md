@@ -78,6 +78,7 @@ Codex-specific collection lives in `src/atc/agents/codex_usage.py`:
 - Reuses shared high-water state so restart/re-read sync passes do not double-count
 - Starts with the backend when `token_tracker.codex_enabled` is true
 - Supports manual deterministic sync through `POST /api/usage/tokens/sync-codex` or `atc usage sync-codex`
+- Exposes operator visibility on the Usage page: running/enabled state, last sync, files seen, last inserted event count, source glob, and manual sync trigger
 
 ## GitHub Integration
 
