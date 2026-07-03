@@ -10,6 +10,7 @@ Usage routes:
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
@@ -72,6 +73,18 @@ class CodexSyncResponse(BaseModel):
     enabled: bool
 
 
+class CodexSyncStatusResponse(BaseModel):
+    enabled: bool
+    running: bool
+    sessions_glob: str
+    poll_interval_seconds: float
+    last_started_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_inserted_events: int = 0
+    last_discovered_files: int = 0
+    last_error: str | None = None
+
+
 def _is_oauth_mode() -> bool:
     """Return True when not using a real API key (OAuth or no key configured)."""
     from atc.agents.auth import get_auth_mode
@@ -125,6 +138,17 @@ async def sync_codex_usage(request: Request) -> CodexSyncResponse:
         inserted_events=inserted,
         enabled=bool(settings.token_tracker.codex_enabled),
     )
+
+
+@router.get("/tokens/sync-codex/status", response_model=CodexSyncStatusResponse)
+async def get_codex_sync_status(request: Request) -> CodexSyncStatusResponse:
+    """Return operator-visible status for deterministic Codex token sync."""
+    settings = request.app.state.settings
+    service = getattr(request.app.state, "codex_usage_sync", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Codex usage sync service is unavailable")
+    status = service.status(enabled=bool(settings.token_tracker.codex_enabled))
+    return CodexSyncStatusResponse(**asdict(status))
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,23 @@ interface ResourceDataPoint {
   ram_mb: number;
 }
 
+interface CodexSyncStatus {
+  enabled: boolean;
+  running: boolean;
+  sessions_glob: string;
+  poll_interval_seconds: number;
+  last_started_at: string | null;
+  last_finished_at: string | null;
+  last_inserted_events: number;
+  last_discovered_files: number;
+  last_error: string | null;
+}
+
+interface CodexSyncResponse {
+  inserted_events: number;
+  enabled: boolean;
+}
+
 type Period = "7d" | "30d" | "90d";
 
 const PERIODS: Period[] = ["7d", "30d", "90d"];
@@ -85,6 +102,12 @@ export default function UsagePage() {
   const [resourceData, setResourceData] = useState<ResourceDataPoint[]>([]);
   const [resourceLoaded, setResourceLoaded] = useState(false);
 
+  // Codex sync status
+  const [codexStatus, setCodexStatus] = useState<CodexSyncStatus | null>(null);
+  const [codexStatusLoaded, setCodexStatusLoaded] = useState(false);
+  const [codexSyncing, setCodexSyncing] = useState(false);
+  const [codexSyncMessage, setCodexSyncMessage] = useState<string | null>(null);
+
   async function fetchTokens(p: Period) {
     try {
       const data = await api.get<TokenDataPoint[]>(`/usage/tokens?period=${p}`);
@@ -105,8 +128,44 @@ export default function UsagePage() {
     }
   }
 
+  async function fetchCodexStatus() {
+    try {
+      const status = await api.get<CodexSyncStatus>(
+        "/usage/tokens/sync-codex/status",
+      );
+      setCodexStatus(status);
+    } catch {
+      setCodexStatus(null);
+    } finally {
+      setCodexStatusLoaded(true);
+    }
+  }
+
+  async function handleCodexSync() {
+    setCodexSyncing(true);
+    setCodexSyncMessage(null);
+    try {
+      const result = await api.post<CodexSyncResponse>(
+        "/usage/tokens/sync-codex",
+        {},
+      );
+      const suffix = result.inserted_events === 1 ? "" : "s";
+      setCodexSyncMessage(
+        `Inserted ${result.inserted_events} token event${suffix}.`,
+      );
+      setTokenLoaded(false);
+      await fetchCodexStatus();
+    } catch {
+      setCodexSyncMessage("Codex sync failed. Check backend logs.");
+      await fetchCodexStatus();
+    } finally {
+      setCodexSyncing(false);
+    }
+  }
+
   if (!tokenLoaded) void fetchTokens(period);
   if (!resourceLoaded) void fetchResources();
+  if (!codexStatusLoaded) void fetchCodexStatus();
 
   function handlePeriodChange(p: Period) {
     setPeriod(p);
@@ -114,15 +173,16 @@ export default function UsagePage() {
   }
 
   // Pivot token data for grouped bar (one entry per date+model)
-  const tokenByDate = tokenData.reduce<Record<string, Record<string, string | number>>>(
-    (acc, d) => {
-      if (!acc[d.date]) acc[d.date] = { date: d.date };
-      acc[d.date]![`${d.model}_in`] = Number(acc[d.date]![`${d.model}_in`] ?? 0) + d.input_tokens;
-      acc[d.date]![`${d.model}_out`] = Number(acc[d.date]![`${d.model}_out`] ?? 0) + d.output_tokens;
-      return acc;
-    },
-    {},
-  );
+  const tokenByDate = tokenData.reduce<
+    Record<string, Record<string, string | number>>
+  >((acc, d) => {
+    if (!acc[d.date]) acc[d.date] = { date: d.date };
+    acc[d.date]![`${d.model}_in`] =
+      Number(acc[d.date]![`${d.model}_in`] ?? 0) + d.input_tokens;
+    acc[d.date]![`${d.model}_out`] =
+      Number(acc[d.date]![`${d.model}_out`] ?? 0) + d.output_tokens;
+    return acc;
+  }, {});
   const tokenChartData = Object.values(tokenByDate);
 
   const models = [...new Set(tokenData.map((d) => d.model))];
@@ -174,7 +234,10 @@ export default function UsagePage() {
                 data={tokenChartData}
                 margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--color-border)"
+                />
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 9, fill: "var(--color-text-muted)" }}
@@ -236,7 +299,10 @@ export default function UsagePage() {
                 data={resourceData}
                 margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--color-border)"
+                />
                 <XAxis
                   dataKey="timestamp"
                   tickFormatter={fmtTime}
@@ -260,9 +326,7 @@ export default function UsagePage() {
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(v: number) =>
-                    v >= 1024
-                      ? `${(v / 1024).toFixed(1)}G`
-                      : `${v.toFixed(0)}M`
+                    v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${v.toFixed(0)}M`
                   }
                 />
                 <Tooltip
@@ -303,6 +367,66 @@ export default function UsagePage() {
               No resource data yet.
             </div>
           )}
+        </div>
+
+        {/* Codex provider sync */}
+        <div className="panel usage-page__card usage-page__card--full">
+          <div className="usage-page__card-header">
+            <h3>Codex Token Sync</h3>
+            <button
+              className="usage-page__action-btn"
+              onClick={() => void handleCodexSync()}
+              disabled={codexSyncing}
+            >
+              {codexSyncing ? "Syncing…" : "Sync now"}
+            </button>
+          </div>
+          {codexStatus ? (
+            <div className="usage-page__sync-grid">
+              <div className="usage-page__sync-item">
+                <span className="usage-page__stat-label">Status</span>
+                <span className="usage-page__sync-value">
+                  {codexStatus.enabled
+                    ? codexStatus.running
+                      ? "Running"
+                      : "Enabled"
+                    : "Disabled"}
+                </span>
+              </div>
+              <div className="usage-page__sync-item">
+                <span className="usage-page__stat-label">Last sync</span>
+                <span className="usage-page__sync-value">
+                  {formatDateTime(codexStatus.last_finished_at)}
+                </span>
+              </div>
+              <div className="usage-page__sync-item">
+                <span className="usage-page__stat-label">Last inserted</span>
+                <span className="usage-page__sync-value">
+                  {codexStatus.last_inserted_events}
+                </span>
+              </div>
+              <div className="usage-page__sync-item">
+                <span className="usage-page__stat-label">Files seen</span>
+                <span className="usage-page__sync-value">
+                  {codexStatus.last_discovered_files}
+                </span>
+              </div>
+              <div className="usage-page__sync-item usage-page__sync-item--wide">
+                <span className="usage-page__stat-label">Source glob</span>
+                <span className="usage-page__sync-value usage-page__sync-value--path">
+                  {codexStatus.sessions_glob}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="usage-page__muted">Codex sync status unavailable.</p>
+          )}
+          {codexStatus?.last_error ? (
+            <p className="usage-page__sync-error">{codexStatus.last_error}</p>
+          ) : null}
+          {codexSyncMessage ? (
+            <p className="usage-page__sync-message">{codexSyncMessage}</p>
+          ) : null}
         </div>
 
         {/* Budget utilization per project */}
@@ -348,6 +472,20 @@ export default function UsagePage() {
       </div>
     </div>
   );
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "Never";
+  try {
+    return new Date(value).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return value;
+  }
 }
 
 function formatTokens(n: number): string {
