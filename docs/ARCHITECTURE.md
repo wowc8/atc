@@ -52,7 +52,7 @@ Design rule:
 | `terminal/` | PTY streaming (tmux pipe-pane → FIFO → WS), output parser, monitor |
 | `tracking/` | Provider-neutral token usage recorder, provider usage trackers, system resources (psutil), GitHub PR/CI, budget enforcer |
 | `rws/` | Remote Ace Server daemon for remote hosts |
-| `agents/` | Agent deployment SOT — writes config files to /tmp |
+| `agents/` | Agent deployment SOT — writes config files to /tmp; provider-owned runtime helpers such as Codex token JSONL parsing live here |
 
 ### Data Layer (`src/atc/state/`)
 
