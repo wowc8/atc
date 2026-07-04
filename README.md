@@ -109,10 +109,18 @@ tests/          → Unit, integration, e2e tests
 - [CODE_STRUCTURE.md](CODE_STRUCTURE.md) — high-level code structure, provider-agnostic architecture, and hygiene rules
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — System architecture
 - [docs/runtime_truth_recovery_plan.md](docs/runtime_truth_recovery_plan.md) — phased plan for provider-neutral runtime truth, delivery verification, health, and recovery
+- [docs/provider_onboarding.md](docs/provider_onboarding.md) — checklist for adding a new CLI provider/platform
+- [docs/provider_interface_contract.md](docs/provider_interface_contract.md) — provider-neutral orchestration, terminal, token, and runtime contracts
+- [docs/provider_acceptance_checklist.md](docs/provider_acceptance_checklist.md) — PR acceptance checklist for new CLI providers
+- [docs/provider_implementation_map.md](docs/provider_implementation_map.md) — source map for provider integration points
 - [docs/FEATURES.md](docs/FEATURES.md) — Feature guide
 - [docs/API.md](docs/API.md) — REST API + WebSocket reference
 - [docs/PATTERNS.md](docs/PATTERNS.md) — Code patterns
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) — How to contribute
+
+### Adding a New CLI Provider
+
+Start with [docs/provider_onboarding.md](docs/provider_onboarding.md). Every new CLI-backed provider must satisfy the provider boundary lock, provider-neutral interface contract, Tower/Leader/Ace orchestration contract, terminal contract, token usage contract, and acceptance checklist before being considered supported. Provider-specific logic belongs in the provider module; shared interfaces should not change inside a provider onboarding PR unless a separate design log justifies a generic ATC need.
 
 ## Upgrading
 

@@ -27,8 +27,10 @@ It may have a best-supported provider at a given moment, but the architecture sh
 - startup, readiness, prompt delivery, and status handling belong at the provider boundary when provider-specific
 - product logic should depend on stable internal interfaces, not tool-specific terminal behaviors
 
-Practical rule:
+Practical rules:
 - Tower / Leader / Ace flows should talk to provider abstractions, not raw tmux or provider-specific CLI details, unless that code is explicitly part of a provider implementation
+- New CLI providers must start from [`docs/provider_onboarding.md`](docs/provider_onboarding.md) and [`docs/provider_interface_contract.md`](docs/provider_interface_contract.md)
+- Provider-specific logic belongs under the provider module; shared interfaces should not change in provider onboarding PRs unless a separate design log justifies a generic ATC need
 
 ### 2. Product logic and runtime wiring should stay separate
 
