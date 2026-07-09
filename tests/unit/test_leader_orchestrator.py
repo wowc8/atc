@@ -95,14 +95,14 @@ class TestSpawnAces:
         assert assignments[0].assignment_id != ""  # idempotency key set
         mock_create.assert_called_once()
 
-    async def test_uses_project_agent_provider(
+    async def test_ace_spawn_uses_runtime_provider_boundary(
         self,
         mock_create: AsyncMock,
         db,
         orchestrator: LeaderOrchestrator,
     ) -> None:
-        """Ace sessions must use the project's configured agent_provider."""
-        # Set project to use opencode
+        """Ace spawning must leave provider command resolution to RuntimeService."""
+        # Set project provider; create_ace should not receive a legacy launch command.
         await db.execute(
             "UPDATE projects SET agent_provider = ? WHERE id = ?",
             ("opencode", orchestrator.project_id),
@@ -112,30 +112,26 @@ class TestSpawnAces:
         await create_task_graph(db, orchestrator.project_id, "Task A")
         await orchestrator.spawn_aces_for_ready_tasks()
 
-        # Verify the launch_command used the opencode provider
+        # Verify legacy launch_command plumbing is no longer used.
         call_kwargs = mock_create.call_args
         assert call_kwargs is not None
-        assert call_kwargs.kwargs.get("launch_command") == "opencode"
+        assert "launch_command" not in call_kwargs.kwargs
 
-    async def test_default_project_provider_uses_configured_launch_command(
+    async def test_default_project_provider_omits_legacy_launch_command(
         self,
         mock_create: AsyncMock,
         db,
         orchestrator: LeaderOrchestrator,
     ) -> None:
-        """Project default agent_provider uses its configured launch command."""
+        """Project default provider is resolved by RuntimeService, not old factory commands."""
         await create_task_graph(db, orchestrator.project_id, "Task B")
         await orchestrator.spawn_aces_for_ready_tasks()
 
         call_kwargs = mock_create.call_args
         assert call_kwargs is not None
-        from atc.agents.factory import get_launch_command
-
         project = await get_project(db, orchestrator.project_id)
         assert project is not None
-        assert call_kwargs.kwargs.get("launch_command") == get_launch_command(
-            project.agent_provider
-        )
+        assert "launch_command" not in call_kwargs.kwargs
 
     async def test_skips_tasks_with_unmet_deps(
         self,
@@ -516,7 +512,6 @@ class TestSpawnRetryAssignmentReuse:
 
         with (
             patch("atc.leader.orchestrator.create_ace", new=AsyncMock(return_value="ace-new")),
-            patch("atc.leader.orchestrator.get_launch_command", return_value="claude"),
             patch(
                 "atc.leader.orchestrator.build_context_package",
                 new=AsyncMock(return_value={"context_entries": []}),
@@ -888,6 +883,7 @@ class TestSessionMonitoring:
         # Should not trigger failure
         assert tg.id in orchestrator.assignments
         assert orchestrator.assignments[tg.id].status == "working"
+
 
 @pytest.mark.asyncio
 async def test_monitor_ace_assignments_is_leader_owned_and_publishes_blockers(

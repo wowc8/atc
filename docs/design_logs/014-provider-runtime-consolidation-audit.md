@@ -329,3 +329,27 @@ No cost/dollar usage semantics reintroduced.
 Proceed to Phase 2 with provider runtime consolidation cleanup before implementing provider-native helper subagents.
 
 Phase 2 should remove the old AgentProvider runtime path or reduce it to zero active product-code usage, move provider-specific runtime/token helpers under `src/atc/providers/<provider>/`, and add boundary tests/scans so future provider work uses the canonical `ProviderRuntime` path.
+
+## Phase 2 outcome
+
+Implemented by the Phase 2 provider-runtime consolidation cleanup.
+
+Changes completed:
+
+- Removed the legacy `AgentProvider` abstraction and old provider classes from active source.
+- Removed `get_launch_command(...)` from Leader/Ace creation flow.
+- Kept role-file deployment under `src/atc/agents/deploy.py` as a separate deployment helper, not a runtime provider abstraction.
+- Moved Codex token JSONL sync from `src/atc/agents/codex_usage.py` to `src/atc/providers/codex/usage.py`.
+- Moved Claude Code runtime helper functions from `src/atc/agents/claude_runtime.py` to `src/atc/providers/claude_code/runtime_helpers.py`.
+- Updated tests/docs so provider runtime work points at `src/atc/providers/<provider>/` and `RuntimeService`.
+
+The canonical runtime path after Phase 2 is now:
+
+```text
+settings/project provider selection
+  -> session row stamped with provider
+  -> RuntimeService
+  -> atc.providers.registry
+  -> ProviderRuntime implementation
+  -> src/atc/providers/<provider>/
+```

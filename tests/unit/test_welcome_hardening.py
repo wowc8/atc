@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from atc.agents.claude_runtime import wait_for_prompt
-from atc.session.ace import _accept_trust_dialog
-
+from atc.providers.claude_code.runtime_helpers import wait_for_prompt
 
 # ---------------------------------------------------------------------------
 # wait_for_prompt tests

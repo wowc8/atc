@@ -70,7 +70,7 @@ Provider-neutral token usage infrastructure with:
 - Shared `TokenUsageRecorder` interface used by provider-specific collectors
 - Boundary rule: provider-specific parsing, filesystem paths, and event formats stay in provider modules; shared tracking only records normalized token increments
 
-Codex-specific collection lives in `src/atc/agents/codex_usage.py`:
+Codex-specific collection lives in `src/atc/providers/codex/usage.py`:
 - Discovers/parses Codex session JSONL files under the Codex provider boundary
 - Extracts Codex `token_count` cumulative token snapshots
 - Maps Codex session metadata/cwd back to ATC sessions without creating orphan usage rows

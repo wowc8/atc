@@ -1,49 +1,15 @@
-"""Tests for atc-agent script and the get_launch_command factory integration."""
+"""Tests for the atc-agent script compatibility wrapper."""
 
 from __future__ import annotations
 
 import os
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from atc.agents.factory import get_launch_command
-
 # Absolute path to the atc-agent script in the project root.
 _SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "atc-agent"
-
-
-# ---------------------------------------------------------------------------
-# get_launch_command — atc-agent integration
-# ---------------------------------------------------------------------------
-
-
-class TestGetLaunchCommandAtcAgent:
-    def test_returns_script_when_exists(self) -> None:
-        """When atc-agent exists on disk, claude_code should use it."""
-        assert _SCRIPT.exists(), f"atc-agent not found at {_SCRIPT}"
-        cmd = get_launch_command("claude_code")
-        assert cmd == str(_SCRIPT)
-
-    def test_falls_back_when_script_missing(self, tmp_path: Path) -> None:
-        """When atc-agent is absent, fall back to bare claude command."""
-        # Patch Path.exists on the computed script path inside get_launch_command.
-        with patch.object(Path, "exists", return_value=False):
-            cmd = get_launch_command("claude_code")
-        assert cmd == "claude --dangerously-skip-permissions"
-
-    def test_opencode_unaffected(self) -> None:
-        """opencode provider is not affected by atc-agent presence."""
-        cmd = get_launch_command("opencode")
-        assert cmd == "opencode"
-
-    def test_unknown_falls_back_to_claude(self) -> None:
-        """Unknown providers still fall back to the claude_code default."""
-        with patch.object(Path, "exists", return_value=False):
-            cmd = get_launch_command("unknown_provider")
-        assert cmd == "claude --dangerously-skip-permissions"
 
 
 # ---------------------------------------------------------------------------

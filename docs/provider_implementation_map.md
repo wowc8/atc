@@ -19,11 +19,10 @@ src/atc/providers/<provider>/
 
 Current examples:
 
-- `src/atc/providers/codex/` — Codex runtime adapter and provider-specific classifiers.
-- `src/atc/providers/claude_code/` — Claude Code runtime adapter.
-- `src/atc/agents/codex_usage.py` — Codex-owned token JSONL parser/sync service; Phase 1 audit recommends moving this under `src/atc/providers/codex/usage.py` during provider-runtime consolidation.
+- `src/atc/providers/codex/` — Codex runtime adapter, classifiers, and token JSONL usage sync service.
+- `src/atc/providers/claude_code/` — Claude Code runtime adapter and provider-specific runtime helpers.
 
-See [`design_logs/014-provider-runtime-consolidation-audit.md`](design_logs/014-provider-runtime-consolidation-audit.md) for the current provider runtime path audit, legacy `AgentProvider` cleanup candidates, and Phase 2 migration plan.
+See [`design_logs/014-provider-runtime-consolidation-audit.md`](design_logs/014-provider-runtime-consolidation-audit.md) for the provider runtime path audit that drove the legacy `AgentProvider` cleanup.
 
 Provider modules should adapt provider-specific facts into provider-neutral ATC primitives before calling shared code.
 

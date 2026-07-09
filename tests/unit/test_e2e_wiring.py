@@ -4,7 +4,7 @@ Verifies that:
   - Tower → Leader flow deploys manager config before spawning
   - Leader → Ace flow deploys ace config before spawning
   - Config files contain correct task/goal information
-  - tmux panes receive the correct launch command and working directory
+  - tmux panes receive the correct provider-selected working directory
   - Deployed files are cleaned up on task completion/failure
 """
 
@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from atc.agents.deploy import AceDeploySpec, ManagerDeploySpec, deploy_ace_files
-from atc.agents.factory import get_launch_command
 from atc.core.events import EventBus
 from atc.leader.leader import _build_manager_deploy_spec
 from atc.leader.orchestrator import LeaderOrchestrator
@@ -99,7 +98,11 @@ class TestBuildManagerDeploySpec:
 class TestTowerToLeaderWiring:
     """Verify that Tower → Leader flow deploys config and launches claude."""
 
-    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+    @patch(
+        "atc.leader.leader._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%1"),
+    )
     @patch("atc.leader.leader.deploy_manager_files")
     async def test_start_leader_deploys_config(
         self,
@@ -142,9 +145,13 @@ class TestTowerToLeaderWiring:
         assert spec.session_id is not None
         assert spec.session_id != spec.leader_id
 
-    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+    @patch(
+        "atc.leader.leader._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%1"),
+    )
     @patch("atc.leader.leader.deploy_manager_files")
-    async def test_start_leader_launches_claude(
+    async def test_start_leader_spawns_provider_session(
         self,
         mock_deploy: AsyncMock,
         mock_spawn_provider: AsyncMock,
@@ -165,10 +172,14 @@ class TestTowerToLeaderWiring:
         mock_spawn_provider.assert_called_once()
         _, kwargs = mock_spawn_provider.call_args
         assert kwargs["session_type"] == "manager"
-        assert kwargs["launch_command"] == get_launch_command("claude_code")
+        assert "launch_command" not in kwargs
         assert kwargs["working_dir"] == "/tmp/repo"
 
-    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+    @patch(
+        "atc.leader.leader._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%1"),
+    )
     @patch("atc.leader.leader.deploy_manager_files")
     async def test_start_leader_uses_deploy_root_when_no_repo(
         self,
@@ -191,22 +202,26 @@ class TestTowerToLeaderWiring:
         _, kwargs = mock_spawn_provider.call_args
         assert kwargs["working_dir"] == "/tmp/atc-agents/leader-1"
 
-    @patch("atc.leader.leader._spawn_provider_session", new_callable=AsyncMock, return_value=("atc", "%1"))
+    @patch(
+        "atc.leader.leader._spawn_provider_session",
+        new_callable=AsyncMock,
+        return_value=("atc", "%1"),
+    )
     @patch("atc.leader.leader.deploy_manager_files")
-    async def test_start_leader_uses_project_agent_provider(
+    async def test_start_leader_uses_runtime_provider_selection(
         self,
         mock_deploy: AsyncMock,
         mock_spawn_provider: AsyncMock,
         db,
         event_bus: EventBus,
     ) -> None:
-        """Leader must use project.agent_provider to pick the launch command."""
+        """Leader startup delegates provider selection to the runtime/session boundary."""
         from atc.agents.deploy import DeployedFiles
 
         mock_deploy.return_value = DeployedFiles(root=Path("/tmp/atc-agents/leader-1"), files=[])
 
         project = await create_project(db, "test-proj", repo_path="/tmp/repo")
-        # Set project to use opencode
+        # Set a project provider; runtime resolution should stay behind _spawn_provider_session.
         await db.execute(
             "UPDATE projects SET agent_provider = ? WHERE id = ?",
             ("opencode", project.id),
@@ -220,8 +235,8 @@ class TestTowerToLeaderWiring:
 
         mock_spawn_provider.assert_called_once()
         _, kwargs = mock_spawn_provider.call_args
-        assert kwargs["launch_command"] == get_launch_command("opencode")
-        assert kwargs["launch_command"] == "opencode"
+        assert "launch_command" not in kwargs
+        assert kwargs["session_type"] == "manager"
 
 
 # ---------------------------------------------------------------------------
@@ -301,12 +316,11 @@ class TestLeaderToAceWiring:
         await create_task_graph(db, project.id, "Task A")
         await orchestrator.spawn_aces_for_ready_tasks()
 
-        # Verify create_ace was called with working_dir and launch_command
+        # Verify create_ace was called with the runtime-selected working_dir.
         mock_create.assert_called_once()
         _, kwargs = mock_create.call_args
         assert kwargs["working_dir"] == "/tmp/repo"
-        from atc.agents.factory import get_launch_command
-        assert kwargs["launch_command"] == get_launch_command("claude_code")
+        assert "launch_command" not in kwargs
 
     @patch("atc.leader.orchestrator.create_ace", new_callable=AsyncMock, return_value="ace-1")
     @patch("atc.leader.orchestrator.deploy_ace_files")

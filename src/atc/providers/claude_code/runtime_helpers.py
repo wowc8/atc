@@ -130,10 +130,17 @@ async def accept_startup_dialogs(
 
             try:
                 alt_on = await get_alternate_on(pane_id)
-                if not alt_on and _BARE_PROMPT_RE.search(output):
-                    if not any(t in lowered for t in _DIALOG_TRIGGERS):
-                        logger.debug("Pane %s: prompt visible (alternate_on=0, %.1fs)", pane_id, elapsed)
-                        return bool(dismissed)
+                if (
+                    not alt_on
+                    and _BARE_PROMPT_RE.search(output)
+                    and not any(t in lowered for t in _DIALOG_TRIGGERS)
+                ):
+                    logger.debug(
+                        "Pane %s: prompt visible (alternate_on=0, %.1fs)",
+                        pane_id,
+                        elapsed,
+                    )
+                    return bool(dismissed)
             except RuntimeError:
                 pass
 
@@ -174,7 +181,9 @@ async def wait_for_prompt(
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
 
-    logger.warning("Pane %s: prompt not ready after %.1fs (wait_for_prompt timed out)", pane_id, timeout)
+    logger.warning(
+        "Pane %s: prompt not ready after %.1fs (wait_for_prompt timed out)", pane_id, timeout
+    )
     return False
 
 
@@ -196,7 +205,9 @@ async def check_tui_ready(
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
 
-    logger.warning("Pane %s: TUI still active after %.1fs, alternate_on not cleared", pane_id, timeout)
+    logger.warning(
+        "Pane %s: TUI still active after %.1fs, alternate_on not cleared", pane_id, timeout
+    )
     return False
 
 
@@ -233,7 +244,8 @@ async def send_instruction(
 
             if any(t in output_lower for t in _WELCOME_TRIGGERS):
                 logger.info(
-                    "Pane %s: welcome screen visible on attempt %d — assuming instruction delivered",
+                    "Pane %s: welcome screen visible on attempt %d — assuming "
+                    "instruction delivered",
                     pane_id,
                     attempt,
                 )
@@ -255,7 +267,8 @@ async def send_instruction(
                     )
                 elif await pane_is_alive(pane_id):
                     logger.info(
-                        "Pane %s: prompt disappeared after send on attempt %d — assuming instruction accepted",
+                        "Pane %s: prompt disappeared after send on attempt %d — "
+                        "assuming instruction accepted",
                         pane_id,
                         attempt,
                     )
