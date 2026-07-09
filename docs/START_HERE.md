@@ -17,6 +17,7 @@ Minimum reading order for any non-trivial change:
 Examples:
 - provider/runtime work:
   - `docs/service_model.md`
+  - `docs/design_logs/014-provider-runtime-consolidation-audit.md`
   - `docs/runtime_orchestration_refactor_phases.md`
   - `docs/runtime_truth_recovery_plan.md`
   - `docs/leader_kickoff_recovery_plan.md`
@@ -72,6 +73,8 @@ These docs exist to:
   - what test coverage is expected for changes
 - `docs/provider_runtime_refactor_plan.md`
   - phased runtime/provider refactor plan
+- `docs/design_logs/014-provider-runtime-consolidation-audit.md`
+  - current provider runtime path audit and Phase 2 cleanup plan
 - `docs/provider_cli_wrapper_spec.md`
   - `atc-provider` wrapper contract
 - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`

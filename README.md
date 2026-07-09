@@ -113,6 +113,7 @@ tests/          → Unit, integration, e2e tests
 - [docs/provider_interface_contract.md](docs/provider_interface_contract.md) — provider-neutral orchestration, terminal, token, and runtime contracts
 - [docs/provider_acceptance_checklist.md](docs/provider_acceptance_checklist.md) — PR acceptance checklist for new CLI providers
 - [docs/provider_implementation_map.md](docs/provider_implementation_map.md) — source map for provider integration points
+- [docs/design_logs/014-provider-runtime-consolidation-audit.md](docs/design_logs/014-provider-runtime-consolidation-audit.md) — current provider runtime path audit and cleanup plan
 - [docs/FEATURES.md](docs/FEATURES.md) — Feature guide
 - [docs/API.md](docs/API.md) — REST API + WebSocket reference
 - [docs/PATTERNS.md](docs/PATTERNS.md) — Code patterns
