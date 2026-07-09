@@ -14,14 +14,16 @@ Use this map to locate the ATC subsystems a new CLI provider may need to integra
 Provider-specific logic belongs under provider-owned modules, for example:
 
 ```text
-src/atc/agents/<provider>/
-src/atc/agents/<provider>_usage.py
-src/atc/agents/providers/<provider>/
+src/atc/providers/<provider>/
 ```
 
 Current examples:
 
-- `src/atc/agents/codex_usage.py` — Codex-owned token JSONL parser/sync service.
+- `src/atc/providers/codex/` — Codex runtime adapter and provider-specific classifiers.
+- `src/atc/providers/claude_code/` — Claude Code runtime adapter.
+- `src/atc/agents/codex_usage.py` — Codex-owned token JSONL parser/sync service; Phase 1 audit recommends moving this under `src/atc/providers/codex/usage.py` during provider-runtime consolidation.
+
+See [`design_logs/014-provider-runtime-consolidation-audit.md`](design_logs/014-provider-runtime-consolidation-audit.md) for the current provider runtime path audit, legacy `AgentProvider` cleanup candidates, and Phase 2 migration plan.
 
 Provider modules should adapt provider-specific facts into provider-neutral ATC primitives before calling shared code.
 
