@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
-from atc.agents.codex_usage import CodexUsageSyncStatus
 from atc.api.app import create_app
 from atc.config import Settings
+from atc.providers.codex.usage import CodexUsageSyncStatus
 from atc.state import db as db_ops
 
 if TYPE_CHECKING:
@@ -77,7 +77,7 @@ def test_codex_usage_sync_starts_and_stops_with_app_lifecycle(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from atc.agents import codex_usage
+    from atc.providers.codex import usage as codex_usage
 
     FakeCodexUsageSyncService.instances = []
     monkeypatch.setattr(codex_usage, "CodexUsageSyncService", FakeCodexUsageSyncService)
@@ -92,7 +92,7 @@ def test_codex_usage_sync_starts_and_stops_with_app_lifecycle(
 
 
 def test_codex_usage_sync_does_not_start_when_disabled(tmp_path: Path, monkeypatch) -> None:
-    from atc.agents import codex_usage
+    from atc.providers.codex import usage as codex_usage
 
     FakeCodexUsageSyncService.instances = []
     monkeypatch.setattr(codex_usage, "CodexUsageSyncService", FakeCodexUsageSyncService)
@@ -105,7 +105,7 @@ def test_codex_usage_sync_does_not_start_when_disabled(tmp_path: Path, monkeypat
 
 
 def test_sync_codex_api_runs_one_service_pass(tmp_path: Path, monkeypatch) -> None:
-    from atc.agents import codex_usage
+    from atc.providers.codex import usage as codex_usage
 
     FakeCodexUsageSyncService.instances = []
     monkeypatch.setattr(codex_usage, "CodexUsageSyncService", FakeCodexUsageSyncService)
@@ -119,7 +119,7 @@ def test_sync_codex_api_runs_one_service_pass(tmp_path: Path, monkeypatch) -> No
 
 
 def test_sync_codex_status_api_reports_service_state(tmp_path: Path, monkeypatch) -> None:
-    from atc.agents import codex_usage
+    from atc.providers.codex import usage as codex_usage
 
     FakeCodexUsageSyncService.instances = []
     monkeypatch.setattr(codex_usage, "CodexUsageSyncService", FakeCodexUsageSyncService)
@@ -198,6 +198,7 @@ def test_codex_sync_endpoint_records_tokens_and_summary_once(tmp_path: Path) -> 
     app = create_app(settings)
 
     with TestClient(app) as client:
+
         async def create_records() -> str:
             project = await db_ops.create_project(
                 app.state.db,

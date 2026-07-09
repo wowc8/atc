@@ -39,10 +39,10 @@ Shared layers must not know about provider-specific filesystem paths, JSON paylo
 Add provider logic under a provider-owned location, for example:
 
 ```text
-src/atc/agents/<provider>/
-src/atc/agents/<provider>_usage.py
-src/atc/agents/providers/<provider>/
+src/atc/providers/<provider>/
 ```
+
+Runtime adapters implement `ProviderRuntime` and are registered through `src/atc/providers/registry.py`. Provider-specific classifiers, prompt recovery, token usage parsers, session metadata mapping, and helper-subagent integrations should live under the same provider package.
 
 The provider module owns adaptation from provider-specific behavior into ATC-normalized primitives.
 

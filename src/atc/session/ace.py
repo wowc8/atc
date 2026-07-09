@@ -25,9 +25,9 @@ from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
 
-from atc.agents.claude_runtime import _DIALOG_TRIGGERS as _CLAUDE_DIALOG_TRIGGERS
-from atc.agents.claude_runtime import accept_startup_dialogs
 from atc.core.app_events import log_event
+from atc.providers.claude_code.runtime_helpers import _DIALOG_TRIGGERS as _CLAUDE_DIALOG_TRIGGERS
+from atc.providers.claude_code.runtime_helpers import accept_startup_dialogs
 from atc.runtime.models import StopRoleRequest
 from atc.runtime.service import RuntimeService
 from atc.session.state_machine import (
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 ATC_TMUX_SESSION = "atc"
 
 # Backward-compatible export for older trust-dialog tests/callers. Claude-specific
-# matching still lives in atc.agents.claude_runtime.
+# matching still lives in atc.providers.claude_code.runtime_helpers.
 _DIALOG_TRIGGERS = _CLAUDE_DIALOG_TRIGGERS
 
 
@@ -287,7 +287,6 @@ async def _spawn_provider_session(
     session_type: str,
     working_dir: str | None,
     context_file: _Path | None = None,
-    launch_command: str | None = None,
 ) -> tuple[str, str]:
     from atc.runtime.models import RoleKind, StartRoleRequest
     from atc.runtime.service import RuntimeService
@@ -319,7 +318,6 @@ async def _spawn_provider_session(
         connection=conn,
         working_dir=working_dir,
         context_ref=str(context_file) if context_file else None,
-        metadata={"launch_command": launch_command} if launch_command else {},
     )
     try:
         handle = await service.spawn_existing_session(request)
@@ -346,7 +344,6 @@ async def create_ace(
     host: str | None = None,
     event_bus: EventBus | None = None,
     working_dir: str | None = None,
-    launch_command: str | None = None,
     deploy_spec_kwargs: dict[str, Any] | None = None,
 ) -> str:
     """Create an ace session (DB-first). Returns the session id.
@@ -356,8 +353,6 @@ async def create_ace(
 
     Args:
         working_dir: Working directory for the tmux pane (e.g. the repo path).
-        launch_command: Shell command to run in the pane (e.g. ``claude``).
-            When provided, the pane launches this command instead of a bare shell.
         deploy_spec_kwargs: If provided, deploy Ace config files (CLAUDE.md,
             hooks, settings.json) using the real session_id after DB creation.
     """
@@ -462,7 +457,6 @@ async def create_ace(
             context_file=deployed.instructions_md_path
             if deployed and deployed.instructions_md_path.exists()
             else None,
-            launch_command=launch_command,
         )
         await db_ops.update_session_tmux(conn, session.id, tmux_session, pane_id)
 

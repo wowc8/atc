@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from atc.agents.claude_runtime import check_tui_ready, send_instruction, wait_for_prompt
+from atc.providers.claude_code.runtime_helpers import (
+    check_tui_ready,
+    send_instruction,
+    wait_for_prompt,
+)
 
 
 @pytest.mark.asyncio
@@ -112,7 +116,9 @@ async def test_check_tui_ready_pane_dies() -> None:
 
 class TestSendInstruction:
     @pytest.mark.asyncio
-    @patch("atc.agents.claude_runtime.send_instruction_async", new_callable=AsyncMock)
+    @patch(
+        "atc.providers.claude_code.runtime_helpers.send_instruction_async", new_callable=AsyncMock
+    )
     async def test_success(self, mock_send_async: AsyncMock) -> None:
         result = await send_instruction(
             "%0",
@@ -140,7 +146,9 @@ class TestSendInstruction:
         assert result is False
 
     @pytest.mark.asyncio
-    @patch("atc.agents.claude_runtime.send_instruction_async", new_callable=AsyncMock)
+    @patch(
+        "atc.providers.claude_code.runtime_helpers.send_instruction_async", new_callable=AsyncMock
+    )
     async def test_retry_on_verification_failure(self, mock_send_async: AsyncMock) -> None:
         result = await send_instruction(
             "%0",
@@ -155,7 +163,9 @@ class TestSendInstruction:
         assert mock_send_async.call_count == 2
 
     @pytest.mark.asyncio
-    @patch("atc.agents.claude_runtime.send_instruction_async", new_callable=AsyncMock)
+    @patch(
+        "atc.providers.claude_code.runtime_helpers.send_instruction_async", new_callable=AsyncMock
+    )
     async def test_skip_verification(self, mock_send_async: AsyncMock) -> None:
         result = await send_instruction(
             "%0",
@@ -170,8 +180,12 @@ class TestSendInstruction:
         mock_send_async.assert_called_once_with("atc", "%0", "test")
 
     @pytest.mark.asyncio
-    @patch("atc.agents.claude_runtime.send_instruction_async", new_callable=AsyncMock)
-    async def test_prompt_disappearing_counts_as_accepted_delivery(self, mock_send_async: AsyncMock) -> None:
+    @patch(
+        "atc.providers.claude_code.runtime_helpers.send_instruction_async", new_callable=AsyncMock
+    )
+    async def test_prompt_disappearing_counts_as_accepted_delivery(
+        self, mock_send_async: AsyncMock
+    ) -> None:
         result = await send_instruction(
             "%0",
             "run tests",
@@ -185,8 +199,12 @@ class TestSendInstruction:
         mock_send_async.assert_called_once_with("atc", "%0", "run tests")
 
     @pytest.mark.asyncio
-    @patch("atc.agents.claude_runtime.send_instruction_async", new_callable=AsyncMock)
-    async def test_prompt_disappearing_with_dead_pane_is_not_treated_as_success(self, mock_send_async: AsyncMock) -> None:
+    @patch(
+        "atc.providers.claude_code.runtime_helpers.send_instruction_async", new_callable=AsyncMock
+    )
+    async def test_prompt_disappearing_with_dead_pane_is_not_treated_as_success(
+        self, mock_send_async: AsyncMock
+    ) -> None:
         result = await send_instruction(
             "%0",
             "run tests",
@@ -200,8 +218,12 @@ class TestSendInstruction:
         mock_send_async.assert_called_once_with("atc", "%0", "run tests")
 
     @pytest.mark.asyncio
-    @patch("atc.agents.claude_runtime.send_instruction_async", new_callable=AsyncMock)
-    async def test_prompt_disappearing_with_visible_dialog_is_not_treated_as_success(self, mock_send_async: AsyncMock) -> None:
+    @patch(
+        "atc.providers.claude_code.runtime_helpers.send_instruction_async", new_callable=AsyncMock
+    )
+    async def test_prompt_disappearing_with_visible_dialog_is_not_treated_as_success(
+        self, mock_send_async: AsyncMock
+    ) -> None:
         async def capture_side_effect(*args, **kwargs):
             capture_side_effect.calls += 1
             if capture_side_effect.calls == 1:

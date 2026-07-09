@@ -8,13 +8,13 @@ from typing import Any
 
 import pytest
 
-from atc.agents.codex_usage import (
+from atc.core.events import EventBus
+from atc.providers.codex.usage import (
     CODEX_PROVIDER,
     CODEX_SOURCE,
     CodexJsonlParser,
     CodexUsageSyncService,
 )
-from atc.core.events import EventBus
 from atc.state.db import create_project, create_session, get_connection, run_migrations
 
 
@@ -306,6 +306,6 @@ def test_codex_parsing_stays_inside_codex_module() -> None:
     forbidden = [".codex", "token_count", "rollout-", "codex_jsonl"]
     assert [term for term in forbidden if term in shared] == []
 
-    codex_module = Path("src/atc/agents/codex_usage.py").read_text()
+    codex_module = Path("src/atc/providers/codex/usage.py").read_text()
     assert "token_count" in codex_module
     assert "~/.codex/sessions/**/*.jsonl" in codex_module

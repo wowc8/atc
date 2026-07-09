@@ -43,7 +43,7 @@ def test_create_provider_runtime_raises_for_unknown() -> None:
         raise AssertionError("Expected ProviderRegistryError")
 
 
-def test_builtin_claude_runtime_registered() -> None:
+def test_builtin_runtime_helpers_registered() -> None:
     factory = get_provider_runtime_factory("claude_code")
     assert factory is ClaudeCodeRuntime
 

@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from atc.agents.deploy import AceDeploySpec, cleanup_deployed_files, deploy_ace_files
-from atc.agents.factory import get_launch_command
 from atc.leader.context_package import build_context_package
 from atc.leader.decomposer import get_completion_status, get_ready_tasks
 from atc.leader.dispatch import verify_ace_dispatch_delivery
@@ -95,14 +94,6 @@ class LeaderOrchestrator:
     blocked_transition_errors: list[dict[str, Any]] = field(default_factory=list)
     _max_concurrent_aces: int = 3
     _governor: ResourceGovernor = field(default_factory=ResourceGovernor)
-
-    def _current_provider_default(self) -> str:
-        app_state = getattr(getattr(self.conn, "_connection", None), "app_state", None)
-        if app_state is not None and getattr(app_state, "settings", None) is not None:
-            return app_state.settings.agent_provider.default
-        from atc.config import load_settings
-
-        return load_settings().agent_provider.default
 
     def _record_transition_block(self, exc: LifecycleTransitionError) -> None:
         """Keep the most recent structured transition blockers visible to callers."""
@@ -276,12 +267,6 @@ class LeaderOrchestrator:
                 )
                 context_entries = ctx.get("context_entries", [])
 
-            provider_name = (
-                project.agent_provider
-                if project and project.agent_provider
-                else self._current_provider_default()
-            )
-
             session_id = await create_ace(
                 self.conn,
                 self.project_id,
@@ -289,7 +274,6 @@ class LeaderOrchestrator:
                 task_id=task_graph_id,
                 event_bus=self.event_bus,
                 working_dir=repo_path,
-                launch_command=get_launch_command(provider_name),
                 deploy_spec_kwargs={
                     "project_name": project_name,
                     "task_title": title,

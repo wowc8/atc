@@ -501,7 +501,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await token_tracker.start()
     app.state.token_tracker = token_tracker
 
-    from atc.agents.codex_usage import CodexUsageSyncService
+    from atc.providers.codex.usage import CodexUsageSyncService
 
     codex_usage_sync = CodexUsageSyncService(
         db,
@@ -669,9 +669,6 @@ def _resolve_claude_binary(settings: Settings) -> None:
                     "agent_provider",
                     settings.agent_provider.model_copy(update={"claude_command": new_cmd}),
                 )
-            # Also update the legacy launch-command cache so older fallback paths use the full path
-            from atc.agents import factory as _factory
-            _factory._LAUNCH_COMMANDS["claude_code"] = new_cmd
             return
 
     logger.warning(
