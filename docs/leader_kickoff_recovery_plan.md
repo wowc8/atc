@@ -306,6 +306,7 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 - `atc leader health --summary` prints the normalized Leader state, task/dispatch truth, recommended action, and the exact recovery/health command operators should run next.
 - Project UI Leader health guidance displays the same normalized Leader state and recommended command so a blocked/unverified startup does not appear as only `0 tasks`.
 - Provider-specific prompt text/key handling remains inside runtime provider adapters/classifiers; API/CLI/UI surfaces consume only neutral health fields and redacted diagnostics.
+- A `default_prompt_visible` observation is suppressed as stale when canonical Leader work already exists (for example, task graph creation), so health does not report a running Leader as blocked merely because the provider returned to its default prompt after doing work.
 
 ### Work
 

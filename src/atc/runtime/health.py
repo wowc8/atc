@@ -156,11 +156,11 @@ def _leader_kickoff_health_state(
         return "failed"
     if not has_payload:
         return "starting"
+    if task_total > 0 or first_actionable_step_observed_at:
+        return "working"
     if not (leader_reported_active and goal_accepted):
         return "kickoff_unverified"
-    if task_total <= 0 and not first_actionable_step_observed_at:
-        return "task_graph_empty"
-    return "working"
+    return "task_graph_empty"
 
 
 def _ace_assignment_acceptance_state(
@@ -495,6 +495,22 @@ async def leader_health(
     kickoff_trace_id = (
         kickoff_payload.get("trace_id") if isinstance(kickoff_payload, dict) else None
     )
+    stale_default_prompt_blocker = bool(
+        blocker == BlockerReason.DEFAULT_PROMPT_VISIBLE.value
+        and runtime_state in {RuntimeState.READY.value, RuntimeState.ACTIVE.value}
+        and (task_graph_created_at or leader_reported_active or goal_accepted)
+    )
+    effective_blocker = None if stale_default_prompt_blocker else blocker
+    kickoff_blocker_reason = effective_blocker
+    if stale_default_prompt_blocker:
+        diagnostics = {
+            **diagnostics,
+            "suppressed_blocker_reason": blocker,
+            "suppressed_blocker_basis": "canonical_leader_work_observed",
+        }
+    kickoff_acceptance_observed = bool(
+        (leader_reported_active and goal_accepted) or task_graph_created_at
+    )
     pending_prompt_text = _pending_prompt_text_from_diagnostics(diagnostics)
     pending_payload_matches = _pending_prompt_matches_payload(
         pending_prompt_text,
@@ -504,7 +520,7 @@ async def leader_health(
         "kickoff_payload_persisted": bool(kickoff_payload),
         "kickoff_state": _leader_kickoff_health_state(
             runtime_state=runtime_state,
-            blocker=blocker,
+            blocker=effective_blocker,
             has_payload=bool(kickoff_payload),
             leader_reported_active=leader_reported_active,
             goal_accepted=goal_accepted,
@@ -512,7 +528,7 @@ async def leader_health(
             first_actionable_step_observed_at=first_actionable_step_observed_at,
         ),
         "startup_handshake_state": "blocked"
-        if blocker
+        if effective_blocker
         else (
             "ready"
             if runtime_state in {RuntimeState.READY.value, RuntimeState.ACTIVE.value}
@@ -522,23 +538,26 @@ async def leader_health(
             "leader_reported_active"
             if leader_reported_active and goal_accepted and first_actionable_step_observed_at
             else (
-                "goal_accepted"
-                if leader_reported_active and goal_accepted
-                else ("submitted_pending_acceptance" if kickoff_payload else "not_submitted")
+                "task_graph_created"
+                if task_graph_created_at
+                else (
+                    "goal_accepted"
+                    if leader_reported_active and goal_accepted
+                    else ("submitted_pending_acceptance" if kickoff_payload else "not_submitted")
+                )
             )
         ),
         "kickoff_verified": bool(
-            not blocker
+            not effective_blocker
             and runtime_state in {RuntimeState.READY.value, RuntimeState.ACTIVE.value}
-            and leader_reported_active
-            and goal_accepted
+            and kickoff_acceptance_observed
             and first_actionable_step_observed_at
         ),
         "goal_accepted": goal_accepted,
         "leader_reported_active": leader_reported_active,
         "leader_active_reported_at": leader_active_reported_at,
         "delivery_trace_id": kickoff_trace_id,
-        "kickoff_blocker_reason": blocker,
+        "kickoff_blocker_reason": kickoff_blocker_reason,
         "first_actionable_step_observed_at": first_actionable_step_observed_at,
         "task_graph_created_at": task_graph_created_at,
         "original_goal_available": bool(
@@ -564,7 +583,7 @@ async def leader_health(
         "blocked": sum(1 for a in project_assignments if a.blocker_reason),
         "unverified": sum(1 for a in project_assignments if not a.dispatch_verified),
     }
-    current_blocker = blocker or next(
+    current_blocker = effective_blocker or next(
         (a.blocker_reason for a in project_assignments if a.blocker_reason), None
     )
     delivery_state = _delivery_state_for_runtime(runtime_state, has_payload=bool(kickoff_payload))
@@ -588,7 +607,7 @@ async def leader_health(
         provider=getattr(session, "provider", None),
         runtime_state=runtime_state,
         delivery_state=delivery_state,
-        blocker_reason=blocker,
+        blocker_reason=effective_blocker,
         last_activity_at=latest_activity,
         task_graph_state=task_summary,
         kickoff_state=kickoff_state,
