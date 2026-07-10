@@ -268,7 +268,8 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 - The capability declares `external_network_allowed: false`, a local host allowlist, bounded methods, and ATC/OpenAPI path prefixes only.
 - `.atc/local_api.sh` validates method/path against the capability file before issuing a request; disallowed paths fail locally without network access.
 - Provider-neutral AGENTS/CLAUDE instructions tell managed agents to use the scoped helper or `atc` CLI for local API inspection and explicitly state that external network access is not authorized.
-- Provider adapters remain responsible for any provider-specific approval or trust mechanics; orchestration/deploy code only emits neutral capability metadata, helper files, and instructions.
+- Tower kickoff/health/recovery busywork may be delegated to Tower-owned hidden provider helper subagents so the user-facing assistant sees only aggregate status, completion, and escalation requests.
+- Provider adapters remain responsible for any provider-specific approval, trust, or helper-subagent mechanics; orchestration/deploy code only emits neutral capability metadata, helper files, instructions, and provider-helper requests.
 
 ### Work
 

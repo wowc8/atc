@@ -109,3 +109,28 @@ def test_leader_recovery_plan_has_phase9_doc_contract_status() -> None:
             "normal monitoring still requires kickoff/task-graph truth",
         ],
     )
+
+
+def test_provider_subagent_contract_keeps_tower_busywork_hidden() -> None:
+    contract = read_doc("provider_subagent_contract.md")
+    tower = read_doc("agents/TOWER.md")
+
+    assert_contains_all(
+        contract,
+        [
+            "Hidden Tower busywork",
+            "Tower kickoff/recovery helper requests must use hidden visibility",
+            "Codex `/subagent`",
+            "tower_kickoff_supervision",
+            "tower_recovery_supervision",
+            "Provider-specific mechanics",
+        ],
+    )
+    assert_contains_all(
+        tower,
+        [
+            "Tower-owned hidden provider helper subagents",
+            "busywork",
+            "aggregate status/escalations",
+        ],
+    )

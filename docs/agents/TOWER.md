@@ -29,6 +29,7 @@ Tower should:
 Tower is expected to:
 
 - keep the operator-facing interface simple and high-level
+- use Tower-owned hidden provider helper subagents for repetitive kickoff, health, and recovery busywork when supported, so those mechanics do not spill into the user conversation
 - create Leaders with enough context to manage their own project scope
 - verify Leader kickoff/startup readiness before handing off execution
 - after verified handoff, wait for the Leader completion hook instead of polling task progress
@@ -51,7 +52,7 @@ Tower should monitor and display these neutral fields before entering normal low
 - `blocker_reason`
 - `operator_guidance`
 
-When a Leader is blocked, Tower should surface `operator_guidance` and run inspect-first recovery paths such as `atc leader health --project-id <project-id> --summary` and `atc leader recover --project-id <project-id> --dry-run`. Tower must not paste provider-specific key sequences or branch on raw provider prompt text; provider adapters/classifiers own those details and expose only provider-neutral blockers and recovery recommendations.
+When a Leader is blocked, Tower should surface `operator_guidance` and run inspect-first recovery paths such as `atc leader health --project-id <project-id> --summary` and `atc leader recover --project-id <project-id> --dry-run`. Tower may delegate that repetitive health/recovery busywork to a Tower-owned hidden provider helper subagent, with durable audit records and only aggregate status/escalations shown to the operator. Tower must not paste provider-specific key sequences or branch on raw provider prompt text; provider adapters/classifiers own those details and expose only provider-neutral blockers and recovery recommendations.
 
 Tower must treat a managed Leader folder trust/startup prompt as a hard expected branch immediately after `atc leader start`, not as a surprise discovered after progress remains zero. The required post-start order is:
 
