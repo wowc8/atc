@@ -1,6 +1,6 @@
 # Leader Kickoff Verification and Startup Prompt Recovery Plan
 
-**Status:** In progress — Phases 0–4 implemented through PR #320 follow-up; Phase 4 adds inspect-first `prompt_not_submitted` recovery with provider-owned submission and audit events.
+**Status:** In progress — Phases 0–5 implemented through PR #320 follow-ups; Phase 5 adds first-class task graph CLI helpers plus targeted Leader assignment over canonical REST/service contracts.
 **Issue:** [#297](https://github.com/wowc8/atc/issues/297)
 **Last updated:** 2026-06-13
 **Scope:** Follow-up runtime/orchestration hardening for Leader startup, managed-workspace provider prompts, `prompt_not_submitted` recovery, task graph ergonomics, and local ATC API capability setup.
@@ -227,6 +227,13 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 ## Phase 5 — First-class task graph commands for Leaders
 
 **Goal:** Leaders should not need to inspect OpenAPI manually to create the initial task graph.
+
+### Implemented contract
+
+- `atc tasks create/list/assign` are thin CLI wrappers over task graph REST/Leader assignment endpoints.
+- `atc leader bootstrap-tasks` creates a simple initial task graph without requiring Leaders to inspect OpenAPI.
+- `POST /api/projects/{project_id}/leader/assign-task` delegates to Leader orchestration for single-task assignment; provider/runtime mechanics remain behind Leader/session/runtime boundaries.
+- Generated Leader workspace instructions prefer the task graph CLI path and keep raw REST/OpenAPI inspection as a fallback only.
 
 ### Work
 
