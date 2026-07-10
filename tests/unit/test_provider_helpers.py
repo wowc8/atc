@@ -5,6 +5,7 @@ import pytest
 from atc.providers.helpers import (
     ProviderHelperEventType,
     ProviderHelperParentRole,
+    ProviderHelperPurpose,
     ProviderHelperRequest,
     ProviderHelperResult,
     ProviderHelperRunStatus,
@@ -62,6 +63,31 @@ def test_provider_helper_result_normalizes_status() -> None:
 
     assert result.status is ProviderHelperRunStatus.COMPLETED
     assert result.summary == "done"
+
+
+def test_tower_kickoff_busywork_helpers_must_stay_hidden() -> None:
+    request = ProviderHelperRequest(
+        provider="codex",
+        parent_session_id="tower-session-1",
+        parent_role=ProviderHelperParentRole.TOWER,
+        purpose=ProviderHelperPurpose.TOWER_KICKOFF_SUPERVISION,
+        prompt="Use provider-native helper mechanics to verify Leader kickoff.",
+    )
+
+    assert request.visibility is ProviderHelperVisibility.HIDDEN
+
+    with pytest.raises(
+        ValueError,
+        match="tower kickoff/recovery helper busywork must use hidden visibility",
+    ):
+        ProviderHelperRequest(
+            provider="codex",
+            parent_session_id="tower-session-1",
+            parent_role="tower",
+            purpose=ProviderHelperPurpose.TOWER_RECOVERY_SUPERVISION,
+            prompt="Inspect recovery state.",
+            visibility="summary",
+        )
 
 
 def test_known_event_types_are_provider_neutral() -> None:

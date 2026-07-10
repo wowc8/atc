@@ -29,6 +29,29 @@ class ProviderHelperParentRole(StrEnum):
     ACE = "ace"
 
 
+class ProviderHelperPurpose(StrEnum):
+    """Provider-neutral helper purposes that product layers may request.
+
+    These values describe why a parent ATC role wants provider-native helper
+    work. They intentionally do not describe how a provider launches or drives
+    the helper; provider modules translate the purpose into mechanics such as
+    Codex /subagent usage.
+    """
+
+    TOWER_KICKOFF_SUPERVISION = "tower_kickoff_supervision"
+    TOWER_RECOVERY_SUPERVISION = "tower_recovery_supervision"
+    PROJECT_STATUS_CHECK = "project_status_check"
+    TASK_EXECUTION_ASSIST = "task_execution_assist"
+
+
+TOWER_BUSYWORK_HELPER_PURPOSES = frozenset(
+    {
+        ProviderHelperPurpose.TOWER_KICKOFF_SUPERVISION,
+        ProviderHelperPurpose.TOWER_RECOVERY_SUPERVISION,
+    }
+)
+
+
 class ProviderHelperRunStatus(StrEnum):
     """Lifecycle status for a provider helper run audit record."""
 
@@ -92,6 +115,15 @@ class ProviderHelperRequest:
             raise ValueError("purpose is required")
         if not self.prompt.strip():
             raise ValueError("prompt is required")
+        purpose = self.purpose.strip()
+        if (
+            self.parent_role is ProviderHelperParentRole.TOWER
+            and purpose in TOWER_BUSYWORK_HELPER_PURPOSES
+            and self.visibility is not ProviderHelperVisibility.HIDDEN
+        ):
+            raise ValueError(
+                "tower kickoff/recovery helper busywork must use hidden visibility"
+            )
 
 
 @dataclass(frozen=True)

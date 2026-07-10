@@ -50,6 +50,20 @@ Backend settings endpoints:
 Visibility is display-only. Changing it must not start, stop, cancel, or alter
 helper execution.
 
+## Hidden Tower busywork
+
+Tower may use provider-native helper subagents for repetitive kickoff, health,
+and recovery supervision so the user-facing assistant can stay in conversation
+instead of manually running Tower internals in chat. Those helper runs are still
+Tower-owned work: they inherit Tower's role boundary, use canonical ATC APIs/CLI
+for state mutation, and write durable audit rows/events.
+
+Tower kickoff/recovery helper requests must use hidden visibility. The normal UI
+may show only Tower's aggregate state, completion status, or an escalation that
+needs operator approval. Provider-specific mechanics, such as Codex `/subagent`
+syntax, remain inside provider modules; shared ATC code uses provider-neutral
+purposes such as `tower_kickoff_supervision` and `tower_recovery_supervision`.
+
 ## Provider-neutral request shape
 
 The shared contract is `atc.providers.helpers.ProviderHelperRequest`:
