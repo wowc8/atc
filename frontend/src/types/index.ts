@@ -29,6 +29,14 @@ export interface ProviderInfo {
   model: string;
 }
 
+export type ProviderHelperVisibility = "hidden" | "summary" | "full";
+
+export interface ProviderHelperSettings {
+  enabled: boolean;
+  default_visibility: ProviderHelperVisibility;
+  audit_enabled: boolean;
+}
+
 export interface Leader {
   id: string;
   project_id: string;
@@ -240,7 +248,15 @@ export interface FeatureFlag {
 
 export interface DeliveryStatusResponse {
   status: string;
-  delivery_state: "queued" | "submitted" | "started" | "delivered" | "confirmed" | "blocked" | "failed" | string;
+  delivery_state:
+    | "queued"
+    | "submitted"
+    | "started"
+    | "delivered"
+    | "confirmed"
+    | "blocked"
+    | "failed"
+    | string;
   message?: string;
   session_id?: string;
   project_id?: string;

@@ -124,9 +124,10 @@ preserving helper metadata such as `helper_run_id`, `helper_purpose`, provider,
 and external provider session IDs in token metadata/raw usage details. The usage
 path stays provider-neutral and token-only.
 
-## Phase 4+ UI expectations
+## Settings UI shell
 
-Phase 3 establishes backend contract and durable audit state. Phase 4 will add
-the global Settings control and helper visibility UI shell. Later Codex helper
-phases should use these tables/contracts rather than inventing provider-specific
-helper state.
+The Settings pane includes a Provider Helper Subagents section for the global
+helper enablement and default visibility controls. The UI deliberately treats
+visibility as display policy only and labels audit logging as always on. Later
+provider-specific helper phases should use these tables/contracts rather than
+inventing provider-specific helper state.
