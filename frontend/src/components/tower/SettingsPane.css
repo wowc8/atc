@@ -122,3 +122,14 @@
   border-radius: var(--radius-md);
   overflow: hidden;
 }
+
+.settings-pane__switch-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.settings-pane__switch-row input[type="checkbox"] {
+  margin-top: var(--space-1);
+}

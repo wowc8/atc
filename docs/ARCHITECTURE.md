@@ -78,7 +78,7 @@ QueryClientProvider → AppProvider (WebSocket state) → Router
 |---|---|---|
 | `/dashboard` | Dashboard | Token usage charts, resource charts, project cards |
 | `/projects/:id` | ProjectView | Leader console + ace terminals + task board |
-| `/settings` | SettingsPage | Configuration management |
+| `/settings` | SettingsPage | Configuration management, including provider helper visibility controls |
 | `/usage` | UsagePage | Full analytics charts |
 
 ### Layout (Option A)
