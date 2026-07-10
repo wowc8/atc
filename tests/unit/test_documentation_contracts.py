@@ -27,6 +27,7 @@ def test_api_docs_cover_leader_health_recovery_and_task_cli_contracts() -> None:
             "operator_guidance",
             "leader_state",
             "recovery_recommendation",
+            "recommended_command",
             "provider_diagnostics",
             "atc leader health --project-id",
             "atc leader recover --project-id",

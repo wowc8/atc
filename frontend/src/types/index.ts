@@ -283,9 +283,11 @@ export interface RuntimeOperatorGuidance {
 }
 
 export interface LeaderRuntimeHealth {
+  leader_state?: string | null;
   runtime_state: string;
   delivery_state: string;
   current_blocker: string | null;
+  recommended_command?: string | null;
   kickoff_state: {
     kickoff_state?: string;
     goal_acceptance_state?: string;

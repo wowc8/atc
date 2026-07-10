@@ -190,6 +190,8 @@ export default function LeaderConsole({
     recommended_action: "none" as const,
     command: null,
   };
+  const leaderHealthState = health?.leader_state ?? health?.kickoff_state.kickoff_state ?? "unknown";
+  const recommendedCommand = health?.recommended_command ?? healthGuidance.command;
 
   return (
     <div className="leader-console" data-testid="leader-console">
@@ -245,7 +247,7 @@ export default function LeaderConsole({
           <div className="leader-console__health-grid">
             <span>Runtime: {health.runtime_state}</span>
             <span>Delivery: {health.delivery_state}</span>
-            <span>State: {health.kickoff_state.kickoff_state ?? "unknown"}</span>
+            <span>Leader: {leaderHealthState}</span>
             <span>Tasks: {health.task_graph_state.total ?? 0}</span>
           </div>
           {health.current_blocker && (
@@ -254,7 +256,7 @@ export default function LeaderConsole({
           {healthGuidance.recommended_action !== "none" && (
             <div className="leader-console__health-action">
               Recommended: {healthGuidance.recommended_action}
-              {healthGuidance.command ? ` — ${healthGuidance.command}` : ""}
+              {recommendedCommand ? ` — ${recommendedCommand}` : ""}
             </div>
           )}
           <div className="leader-console__health-controls">

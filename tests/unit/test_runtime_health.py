@@ -150,6 +150,10 @@ async def test_leader_health_reports_runtime_and_task_summary(db) -> None:
     assert data["kickoff_state"]["goal_accepted"] is True
     assert data["kickoff_state"]["kickoff_verified"] is True
     assert data["kickoff_state"]["kickoff_state"] == "working"
+    assert data["leader_state"] == "working"
+    assert data["recommended_command"] == (
+        f"atc leader health --project-id {project.id} --summary"
+    )
     assert data["task_graph_state"]["total"] == 1
     assert data["ace_dispatch"]["verified"] == 1
     assert data["ace_count"] == 1
@@ -199,6 +203,7 @@ async def test_leader_health_treats_startup_trust_as_expected_pre_nudge_branch(d
     )
 
     assert health.runtime_state == "blocked"
+    assert health.leader_state == "blocked_on_provider_prompt"
     assert health.current_blocker == "runtime_trust_required"
     assert health.kickoff_state["kickoff_state"] == "blocked_on_provider_prompt"
     assert health.operator_guidance["recommended_action"] == (
@@ -247,6 +252,7 @@ async def test_leader_health_unverified_startup_checks_trust_before_progress_nud
         ),
     )
 
+    assert health.leader_state == "kickoff_unverified"
     assert health.kickoff_state["kickoff_state"] == "kickoff_unverified"
     assert health.operator_guidance["recommended_action"] == (
         "check_startup_trust_prompt_before_nudge"

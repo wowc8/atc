@@ -41,6 +41,7 @@ class RuntimeHealth:
     pane_attached: bool
     provider: str | None
     session_id: str | None = None
+    leader_state: str | None = None
     runtime_state: str = RuntimeState.MISSING.value
     delivery_state: str = DeliveryState.NOT_STARTED.value
     blocker_reason: str | None = None
@@ -51,6 +52,7 @@ class RuntimeHealth:
     ace_dispatch: dict[str, Any] = field(default_factory=dict)
     ace_count: int = 0
     current_blocker: str | None = None
+    recommended_command: str | None = None
     recovery_recommendation: dict[str, Any] | None = None
     operator_guidance: dict[str, Any] = field(default_factory=dict)
     provider_diagnostics: dict[str, Any] = field(default_factory=dict)
@@ -566,10 +568,21 @@ async def leader_health(
         (a.blocker_reason for a in project_assignments if a.blocker_reason), None
     )
     delivery_state = _delivery_state_for_runtime(runtime_state, has_payload=bool(kickoff_payload))
+    operator_guidance = _operator_guidance_for(
+        role="leader",
+        project_id=project_id,
+        session_id=session.id if session else None,
+        runtime_state=runtime_state,
+        delivery_state=delivery_state,
+        current_blocker=current_blocker,
+        kickoff_state=kickoff_state,
+        ace_dispatch=dispatch_summary,
+    )
     return RuntimeHealth(
         role="leader",
         project_id=project_id,
         session_id=session.id if session else None,
+        leader_state=kickoff_state["kickoff_state"],
         runtime_exists=session is not None and session.status in _ACTIVE_SESSION_STATUSES,
         pane_attached=bool(getattr(session, "tmux_pane", None)),
         provider=getattr(session, "provider", None),
@@ -582,19 +595,11 @@ async def leader_health(
         ace_dispatch=dispatch_summary,
         ace_count=len(aces),
         current_blocker=current_blocker,
+        recommended_command=operator_guidance.get("command"),
         recovery_recommendation=_recovery_for(
             "leader", project_id, current_blocker, session.id if session else None
         ),
-        operator_guidance=_operator_guidance_for(
-            role="leader",
-            project_id=project_id,
-            session_id=session.id if session else None,
-            runtime_state=runtime_state,
-            delivery_state=delivery_state,
-            current_blocker=current_blocker,
-            kickoff_state=kickoff_state,
-            ace_dispatch=dispatch_summary,
-        ),
+        operator_guidance=operator_guidance,
         provider_diagnostics=diagnostics,
     )
 
