@@ -261,6 +261,64 @@ async def test_leader_health_unverified_startup_checks_trust_before_progress_nud
 
 
 @pytest.mark.asyncio
+async def test_leader_health_suppresses_stale_default_prompt_after_task_graph_exists(db) -> None:
+    project = await create_project(db, "leader-default-prompt-stale")
+    leader = await create_leader(db, project.id, goal="Create tasks")
+    session = await create_session(
+        db,
+        project.id,
+        "manager",
+        "leader-stale-default-prompt",
+        status="working",
+        provider="codex",
+    )
+    await db.execute(
+        "UPDATE sessions SET tmux_pane = ?, tmux_session = ? WHERE id = ?",
+        ("%23", "atc", session.id),
+    )
+    await db.execute(
+        "UPDATE leaders SET session_id = ?, context = ? WHERE id = ?",
+        (
+            session.id,
+            json.dumps({"leader_kickoff_payload": {"message": "go"}}),
+            leader.id,
+        ),
+    )
+    await create_task_graph(db, project.id, "Task one")
+    await create_task_graph(db, project.id, "Task two")
+    await db.commit()
+
+    health = await leader_health(
+        db,
+        project.id,
+        runtime_service=FakeRuntimeService(
+            RuntimeInspection(
+                session_id=session.id,
+                provider_name="codex",
+                alive=True,
+                readiness=ReadinessState.READY,
+                summary="Ready at default prompt after producing work",
+                details={"blocker_reason": "default_prompt_visible"},
+            )
+        ),
+    )
+
+    assert health.runtime_state == "ready"
+    assert health.blocker_reason is None
+    assert health.current_blocker is None
+    assert health.leader_state == "working"
+    assert health.kickoff_state["kickoff_state"] == "working"
+    assert health.kickoff_state["goal_acceptance_state"] == "task_graph_created"
+    assert health.kickoff_state["kickoff_verified"] is True
+    assert health.provider_diagnostics["suppressed_blocker_reason"] == "default_prompt_visible"
+    assert health.provider_diagnostics["suppressed_blocker_basis"] == (
+        "canonical_leader_work_observed"
+    )
+    assert health.operator_guidance["severity"] == "ok"
+    assert health.operator_guidance["recommended_action"] == "none"
+
+
+@pytest.mark.asyncio
 async def test_ace_health_treats_startup_trust_as_expected_pre_instruction_branch(db) -> None:
     project = await create_project(db, "ace-trust-startup")
     task = await create_task_graph(db, project.id, "Task one")
