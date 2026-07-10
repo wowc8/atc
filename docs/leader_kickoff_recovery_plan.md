@@ -1,6 +1,6 @@
 # Leader Kickoff Verification and Startup Prompt Recovery Plan
 
-**Status:** In progress — Phases 0–5 implemented through PR #320 follow-ups; Phase 5 adds first-class task graph CLI helpers plus targeted Leader assignment over canonical REST/service contracts.
+**Status:** In progress — Phases 0–6 implemented through PR #320 follow-ups; Phase 6 deploys provider-neutral local ATC API capability metadata/helpers for managed workspaces without broad external-network approval.
 **Issue:** [#297](https://github.com/wowc8/atc/issues/297)
 **Last updated:** 2026-06-13
 **Scope:** Follow-up runtime/orchestration hardening for Leader startup, managed-workspace provider prompts, `prompt_not_submitted` recovery, task graph ergonomics, and local ATC API capability setup.
@@ -261,6 +261,14 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 ## Phase 6 — Local ATC API capability preauthorization for managed agents
 
 **Goal:** Managed Leader/Ace agents can inspect the local ATC API without interactive provider approval, while not gaining broad network approval.
+
+### Implemented contract
+
+- Managed Tower/Leader/Ace deployment writes `.atc/local_api_capability.json` for local ATC API inspection when the configured API base URL resolves to `127.0.0.1` or `localhost`.
+- The capability declares `external_network_allowed: false`, a local host allowlist, bounded methods, and ATC/OpenAPI path prefixes only.
+- `.atc/local_api.sh` validates method/path against the capability file before issuing a request; disallowed paths fail locally without network access.
+- Provider-neutral AGENTS/CLAUDE instructions tell managed agents to use the scoped helper or `atc` CLI for local API inspection and explicitly state that external network access is not authorized.
+- Provider adapters remain responsible for any provider-specific approval or trust mechanics; orchestration/deploy code only emits neutral capability metadata, helper files, and instructions.
 
 ### Work
 
