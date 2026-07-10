@@ -29,6 +29,11 @@ token_tracker:
   codex_enabled: true
   codex_sessions_glob: ~/.codex/sessions/**/*.jsonl
 
+provider_helpers:
+  enabled: true
+  default_visibility: hidden
+  audit_enabled: true
+
 sentry:
   enabled: false
   dsn: ""

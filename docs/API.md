@@ -236,6 +236,8 @@ POST   /api/projects/{id}/github/sync         → force immediate sync
 ```
 GET    /api/settings                          → all config key/values
 PUT    /api/settings                          → bulk update
+GET    /api/settings/provider-helpers         → provider helper subagent settings
+PUT    /api/settings/provider-helpers         → update enabled/default_visibility; audit remains on
 ```
 
 ## Failure Logs

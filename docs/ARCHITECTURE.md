@@ -52,7 +52,8 @@ Design rule:
 | `terminal/` | PTY streaming (tmux pipe-pane → FIFO → WS), output parser, monitor |
 | `tracking/` | Provider-neutral token usage recorder, provider usage trackers, system resources (psutil), GitHub PR/CI, budget enforcer |
 | `rws/` | Remote Ace Server daemon for remote hosts |
-| `agents/` | Agent deployment SOT — writes config files to /tmp; provider-owned runtime helpers such as Codex token JSONL parsing live here |
+| `agents/` | Shared agent deployment SOT — writes config files to /tmp |
+| `providers/` | Provider-owned runtime adapters, provider-specific helpers, token collectors, and provider-native helper subagent mechanics |
 
 ### Data Layer (`src/atc/state/`)
 
@@ -108,7 +109,8 @@ Single WebSocket endpoint at `/ws` with channel-based pub/sub.
 ## Database Schema
 
 Core tables: `projects`, `leaders`, `sessions`, `tasks`, `project_budgets`,
-`usage_events`, `github_prs`, `notifications`, `config`, `tower_memory`, `failure_logs`.
+`usage_events`, `provider_helper_runs`, `provider_helper_events`, `github_prs`,
+`notifications`, `config`, `tower_memory`, `failure_logs`.
 
 See `src/atc/state/migrations/versions/` for the canonical schema.
 

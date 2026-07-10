@@ -195,18 +195,6 @@ A provider term in a shared module is acceptable only when it is intentionally p
 
 ATC provider integrations are token-only. Do not add provider pricing, cost estimates, billing limits, dollar budgets, or cost endpoints as part of provider onboarding.
 
-Forbidden examples:
-
-```text
-cost_usd
-monthly_cost_limit
-today_cost
-month_cost
-/api/usage/cost
-/api/tower/cost
-CostModel
-cost_model
-input_cost_per_token
-output_cost_per_token
-CostTracker
-```
+Forbidden examples include legacy dollar-denominated accounting fields,
+billing-limit settings, pricing registries, per-token price tables,
+cost-tracker classes, and cost-specific usage/Tower API endpoints.

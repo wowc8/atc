@@ -137,21 +137,9 @@ If the provider is blocked, ATC should report `blocked` or equivalent guidance r
 
 Token accounting is token-only. Do not add or reintroduce cost, dollar, pricing, or billing semantics.
 
-Forbidden concepts include:
-
-```text
-cost_usd
-monthly_cost_limit
-today_cost
-month_cost
-/api/usage/cost
-/api/tower/cost
-CostModel
-cost_model
-input_cost_per_token
-output_cost_per_token
-CostTracker
-```
+Forbidden concepts include legacy dollar-denominated accounting fields, billing-limit
+settings, pricing registries, per-token price tables, cost-tracker classes, and
+cost-specific usage/Tower API endpoints.
 
 Provider-specific token discovery/parsing belongs inside the provider module. Shared token tracking receives normalized increments only.
 

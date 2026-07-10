@@ -28,6 +28,8 @@ from atc.state.models import (
     OrchestrationOperation,
     Project,
     ProjectBudget,
+    ProviderHelperEvent,
+    ProviderHelperRun,
     QALoopRun,
     Session,
     SessionHeartbeat,
@@ -378,6 +380,49 @@ CREATE TABLE IF NOT EXISTS usage_source_offsets (
     updated_at                    TEXT NOT NULL,
     PRIMARY KEY (provider, source_key)
 );
+
+CREATE TABLE IF NOT EXISTS provider_helper_runs (
+    id                 TEXT PRIMARY KEY,
+    provider           TEXT NOT NULL,
+    helper_id          TEXT,
+    parent_session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    parent_role        TEXT NOT NULL CHECK(parent_role IN ('tower', 'leader', 'ace')),
+    project_id         TEXT REFERENCES projects(id),
+    task_id            TEXT,
+    purpose            TEXT NOT NULL,
+    visibility         TEXT NOT NULL DEFAULT 'hidden'
+                       CHECK(visibility IN ('hidden', 'summary', 'full')),
+    status             TEXT NOT NULL DEFAULT 'requested'
+                       CHECK(status IN (
+                           'requested', 'running', 'completed', 'failed', 'cancelled'
+                       )),
+    started_at         TEXT NOT NULL,
+    finished_at        TEXT,
+    summary            TEXT,
+    prompt_text        TEXT,
+    output_text        TEXT,
+    metadata_json      TEXT,
+    error              TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_helper_events (
+    id             TEXT PRIMARY KEY,
+    helper_run_id  TEXT NOT NULL REFERENCES provider_helper_runs(id) ON DELETE CASCADE,
+    event_type     TEXT NOT NULL,
+    timestamp      TEXT NOT NULL,
+    message        TEXT,
+    payload_json   TEXT,
+    created_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_helper_runs_parent
+    ON provider_helper_runs(parent_session_id, parent_role, status);
+CREATE INDEX IF NOT EXISTS idx_provider_helper_runs_project
+    ON provider_helper_runs(project_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_provider_helper_events_run
+    ON provider_helper_events(helper_run_id, timestamp);
 
 CREATE TABLE IF NOT EXISTS notifications (
     id          TEXT PRIMARY KEY,
@@ -2512,8 +2557,6 @@ async def write_usage_event(
     return event
 
 
-
-
 async def get_usage_source_offset(
     db: aiosqlite.Connection,
     *,
@@ -2593,6 +2636,211 @@ async def upsert_usage_source_offset(
     )
     await db.commit()
     return offset
+
+
+# ---------------------------------------------------------------------------
+# Provider helper audit helpers
+# ---------------------------------------------------------------------------
+
+
+async def create_provider_helper_run(
+    db: aiosqlite.Connection,
+    *,
+    provider: str,
+    parent_session_id: str,
+    parent_role: str,
+    purpose: str,
+    visibility: str = "hidden",
+    helper_id: str | None = None,
+    project_id: str | None = None,
+    task_id: str | None = None,
+    prompt_text: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    status: str = "requested",
+    started_at: str | None = None,
+) -> ProviderHelperRun:
+    """Create a provider helper audit record before provider-native execution."""
+    now = _now()
+    run = ProviderHelperRun(
+        id=_uuid(),
+        provider=provider,
+        helper_id=helper_id,
+        parent_session_id=parent_session_id,
+        parent_role=parent_role,
+        project_id=project_id,
+        task_id=task_id,
+        purpose=purpose,
+        visibility=visibility,
+        status=status,
+        started_at=started_at or now,
+        prompt_text=prompt_text,
+        metadata_json=json.dumps(metadata or {}, sort_keys=True),
+        created_at=now,
+        updated_at=now,
+    )
+    await db.execute(
+        """INSERT INTO provider_helper_runs
+           (id, provider, helper_id, parent_session_id, parent_role, project_id,
+            task_id, purpose, visibility, status, started_at, finished_at, summary,
+            prompt_text, output_text, metadata_json, error, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            run.id,
+            run.provider,
+            run.helper_id,
+            run.parent_session_id,
+            run.parent_role,
+            run.project_id,
+            run.task_id,
+            run.purpose,
+            run.visibility,
+            run.status,
+            run.started_at,
+            run.finished_at,
+            run.summary,
+            run.prompt_text,
+            run.output_text,
+            run.metadata_json,
+            run.error,
+            run.created_at,
+            run.updated_at,
+        ),
+    )
+    await db.commit()
+    return run
+
+
+async def get_provider_helper_run(
+    db: aiosqlite.Connection,
+    helper_run_id: str,
+) -> ProviderHelperRun | None:
+    cursor = await db.execute("SELECT * FROM provider_helper_runs WHERE id = ?", (helper_run_id,))
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return ProviderHelperRun(**_filter_model_fields(ProviderHelperRun, dict(row)))
+
+
+async def list_provider_helper_runs(
+    db: aiosqlite.Connection,
+    *,
+    parent_session_id: str | None = None,
+    project_id: str | None = None,
+    visibility: str | None = None,
+    limit: int = 50,
+) -> list[ProviderHelperRun]:
+    conditions: list[str] = []
+    params: list[Any] = []
+    if parent_session_id is not None:
+        conditions.append("parent_session_id = ?")
+        params.append(parent_session_id)
+    if project_id is not None:
+        conditions.append("project_id = ?")
+        params.append(project_id)
+    if visibility is not None:
+        conditions.append("visibility = ?")
+        params.append(visibility)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
+    cursor = await db.execute(
+        f"SELECT * FROM provider_helper_runs {where} ORDER BY started_at DESC LIMIT ?",  # noqa: S608
+        params,
+    )
+    rows = await cursor.fetchall()
+    return [ProviderHelperRun(**_filter_model_fields(ProviderHelperRun, dict(row))) for row in rows]
+
+
+async def update_provider_helper_run(
+    db: aiosqlite.Connection,
+    helper_run_id: str,
+    *,
+    status: str | None = None,
+    finished_at: str | None = None,
+    summary: str | None = None,
+    output_text: str | None = None,
+    error: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> ProviderHelperRun | None:
+    existing = await get_provider_helper_run(db, helper_run_id)
+    if existing is None:
+        return None
+    now = _now()
+    metadata_json = existing.metadata_json
+    if metadata is not None:
+        metadata_json = json.dumps(metadata, sort_keys=True)
+    await db.execute(
+        """UPDATE provider_helper_runs
+           SET status = ?, finished_at = ?, summary = ?, output_text = ?,
+               error = ?, metadata_json = ?, updated_at = ?
+           WHERE id = ?""",
+        (
+            status or existing.status,
+            finished_at if finished_at is not None else existing.finished_at,
+            summary if summary is not None else existing.summary,
+            output_text if output_text is not None else existing.output_text,
+            error if error is not None else existing.error,
+            metadata_json,
+            now,
+            helper_run_id,
+        ),
+    )
+    await db.commit()
+    return await get_provider_helper_run(db, helper_run_id)
+
+
+async def append_provider_helper_event(
+    db: aiosqlite.Connection,
+    *,
+    helper_run_id: str,
+    event_type: str,
+    message: str | None = None,
+    payload: dict[str, Any] | None = None,
+    timestamp: str | None = None,
+) -> ProviderHelperEvent:
+    """Append a provider-neutral helper audit event."""
+    now = _now()
+    event = ProviderHelperEvent(
+        id=_uuid(),
+        helper_run_id=helper_run_id,
+        event_type=event_type,
+        timestamp=timestamp or now,
+        message=message,
+        payload_json=json.dumps(payload or {}, sort_keys=True),
+        created_at=now,
+    )
+    await db.execute(
+        """INSERT INTO provider_helper_events
+           (id, helper_run_id, event_type, timestamp, message, payload_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            event.id,
+            event.helper_run_id,
+            event.event_type,
+            event.timestamp,
+            event.message,
+            event.payload_json,
+            event.created_at,
+        ),
+    )
+    await db.commit()
+    return event
+
+
+async def list_provider_helper_events(
+    db: aiosqlite.Connection,
+    helper_run_id: str,
+) -> list[ProviderHelperEvent]:
+    cursor = await db.execute(
+        """SELECT * FROM provider_helper_events
+           WHERE helper_run_id = ?
+           ORDER BY timestamp, created_at""",
+        (helper_run_id,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        ProviderHelperEvent(**_filter_model_fields(ProviderHelperEvent, dict(row))) for row in rows
+    ]
+
 
 # ---------------------------------------------------------------------------
 # ProjectBudget helpers

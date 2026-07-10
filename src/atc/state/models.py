@@ -138,6 +138,46 @@ class UsageSourceOffset:
 
 
 @dataclass
+class ProviderHelperRun:
+    id: str
+    provider: str
+    helper_id: str | None
+    parent_session_id: str
+    parent_role: str  # tower|leader|ace
+    purpose: str
+    visibility: str  # hidden|summary|full
+    status: str  # requested|running|completed|failed|cancelled
+    started_at: str
+    project_id: str | None = None
+    task_id: str | None = None
+    finished_at: str | None = None
+    summary: str | None = None
+    prompt_text: str | None = None
+    output_text: str | None = None
+    metadata_json: str | None = None
+    error: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+    def metadata(self) -> dict[str, Any]:
+        return json.loads(self.metadata_json) if self.metadata_json else {}
+
+
+@dataclass
+class ProviderHelperEvent:
+    id: str
+    helper_run_id: str
+    event_type: str
+    timestamp: str
+    message: str | None = None
+    payload_json: str | None = None
+    created_at: str = ""
+
+    def payload(self) -> dict[str, Any]:
+        return json.loads(self.payload_json) if self.payload_json else {}
+
+
+@dataclass
 class GitHubPR:
     id: str  # "{owner}/{repo}#{number}"
     project_id: str | None

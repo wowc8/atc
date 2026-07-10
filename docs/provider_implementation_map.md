@@ -6,6 +6,7 @@ Use this map to locate the ATC subsystems a new CLI provider may need to integra
 
 - [`provider_onboarding.md`](provider_onboarding.md) — main onboarding guide.
 - [`provider_interface_contract.md`](provider_interface_contract.md) — shared/provider boundary contract.
+- [`provider_subagent_contract.md`](provider_subagent_contract.md) — provider-native helper subagent contract and audit model.
 - [`provider_acceptance_checklist.md`](provider_acceptance_checklist.md) — PR acceptance checklist.
 - [`templates/provider_onboarding_template.md`](templates/provider_onboarding_template.md) — provider-specific design log template.
 
@@ -93,6 +94,21 @@ Provider modules handle:
 - cumulative total to increment conversion;
 - external provider session mapping;
 - provider-specific de-dupe/source-key semantics.
+
+## Provider helper subagents
+
+Relevant shared areas:
+
+```text
+src/atc/providers/helpers.py
+src/atc/state/
+docs/provider_subagent_contract.md
+```
+
+Provider-native helper subagents are private/background assistants to Tower,
+Leader, or Ace roles. They must use the shared request/result contract and
+durable `provider_helper_runs` / `provider_helper_events` audit tables. Helper
+visibility is global/display-only; audit records are always written.
 
 ## API surfaces
 

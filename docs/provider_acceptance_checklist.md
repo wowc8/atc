@@ -88,11 +88,11 @@ Use this checklist in every PR that adds or materially changes a CLI-backed prov
 
 ## Cost/dollar prohibition
 
-- [ ] No `cost_usd`.
+- [ ] No legacy dollar-denominated accounting fields.
 - [ ] No pricing registry.
 - [ ] No dollar budgets or billing limits.
-- [ ] No `/api/*/cost` endpoints.
-- [ ] No provider model cost rates.
+- [ ] No cost-specific usage/Tower endpoints.
+- [ ] Token limits are enforced using token counts only.
 - [ ] Stale cost-term scan is included.
 
 ## Documentation
