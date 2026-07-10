@@ -1,6 +1,6 @@
 # Leader Kickoff Verification and Startup Prompt Recovery Plan
 
-**Status:** In progress — Phases 0–6 implemented through PR #320 follow-ups; Phase 6 deploys provider-neutral local ATC API capability metadata/helpers for managed workspaces without broad external-network approval.
+**Status:** In progress — Phases 0–7 implemented through PR #320 follow-ups; Phase 7 surfaces Leader health/recovery guidance in API, CLI, and Project UI without provider prompt parsing outside adapters.
 **Issue:** [#297](https://github.com/wowc8/atc/issues/297)
 **Last updated:** 2026-06-13
 **Scope:** Follow-up runtime/orchestration hardening for Leader startup, managed-workspace provider prompts, `prompt_not_submitted` recovery, task graph ergonomics, and local ATC API capability setup.
@@ -297,6 +297,14 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 ## Phase 7 — UI/CLI health surfacing and operator recovery guidance
 
 **Goal:** Operators see the real Leader health state and an actionable recovery path instead of only zero progress/tasks.
+
+### Implemented contract
+
+- `GET /api/projects/{id}/leader/health` returns top-level `leader_state`, `runtime_state`, `delivery_state`, `blocker_reason`/`current_blocker`, `recovery_recommendation`, `recommended_command`, `operator_guidance`, and redacted `provider_diagnostics`.
+- `leader_state` is derived from provider-neutral kickoff/task evidence, not raw provider prompt strings: `blocked_on_provider_prompt`, `kickoff_unverified`, `task_graph_empty`, and `working` remain separate from task-count progress.
+- `atc leader health --summary` prints the normalized Leader state, task/dispatch truth, recommended action, and the exact recovery/health command operators should run next.
+- Project UI Leader health guidance displays the same normalized Leader state and recommended command so a blocked/unverified startup does not appear as only `0 tasks`.
+- Provider-specific prompt text/key handling remains inside runtime provider adapters/classifiers; API/CLI/UI surfaces consume only neutral health fields and redacted diagnostics.
 
 ### Work
 

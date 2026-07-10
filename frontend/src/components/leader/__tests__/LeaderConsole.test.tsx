@@ -195,6 +195,43 @@ describe("LeaderConsole", () => {
     resolvePost(new Response(JSON.stringify({ status: "started" }), { status: 200 }));
   });
 
+  it("surfaces Leader health state and recommended recovery command", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            leader_state: "blocked_on_provider_prompt",
+            runtime_state: "blocked",
+            delivery_state: "blocked",
+            current_blocker: "prompt_not_submitted",
+            recommended_command: "atc leader recover --project-id proj-1 --dry-run",
+            kickoff_state: { kickoff_state: "fallback_should_not_render" },
+            task_graph_state: { total: 0 },
+            ace_dispatch: {},
+            operator_guidance: {
+              severity: "blocked",
+              summary: "Kickoff prompt was not submitted to the provider.",
+              recommended_action: "run_inspect_first_recovery",
+              command: "atc leader recover --project-id proj-1 --dry-run",
+              details: "Use dry-run first.",
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    render(<LeaderConsole projectId="proj-1" leader={managingLeader} onRefresh={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("leader-health-guidance")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Leader: blocked_on_provider_prompt/)).toBeInTheDocument();
+    expect(screen.getByText(/Recommended: run_inspect_first_recovery/)).toHaveTextContent(
+      "atc leader recover --project-id proj-1 --dry-run",
+    );
+  });
+
   it("treats codex as a terminal-backed provider", () => {
     setMockState({ projects: [codexProject] });
     render(<LeaderConsole projectId="proj-1" leader={idleLeader} onRefresh={vi.fn()} project={codexProject} />);

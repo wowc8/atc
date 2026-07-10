@@ -338,9 +338,11 @@ class TestLeaderHealth:
         self, api_stub: str, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _StubHandler.response_body = {
+            "leader_state": "blocked_on_provider_prompt",
             "runtime_state": "blocked",
             "delivery_state": "blocked",
             "current_blocker": "prompt_not_submitted",
+            "recommended_command": "atc leader recover --project-id proj-1 --dry-run",
             "kickoff_state": {
                 "kickoff_state": "blocked_on_provider_prompt",
                 "goal_acceptance_state": "unverified",
@@ -378,6 +380,7 @@ class TestLeaderHealth:
         assert req["path"] == "/api/projects/proj-1/leader/health"
         output = capsys.readouterr().out
         assert "Leader health: blocked" in output
+        assert "Leader state: blocked_on_provider_prompt / acceptance: unverified" in output
         assert "Recommended action: run_inspect_first_recovery" in output
         assert "atc leader recover --project-id proj-1 --dry-run" in output
 

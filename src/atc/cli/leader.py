@@ -144,12 +144,14 @@ def _print_health_summary(body: dict) -> None:
     kickoff = body.get("kickoff_state") or {}
     tasks = body.get("task_graph_state") or {}
     dispatch = body.get("ace_dispatch") or {}
+    leader_state = body.get("leader_state") or kickoff.get("kickoff_state")
+    recommended_command = body.get("recommended_command") or guidance.get("command")
     print(f"Leader health: {guidance.get('severity', 'unknown')}")
     print(f"Summary: {guidance.get('summary', 'No guidance available.')}")
     print(f"Runtime: {body.get('runtime_state')} / delivery: {body.get('delivery_state')}")
     print(
         "Leader state: "
-        f"{kickoff.get('kickoff_state')} / acceptance: {kickoff.get('goal_acceptance_state')}"
+        f"{leader_state} / acceptance: {kickoff.get('goal_acceptance_state')}"
     )
     print(
         "Tasks: "
@@ -167,8 +169,8 @@ def _print_health_summary(body: dict) -> None:
         print(f"Blocker: {body['current_blocker']}")
     if guidance.get("recommended_action"):
         print(f"Recommended action: {guidance['recommended_action']}")
-    if guidance.get("command"):
-        print(f"Command: {guidance['command']}")
+    if recommended_command:
+        print(f"Command: {recommended_command}")
     if guidance.get("details"):
         print(f"Details: {guidance['details']}")
 

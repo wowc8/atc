@@ -53,11 +53,12 @@ Important fields:
 
 `GET /api/projects/{id}/leader/health` is the canonical operator/Tower view for a Leader's runtime truth. Important top-level fields include:
 
-- `leader_state`: normalized health state for the Leader, such as healthy, unverified, blocked, or missing.
+- `leader_state`: normalized health state for the Leader, such as `blocked_on_provider_prompt`, `kickoff_unverified`, `task_graph_empty`, `working`, or `runtime_missing`.
 - `runtime_state`: provider-neutral runtime state; product layers branch on this, not raw terminal text.
 - `delivery_state`: provider-neutral kickoff delivery state.
 - `blocker_reason`: stable blocker reason such as `pane_missing`, `runtime_trust_required`, `runtime_permission_required`, or `prompt_not_submitted`.
 - `recovery_recommendation`: concise safe next action for tooling.
+- `recommended_command`: top-level operator command mirroring the current guidance command for CLI/UI consumers.
 - `operator_guidance`: user-facing summary with severity, recommended action, command, and details.
 - `provider_diagnostics`: redacted nested provider details for debugging only; orchestration must not branch on provider-specific prompt strings.
 
