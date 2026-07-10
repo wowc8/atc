@@ -8,6 +8,8 @@ Routes:
   GET  /api/settings/agent-provider       → get current agent provider config
   PUT  /api/settings/agent-provider       → update agent provider config
   GET  /api/settings/providers            → list available providers
+  GET  /api/settings/provider-helpers     → get provider helper settings
+  PUT  /api/settings/provider-helpers     → update provider helper settings
   GET  /api/settings/sentry              → get sentry status
   POST /api/settings/sentry/send-report  → manually send an error report
 """
@@ -197,6 +199,21 @@ class ProviderInfo(BaseModel):
     model: str
 
 
+class ProviderHelpersResponse(BaseModel):
+    """Global provider helper subagent settings."""
+
+    enabled: bool
+    default_visibility: str
+    audit_enabled: bool
+
+
+class ProviderHelpersUpdateRequest(BaseModel):
+    """Update global provider helper subagent settings."""
+
+    enabled: bool | None = None
+    default_visibility: str | None = None
+
+
 @router.get("/agent-provider")
 async def get_agent_provider(request: Request) -> AgentProviderResponse:
     """Return the current agent provider configuration."""
@@ -256,16 +273,22 @@ async def update_agent_provider(
                 try:
                     await ace_ops.stop_ace(db, session.id, event_bus=event_bus)
                 except Exception:
-                    logger.exception("Failed to pause stale ace session %s during provider switch", session.id)
+                    logger.exception(
+                        "Failed to pause stale ace session %s during provider switch", session.id
+                    )
 
         for leader_info in handoff["leaders"]:
             project_id = leader_info["project_id"]
             try:
                 await leader_ops.stop_leader(db, project_id, event_bus=event_bus)
             except Exception:
-                logger.exception("Failed to stop leader for project %s during provider switch", project_id)
+                logger.exception(
+                    "Failed to stop leader for project %s during provider switch", project_id
+                )
 
-        tower_was_running = handoff["tower"]["session_id"] is not None and handoff["tower"]["state"] in ("managing", "planning", "idle")
+        tower_was_running = handoff["tower"]["session_id"] is not None and handoff["tower"][
+            "state"
+        ] in ("managing", "planning", "idle")
         if handoff["tower"]["session_id"]:
             try:
                 await tower.stop_session()
@@ -307,6 +330,45 @@ async def list_available_providers() -> list[ProviderInfo]:
         )
         for info in list_provider_runtime_infos()
     ]
+
+
+@router.get("/provider-helpers", response_model=ProviderHelpersResponse)
+async def get_provider_helpers(request: Request) -> ProviderHelpersResponse:
+    """Return global provider helper subagent settings."""
+    cfg = request.app.state.settings.provider_helpers
+    return ProviderHelpersResponse(
+        enabled=cfg.enabled,
+        default_visibility=cfg.default_visibility,
+        audit_enabled=cfg.audit_enabled,
+    )
+
+
+@router.put("/provider-helpers", response_model=ProviderHelpersResponse)
+async def update_provider_helpers(
+    body: ProviderHelpersUpdateRequest,
+    request: Request,
+) -> ProviderHelpersResponse:
+    """Update global provider helper settings.
+
+    Visibility controls display only. Audit logging remains locked on because
+    helper execution must be observable after the fact even when hidden in UI.
+    """
+    cfg = request.app.state.settings.provider_helpers
+    if body.enabled is not None:
+        cfg.enabled = body.enabled
+    if body.default_visibility is not None:
+        if body.default_visibility not in {"hidden", "summary", "full"}:
+            raise HTTPException(
+                status_code=422,
+                detail="default_visibility must be hidden, summary, or full",
+            )
+        cfg.default_visibility = body.default_visibility
+    cfg.audit_enabled = True
+    return ProviderHelpersResponse(
+        enabled=cfg.enabled,
+        default_visibility=cfg.default_visibility,
+        audit_enabled=cfg.audit_enabled,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +437,7 @@ async def send_sentry_report(
 # ---------------------------------------------------------------------------
 # Resource limits settings
 # ---------------------------------------------------------------------------
+
 
 class ResourceLimitsResponse(BaseModel):
     max_concurrent_aces: int

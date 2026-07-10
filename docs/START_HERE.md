@@ -23,6 +23,7 @@ Examples:
   - `docs/leader_kickoff_recovery_plan.md`
   - `docs/provider_runtime_refactor_plan.md`
   - `docs/provider_cli_wrapper_spec.md`
+  - `docs/provider_subagent_contract.md`
   - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`
 - API or architecture work:
   - `docs/service_model.md`
@@ -77,6 +78,8 @@ These docs exist to:
   - current provider runtime path audit and Phase 2 cleanup plan
 - `docs/provider_cli_wrapper_spec.md`
   - `atc-provider` wrapper contract
+- `docs/provider_subagent_contract.md`
+  - provider-native helper subagent contract, durable audit model, and visibility semantics
 - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`
   - runtime/provider boundary rules
 - `docs/runtime_orchestration_refactor_phases.md`

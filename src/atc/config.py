@@ -56,6 +56,12 @@ class TokenTrackerConfig(BaseModel):
     codex_sessions_glob: str = "~/.codex/sessions/**/*.jsonl"
 
 
+class ProviderHelpersConfig(BaseModel):
+    enabled: bool = True
+    default_visibility: str = "hidden"
+    audit_enabled: bool = True
+
+
 class HeartbeatConfig(BaseModel):
     enabled: bool = True
     interval_seconds: int = 30
@@ -126,6 +132,7 @@ class Settings(BaseSettings):
     github: GitHubConfig = GitHubConfig()
     budget: BudgetConfig = BudgetConfig()
     token_tracker: TokenTrackerConfig = TokenTrackerConfig()
+    provider_helpers: ProviderHelpersConfig = ProviderHelpersConfig()
     heartbeat: HeartbeatConfig = HeartbeatConfig()
     logging: LoggingConfig = LoggingConfig()
     sentry: SentryConfig = SentryConfig()
