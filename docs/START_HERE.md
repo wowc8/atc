@@ -87,7 +87,7 @@ These docs exist to:
 - `docs/runtime_truth_recovery_plan.md`
   - provider-neutral runtime truth, delivery verification, health, and recovery model
 - `docs/leader_kickoff_recovery_plan.md`
-  - planned follow-up phases for Leader kickoff verification, startup prompt recovery, task graph ergonomics, and local ATC API capability setup
+  - phased Leader kickoff verification/recovery contract; includes Phase 9 API and role-documentation convergence requirements
 - `docs/runtime_orchestration_phase0_baseline.md`
   - Phase 0 validation evidence, current delivery/session path map, test inventory, and Playwright baseline gate
 - `docs/agents/README.md`

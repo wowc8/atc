@@ -92,7 +92,15 @@ POST /api/projects/{project_id}/leader/report-complete
 
 This hook is the canonical way Tower learns the project is done after handoff.
 
-Leader may inspect the local ATC API helper/capability files generated into the managed workspace for approved local API access. The local ATC API helper is restricted to the configured localhost base URL and allowlisted paths; external network or secret-bearing approval decisions remain outside Leader control.
+Leader may inspect the local ATC API helper/capability files generated into the managed workspace for approved local API access. The local ATC API helper is restricted to the configured localhost base URL and allowlisted paths such as `/openapi.json`, `/api/projects`, task graph routes, Leader health/recovery, and Ace health/reporting routes; external network or secret-bearing approval decisions remain outside Leader control.
+
+Leader's runtime truth contract is:
+
+- call `atc leader report-active --project-id <project-id> --message "accepted goal"` or `POST /api/projects/{project_id}/leader/report-active` after reading and accepting the goal;
+- create or reconcile a task graph before claiming first actionable progress;
+- use `atc leader bootstrap-tasks`, `atc tasks create`, and `atc tasks assign` for normal planning/assignment rather than rediscovering basic ATC APIs from OpenAPI;
+- treat `runtime_state`, `delivery_state`, `startup_readiness_state`, `assignment_acceptance_state`, `dispatch_verified`, `artifact_ready`, and `blocker_reason` as the canonical product-facing state;
+- report provider-neutral blockers upward and leave exact provider prompt handling to provider adapters/classifiers.
 
 ## Must not do
 

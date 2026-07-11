@@ -31,6 +31,12 @@ def test_api_docs_cover_leader_health_recovery_and_task_cli_contracts() -> None:
             "provider_diagnostics",
             "atc leader health --project-id",
             "atc leader recover --project-id",
+            "POST /api/projects/{id}/leader/report-active` is the canonical "
+            "Leader-owned proof point",
+            "runtime_recovery_audit",
+            "session_id`, `status`, `delivery_state=sent/submitted`, or a visible "
+            "pane is not execution proof",
+            "kickoff_verified=true",
             "atc tasks create --project-id",
             "atc tasks assign --project-id",
             "atc leader bootstrap-tasks --project-id",
@@ -59,6 +65,10 @@ def test_role_docs_encode_runtime_truth_and_provider_boundary() -> None:
             "Leader session row is not proof",
             "provider-neutral",
             "Tower must not paste provider-specific key sequences",
+            "goal_acceptance_state=accepted_active",
+            "task/Ace progress after handoff is Leader-owned evidence",
+            "provider-specific prompt strings, trust wording, and key sequences never "
+            "appear in Tower policy",
         ],
     )
     assert_contains_all(
@@ -76,6 +86,10 @@ def test_role_docs_encode_runtime_truth_and_provider_boundary() -> None:
             "atc ace report-active --project-id",
             "atc ace report-artifact --project-id",
             "session row or assignment row exists",
+            "atc leader report-active --project-id",
+            "create or reconcile a task graph before claiming first actionable progress",
+            "provider-neutral blockers",
+            "provider adapters/classifiers",
         ],
     )
     assert_contains_all(
@@ -93,6 +107,11 @@ def test_role_docs_encode_runtime_truth_and_provider_boundary() -> None:
             "awaiting_ace_active_report",
             "Leader owns recovery decisions",
             "provider-neutral blocker",
+            "atc ace report-artifact --project-id",
+            "runtime_trust_required",
+            "runtime_permission_required",
+            "prompt_not_submitted",
+            "not raw provider prompt wording",
         ],
     )
 
@@ -107,6 +126,31 @@ def test_leader_recovery_plan_has_phase9_doc_contract_status() -> None:
             "Docs and role contracts encode the same runtime truth rules",
             "Documentation contract tests pass",
             "normal monitoring still requires kickoff/task-graph truth",
+            "Phase 9 is a contract/documentation convergence phase",
+            "does not change runtime behavior",
+            "202 Accepted",
+            "Provider-specific prompt strings and key sequences remain "
+            "provider-adapter/classifier concerns",
+        ],
+    )
+
+
+def test_entrypoints_link_phase9_runtime_truth_contract_docs() -> None:
+    start_here = read_doc("START_HERE.md")
+    codebase_map = read_doc("CODEBASE_MAP.md")
+
+    assert_contains_all(
+        start_here,
+        [
+            "docs/leader_kickoff_recovery_plan.md",
+            "Phase 9 API and role-documentation convergence requirements",
+        ],
+    )
+    assert_contains_all(
+        codebase_map,
+        [
+            "docs/leader_kickoff_recovery_plan.md",
+            "role/API documentation convergence",
         ],
     )
 

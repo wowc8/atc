@@ -62,6 +62,8 @@ Important fields:
 - `operator_guidance`: user-facing summary with severity, recommended action, command, and details.
 - `provider_diagnostics`: redacted nested provider details for debugging only; orchestration must not branch on provider-specific prompt strings.
 
+`POST /api/projects/{id}/leader/report-active` is the canonical Leader-owned proof point that the goal was accepted. A Leader should call it before normal task/Ace supervision so Tower can distinguish accepted work from a session row or submitted prompt. The request records provider-neutral acceptance evidence such as `goal_accepted`, `message`, and later task-graph timestamps; it does not encode provider prompt text.
+
 `POST /api/projects/{id}/leader/recover` plans or applies inspect-first recovery. Use dry-run before mutation. A typical operator flow is:
 
 ```bash
@@ -69,7 +71,14 @@ atc leader health --project-id <project-id> --summary
 atc leader recover --project-id <project-id> --dry-run
 ```
 
-Recovery apply policies must remain explicit; pressing Enter or resending a persisted kickoff is not success until health/kickoff verification changes.
+Recovery apply policies must remain explicit; pressing Enter or resending a persisted kickoff is not success until health/kickoff verification changes. Recovery outcomes are audited through provider-neutral `runtime_recovery_audit` events; exact prompt strings, key sequences, and provider TUI mechanics remain inside provider adapters/classifiers.
+
+Leader health consumers must use the contract in this section rather than optimistic shortcuts:
+
+- `session_id`, `status`, `delivery_state=sent/submitted`, or a visible pane is not execution proof.
+- `kickoff_verified=true` requires Leader acceptance plus first actionable work, usually task graph creation.
+- `blocker_reason` values are stable product-facing codes; raw provider prompt text belongs only in redacted diagnostics.
+- `operator_guidance.command`/`recommended_command` are the safe operator/CLI entrypoints for recovery.
 
 ## Tasks / Task Graphs
 
