@@ -398,6 +398,10 @@ Tower should not enter normal low-frequency monitoring until the Leader reaches 
 - Baseline UI smoke still passes, with screenshots attached to the PR when PR evidence exists.
 - Post-merge validation is rerun from `main`.
 
+### Phase 9 implementation notes
+
+Phase 9 is a contract/documentation convergence phase. It does not change runtime behavior; it makes the runtime truth contract durable across `docs/API.md`, Tower/Leader/Ace role contracts, and documentation contract tests. The docs now explicitly require Leader health/report-active/recovery consumers to treat session rows, `202 Accepted`, `queued`, `submitted`, `sent`, and visible panes as insufficient execution proof until `kickoff_verified`, Leader goal acceptance, and task graph/actionable-step evidence exist. Provider-specific prompt strings and key sequences remain provider-adapter/classifier concerns; product docs refer only to provider-neutral states, blockers, guidance, and audit events.
+
 ## Documentation requirements for every phase
 
 Every implementation PR for this plan must check and update the relevant docs before merge:

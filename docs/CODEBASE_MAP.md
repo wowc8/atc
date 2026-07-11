@@ -57,7 +57,7 @@ Current/future paths:
 
 See:
 - `docs/runtime_truth_recovery_plan.md` — provider-neutral runtime truth, delivery verification, health, and recovery model
-- `docs/leader_kickoff_recovery_plan.md` — follow-up phased plan for proving Leader goal acceptance, startup prompt recovery, task graph ergonomics, and managed-agent local API capability setup
+- `docs/leader_kickoff_recovery_plan.md` — phased contract for proving Leader goal acceptance, startup prompt recovery, task graph ergonomics, managed-agent local API capability setup, and role/API documentation convergence
 - `docs/provider_runtime_refactor_plan.md`
 - `docs/provider_cli_wrapper_spec.md`
 - `docs/RUNTIME_PROVIDER_GUARDRAILS.md`

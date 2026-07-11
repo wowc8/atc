@@ -74,6 +74,13 @@ After the Leader reports active/goal accepted and begins project work, Tower mus
 2. second identical blocker cycle: send one Leader nudge/request for Leader-owned recovery;
 3. third identical blocker cycle: escalate to the operator with choices such as wait, ask Leader to recover, stop/restart Leader, or operator-approved break-glass.
 
+Tower's normal monitoring contract is therefore:
+
+- session existence, `queued`, `submitted`, `sent`, or `202 Accepted` means only that ATC attempted startup/delivery;
+- `kickoff_verified=true`, `goal_acceptance_state=accepted_active`, and task graph/actionable-step evidence are required before Tower treats the Leader as running project work;
+- task/Ace progress after handoff is Leader-owned evidence and should be summarized from Leader health/progress, not direct Tower→Ace probing;
+- provider-specific prompt strings, trust wording, and key sequences never appear in Tower policy. Tower consumes `blocker_reason`, `runtime_state`, `delivery_state`, `operator_guidance`, and recovery audit outcomes.
+
 Tower should then wait for the event-driven completion hook:
 
 ```text

@@ -61,7 +61,13 @@ atc ace report-artifact --project-id <project-id> --ace-id <ace-id> --path /abso
 
 This creates Ace-side evidence that the assignment was accepted. Without `assignment_accepted=true`, Leader should treat delivered prompts as `awaiting_ace_active_report` rather than verified active work.
 
-If blocked by auth, trust, permissions, missing tools, or an unclear prompt, Ace should report the provider-neutral blocker upward. Leader owns recovery decisions and should use ATC health/recovery surfaces rather than asking the Ace to improvise provider-specific prompt handling.
+When producing work artifacts, Ace should route evidence through the canonical artifact path instead of leaving Leader to search sibling worktrees or terminal scrollback:
+
+```bash
+atc ace report-artifact --project-id <project-id> --ace-id <ace-id> --path /absolute/output --kind worktree
+```
+
+If blocked by auth, trust, permissions, missing tools, or an unclear prompt, Ace should report the provider-neutral blocker upward. Leader owns recovery decisions and should use ATC health/recovery surfaces rather than asking the Ace to improvise provider-specific prompt handling. Ace reports should name stable blocker categories such as `runtime_trust_required`, `runtime_permission_required`, or `prompt_not_submitted` when available, not raw provider prompt wording.
 
 ## Must not do
 
