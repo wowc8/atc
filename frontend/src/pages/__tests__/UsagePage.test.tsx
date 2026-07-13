@@ -4,9 +4,18 @@ import UsagePage from "../UsagePage";
 import { renderWithProviders } from "../../test/helpers";
 
 beforeEach(() => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify([]), { status: 200 }),
-  );
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.includes("/usage/summary")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ today_tokens: 0, month_tokens: 0 }),
+          { status: 200 },
+        ),
+      );
+    }
+    return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+  });
 });
 
 describe("UsagePage", () => {
@@ -28,6 +37,29 @@ describe("UsagePage", () => {
   it("shows token usage card", () => {
     renderWithProviders(<UsagePage />);
     expect(screen.getByText("Token Usage")).toBeInTheDocument();
+  });
+
+  it("loads token summary counters from the aggregate usage endpoint", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/usage/summary")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ today_tokens: 999, month_tokens: 123456 }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url.includes("/usage/tokens")) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+    });
+
+    renderWithProviders(<UsagePage />);
+
+    expect(await screen.findByText("999")).toBeInTheDocument();
+    expect(await screen.findByText("123k")).toBeInTheDocument();
   });
 
   it("shows budget utilization section", () => {

@@ -310,6 +310,13 @@ export function AppProvider({ children }: AppProviderProps) {
       const failureLogs = await api.get<FailureLog[]>("/failure-logs?limit=200");
       dispatch({ type: "SET_FAILURE_LOGS", payload: failureLogs });
 
+      // Fetch aggregate usage totals used by dashboard/usage summary cards.
+      // Daily chart data is fetched by UsagePage, but the top-line counters must
+      // come from the canonical aggregate endpoint so they do not remain at the
+      // initial zero state while the chart already has token rows.
+      const usage = await api.get<UsageSummary>("/usage/summary");
+      dispatch({ type: "SET_USAGE", payload: usage });
+
       // Fetch tower status for panel state
       const towerStatus = await api.get<{
         state: string;
