@@ -58,6 +58,25 @@ const PERIOD_LABELS: Record<Period, string> = {
   "90d": "90d",
 };
 
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: "#0d1117",
+  border: "1px solid var(--color-border)",
+  borderRadius: "8px",
+  boxShadow: "0 12px 32px rgba(0, 0, 0, 0.45)",
+  color: "var(--color-text-primary)",
+  fontSize: "12px",
+  opacity: 1,
+};
+
+const CHART_TOOLTIP_LABEL_STYLE = {
+  color: "var(--color-text-primary)",
+  fontWeight: 600,
+};
+
+const CHART_TOOLTIP_ITEM_STYLE = {
+  color: "var(--color-text-primary)",
+};
+
 // ---------------------------------------------------------------------------
 // Period selector
 // ---------------------------------------------------------------------------
@@ -89,7 +108,7 @@ function PeriodSelector({
 // ---------------------------------------------------------------------------
 
 export default function UsagePage() {
-  const { state } = useAppContext();
+  const { state, dispatch } = useAppContext();
   const { usage, projects, budgets } = state;
 
   const [period, setPeriod] = useState<Period>("7d");
@@ -101,6 +120,9 @@ export default function UsagePage() {
   // Resource data
   const [resourceData, setResourceData] = useState<ResourceDataPoint[]>([]);
   const [resourceLoaded, setResourceLoaded] = useState(false);
+
+  // Aggregate usage summary
+  const [usageSummaryLoaded, setUsageSummaryLoaded] = useState(false);
 
   // Codex sync status
   const [codexStatus, setCodexStatus] = useState<CodexSyncStatus | null>(null);
@@ -125,6 +147,18 @@ export default function UsagePage() {
       setResourceLoaded(true);
     } catch {
       setResourceData([]);
+    }
+  }
+
+  async function fetchUsageSummary() {
+    try {
+      const summary = await api.get<typeof usage>("/usage/summary");
+      dispatch({ type: "SET_USAGE", payload: summary });
+    } catch {
+      // Keep the existing summary if the aggregate endpoint is temporarily
+      // unavailable. The chart endpoint is independent and may still render.
+    } finally {
+      setUsageSummaryLoaded(true);
     }
   }
 
@@ -154,7 +188,9 @@ export default function UsagePage() {
         `Inserted ${result.inserted_events} token event${suffix}.`,
       );
       setTokenLoaded(false);
+      setUsageSummaryLoaded(false);
       await fetchCodexStatus();
+      await fetchUsageSummary();
     } catch {
       setCodexSyncMessage("Codex sync failed. Check backend logs.");
       await fetchCodexStatus();
@@ -165,6 +201,7 @@ export default function UsagePage() {
 
   if (!tokenLoaded) void fetchTokens(period);
   if (!resourceLoaded) void fetchResources();
+  if (!usageSummaryLoaded) void fetchUsageSummary();
   if (!codexStatusLoaded) void fetchCodexStatus();
 
   function handlePeriodChange(p: Period) {
@@ -254,12 +291,9 @@ export default function UsagePage() {
                   }
                 />
                 <Tooltip
-                  contentStyle={{
-                    background: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "6px",
-                    fontSize: "11px",
-                  }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                 />
                 <Legend wrapperStyle={{ fontSize: "10px" }} />
                 {models.map((model) => (
@@ -330,12 +364,9 @@ export default function UsagePage() {
                   }
                 />
                 <Tooltip
-                  contentStyle={{
-                    background: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "6px",
-                    fontSize: "11px",
-                  }}
+                  contentStyle={CHART_TOOLTIP_STYLE}
+                  labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                  itemStyle={CHART_TOOLTIP_ITEM_STYLE}
                   labelFormatter={fmtTime}
                 />
                 <Legend
