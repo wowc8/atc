@@ -83,6 +83,7 @@ class TaskGraphResponse(BaseModel):
     runtime_truth: RuntimeTruthSummary
     assigned_ace_id: str | None = None
     dependencies: list[str] | None = None
+    completed_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -188,6 +189,7 @@ def _to_response(tg: Any, assignment: Any | None = None) -> TaskGraphResponse:
         runtime_truth=truth,
         assigned_ace_id=tg.assigned_ace_id,
         dependencies=tg.dependencies,
+        completed_at=tg.completed_at,
         created_at=tg.created_at,
         updated_at=tg.updated_at,
     )

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import TaskBoard from "../TaskBoard";
+import TaskBoard, { formatCompletedAt } from "../TaskBoard";
 import type { TaskGraph } from "../../../types";
 
 // Mock api module
@@ -41,6 +41,7 @@ const sampleTasks: TaskGraph[] = [
     },
     assigned_ace_id: "ace-abcdef12",
     dependencies: null,
+    completed_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   },
@@ -69,6 +70,7 @@ const sampleTasks: TaskGraph[] = [
     },
     assigned_ace_id: null,
     dependencies: ["t1"],
+    completed_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   },
@@ -97,8 +99,9 @@ const sampleTasks: TaskGraph[] = [
     },
     assigned_ace_id: null,
     dependencies: null,
+    completed_at: "2026-01-01T00:01:00Z",
     created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:01:00Z",
   },
 ];
 
@@ -175,6 +178,55 @@ describe("TaskBoard", () => {
       />,
     );
     expect(screen.getByText("First task")).toBeInTheDocument();
+  });
+
+  it("wraps each kanban column in an internal scroll window", () => {
+    render(
+      <TaskBoard
+        projectId="p1"
+        taskGraphs={sampleTasks}
+        onRefresh={mockRefresh}
+      />,
+    );
+    expect(screen.getByTestId("kanban-column-todo")).toBeInTheDocument();
+    expect(screen.getByTestId("kanban-column-done")).toBeInTheDocument();
+  });
+
+  it("shows completion age on done cards", () => {
+    render(
+      <TaskBoard
+        projectId="p1"
+        taskGraphs={sampleTasks}
+        onRefresh={mockRefresh}
+      />,
+    );
+    expect(screen.getByText(/Finished /)).toBeInTheDocument();
+  });
+
+  it("formats today's completion with zero days and a time", () => {
+    expect(
+      formatCompletedAt(
+        {
+          ...sampleTasks[2]!,
+          completed_at: "2026-01-03T14:05:00Z",
+          updated_at: "2026-01-03T14:05:00Z",
+        },
+        new Date("2026-01-03T20:00:00Z"),
+      ),
+    ).toMatch(/^0 days ago at /);
+  });
+
+  it("formats older completions as days ago only", () => {
+    expect(
+      formatCompletedAt(
+        {
+          ...sampleTasks[2]!,
+          completed_at: "2026-01-01T14:05:00Z",
+          updated_at: "2026-01-01T14:05:00Z",
+        },
+        new Date("2026-01-03T20:00:00Z"),
+      ),
+    ).toBe("2 days ago");
   });
 
   it("shows runtime truth separately from task state", () => {

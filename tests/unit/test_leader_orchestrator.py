@@ -534,7 +534,7 @@ class TestSpawnRetryAssignmentReuse:
 @patch("atc.leader.orchestrator.destroy_ace", new_callable=AsyncMock)
 @pytest.mark.asyncio
 class TestMarkTaskDone:
-    async def test_marks_done_and_destroys_ace(
+    async def test_marks_done_and_preserves_ace_at_retention_floor(
         self,
         mock_destroy: AsyncMock,
         db,
@@ -556,7 +556,11 @@ class TestMarkTaskDone:
         )
 
         captured: list[dict] = []
-        event_bus.subscribe("leader_task_completed", lambda d: captured.append(d))
+
+        async def capture_completed(payload: dict) -> None:
+            captured.append(payload)
+
+        event_bus.subscribe("leader_task_completed", capture_completed)
 
         await orchestrator.mark_task_done(tg.id)
 
@@ -564,8 +568,90 @@ class TestMarkTaskDone:
         assert updated is not None
         assert updated.status == "done"
         assert orchestrator.assignments[tg.id].status == "done"
-        mock_destroy.assert_called_once()
+        mock_destroy.assert_not_called()
         assert len(captured) == 1
+
+
+    async def test_retention_retires_oldest_completed_ace_only_above_four(
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        from atc.state import db as db_ops
+
+        completed: list[tuple[str, str]] = []
+        for index in range(5):
+            tg = await create_task_graph(db, orchestrator.project_id, f"Task {index}")
+            session = await create_session(
+                db,
+                orchestrator.project_id,
+                "ace",
+                f"ace-{index}",
+                task_id=tg.id,
+                status="idle",
+            )
+            assignment_id = f"assign-{index}"
+            await db_ops.assign_task(db, tg.id, session.id, assignment_id)
+            await db_ops.update_task_assignment_status(db, assignment_id, "working")
+            await db_ops.update_task_graph_status(db, tg.id, "in_progress")
+            if index < 4:
+                await db_ops.update_task_assignment_status(db, assignment_id, "done")
+                await db_ops.update_task_graph_status(db, tg.id, "done")
+                completed.append((tg.id, session.id))
+
+        newest_tg_id, newest_session_id = completed[-1]
+        current_tg = await create_task_graph(db, orchestrator.project_id, "Current Task")
+        current_session = await create_session(
+            db,
+            orchestrator.project_id,
+            "ace",
+            "ace-current",
+            task_id=current_tg.id,
+            status="idle",
+        )
+        current_assignment_id = "assign-current"
+        await db_ops.assign_task(db, current_tg.id, current_session.id, current_assignment_id)
+        await db_ops.update_task_assignment_status(db, current_assignment_id, "working")
+        await db_ops.update_task_graph_status(db, current_tg.id, "in_progress")
+        orchestrator.assignments[current_tg.id] = AceAssignment(
+            ace_session_id=current_session.id,
+            task_graph_id=current_tg.id,
+            task_title="Current Task",
+            status="working",
+            assignment_id=current_assignment_id,
+        )
+
+        await orchestrator.mark_task_done(current_tg.id)
+
+        assert mock_destroy.call_count == 1
+        assert mock_destroy.call_args.args[1] == completed[0][1]
+        assert orchestrator.assignments[current_tg.id].status == "done"
+        refreshed_current = await get_task_graph(db, current_tg.id)
+        assert refreshed_current is not None
+        assert refreshed_current.status == "done"
+        assert refreshed_current.assigned_ace_id == current_session.id
+        assert refreshed_current.completed_at is not None
+
+    async def test_done_timestamp_clears_when_task_reopens(
+        self,
+        mock_destroy: AsyncMock,
+        db,
+        orchestrator: LeaderOrchestrator,
+    ) -> None:
+        from atc.state import db as db_ops
+
+        tg = await create_task_graph(db, orchestrator.project_id, "Task A")
+        await db_ops.update_task_graph_status(db, tg.id, "assigned")
+        await db_ops.update_task_graph_status(db, tg.id, "in_progress")
+        done = await db_ops.update_task_graph_status(db, tg.id, "done")
+        assert done is not None
+        assert done.completed_at is not None
+
+        reopened = await db_ops.update_task_graph_status(db, tg.id, "todo")
+        assert reopened is not None
+        assert reopened.completed_at is None
+        mock_destroy.assert_not_called()
 
     async def test_done_without_assignment(
         self,

@@ -34,9 +34,30 @@
 
 /* Kanban grid */
 .task-board__grid {
+  --task-board-card-full-height: 104px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-3);
+}
+
+.task-board__col {
+  min-height: 0;
+}
+
+.task-board__col-scroll {
+  max-height: calc((var(--task-board-card-full-height) * 3) + (var(--space-2) * 2));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: var(--space-1);
+}
+
+.task-board__col-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.task-board__col-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 .task-board__col h4 {
@@ -60,6 +81,7 @@
 
 /* Card */
 .task-board__card {
+  min-height: var(--task-board-card-full-height);
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg);
   border: 1px solid var(--color-border-subtle);
@@ -119,6 +141,12 @@
 }
 
 .task-board__unassigned {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.task-board__completed-at {
+  margin-top: var(--space-1);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }

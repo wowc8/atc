@@ -484,6 +484,7 @@ CREATE TABLE IF NOT EXISTS task_graphs (
     status          TEXT NOT NULL DEFAULT 'todo',
     assigned_ace_id TEXT,
     dependencies    TEXT,
+    completed_at    TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -823,6 +824,16 @@ async def _apply_file_migrations(db: aiosqlite.Connection) -> None:
                 )
                 await db.commit()
                 continue
+        if path.name == "021_task_graph_completion_metadata.sql" and await _has_column(
+            db, "task_graphs", "completed_at"
+        ):
+            logger.info("Migration skip: %s already applied structurally", path.name)
+            await db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (path.name, _now()),
+            )
+            await db.commit()
+            continue
 
         sql = path.read_text()
         if sql.strip():
@@ -1311,8 +1322,8 @@ async def create_task_graph(
     await db.execute(
         """INSERT INTO task_graphs
            (id, project_id, title, description, status, assigned_ace_id,
-            dependencies, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            dependencies, completed_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             tg.id,
             tg.project_id,
@@ -1321,6 +1332,7 @@ async def create_task_graph(
             tg.status,
             tg.assigned_ace_id,
             tg.dependencies_json(),
+            tg.completed_at,
             tg.created_at,
             tg.updated_at,
         ),
@@ -1420,9 +1432,13 @@ async def update_task_graph_status(
 
     target = validate_task_graph_transition(task_graph_id, existing.status, new_status)
 
+    now = _now()
+    completed_at = now if target.value == "done" else None
     await db.execute(
-        "UPDATE task_graphs SET status = ?, updated_at = ? WHERE id = ?",
-        (target.value, _now(), task_graph_id),
+        """UPDATE task_graphs
+           SET status = ?, completed_at = ?, updated_at = ?
+           WHERE id = ?""",
+        (target.value, completed_at, now, task_graph_id),
     )
     await db.commit()
     return await get_task_graph(db, task_graph_id)

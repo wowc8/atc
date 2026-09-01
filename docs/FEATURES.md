@@ -46,7 +46,10 @@ Web UI showing:
 - TowerBar with live status, token usage, notifications
 - Project/Ace list with status indicators
 - Leader console with terminal + task board
+- Project task Kanban columns keep a fixed internal window sized for three full task cards, then scroll within the Kanban block for additional tasks
+- Completed task cards display durable completion recency: same-day completions show `0 days ago` plus the completion time, while older completions show the day count
 - Ace terminal tabs with keep-alive off-screen pattern
+- Completed Ace sessions remain available for operator follow-up while a project has four or fewer Aces; when more than four Ace sessions exist, the oldest completed Ace is retired while the task keeps its `assigned_ace_id` session reference and completion timestamp
 - Token usage, resource, and GitHub analytics charts
 
 ## Budget Enforcement
