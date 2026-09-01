@@ -275,6 +275,7 @@ class TaskGraph:
     description: str | None = None
     assigned_ace_id: str | None = None
     dependencies: list[str] | None = None
+    completed_at: str | None = None
     created_at: str = ""
     updated_at: str = ""
 

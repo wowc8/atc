@@ -21,6 +21,34 @@ const COLUMN_LABELS: Record<string, string> = {
   done: "Done",
 };
 
+export function formatCompletedAt(task: TaskGraph, now = new Date()): string | null {
+  if ((task.task_state ?? task.status) !== "done") return null;
+  const timestamp = task.completed_at ?? task.updated_at;
+  if (!timestamp) return null;
+
+  const completed = new Date(timestamp);
+  if (Number.isNaN(completed.getTime())) return null;
+
+  const completedDate = new Date(
+    completed.getFullYear(),
+    completed.getMonth(),
+    completed.getDate(),
+  );
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysAgo = Math.max(
+    0,
+    Math.floor((nowDate.getTime() - completedDate.getTime()) / 86_400_000),
+  );
+
+  if (daysAgo === 0) {
+    return `0 days ago at ${completed.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    })}`;
+  }
+  return `${daysAgo} days ago`;
+}
+
 export default function TaskBoard({
   projectId,
   taskGraphs,
@@ -137,9 +165,11 @@ function KanbanView({ taskGraphs }: ViewProps) {
               {COLUMN_LABELS[col]}
               <span className="task-board__col-count">{colTasks.length}</span>
             </h4>
-            {colTasks.map((task) => (
-              <TaskCard key={task.id} task={task} />
-            ))}
+            <div className="task-board__col-scroll" data-testid={`kanban-column-${col}`}>
+              {colTasks.map((task) => (
+                <TaskCard key={task.id} task={task} />
+              ))}
+            </div>
           </div>
         );
       })}
@@ -231,6 +261,8 @@ function RuntimeTruth({ task, compact = false }: { task: TaskGraph; compact?: bo
 // ---------------------------------------------------------------------------
 
 function TaskCard({ task }: { task: TaskGraph }) {
+  const completedLabel = formatCompletedAt(task);
+
   return (
     <div className="task-board__card" data-testid="task-card">
       <div className="task-board__card-title">{task.title}</div>
@@ -238,11 +270,16 @@ function TaskCard({ task }: { task: TaskGraph }) {
         <StatusBadge status={task.task_state ?? task.status} size="sm" />
         <RuntimeTruth task={task} compact />
         {task.assigned_ace_id && (
-          <span className="task-board__assignee">
+          <span className="task-board__assignee" title={`Session ${task.assigned_ace_id}`}>
             {task.assigned_ace_id.slice(0, 8)}
           </span>
         )}
       </div>
+      {completedLabel && (
+        <div className="task-board__completed-at" data-testid="task-completed-at">
+          Finished {completedLabel}
+        </div>
+      )}
       {task.description && (
         <p className="task-board__card-desc">
           {task.description.length > 80

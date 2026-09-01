@@ -119,6 +119,7 @@ export interface TaskGraph {
   runtime_truth?: RuntimeTruthSummary;
   assigned_ace_id: string | null;
   dependencies: string[] | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 }

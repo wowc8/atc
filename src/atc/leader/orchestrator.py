@@ -35,6 +35,7 @@ from atc.tracking.resources import ResourceGovernor
 # simultaneously (each would otherwise see active_count=0).
 _GLOBAL_ACTIVE_ACES: int = 0
 _GLOBAL_LOCK = None  # asyncio.Lock, initialized lazily
+_ACE_SESSION_RETENTION_FLOOR = 4
 
 
 async def _get_global_lock() -> asyncio.Lock:
@@ -570,24 +571,7 @@ class LeaderOrchestrator:
         if assignment is not None:
             assignment.status = "done"
 
-            # Destroy the Ace session (free resources)
-            try:
-                await destroy_ace(
-                    self.conn,
-                    assignment.ace_session_id,
-                    event_bus=self.event_bus,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to destroy Ace %s for completed task '%s'",
-                    assignment.ace_session_id,
-                    assignment.task_title,
-                )
-
-            # Clean up deployed config files
-            if assignment.deployed_root:
-                with contextlib.suppress(Exception):
-                    cleanup_deployed_files(assignment.deployed_root)
+        await self._retire_oldest_completed_ace_if_needed()
 
         if self.event_bus:
             await self.event_bus.publish(
@@ -598,6 +582,69 @@ class LeaderOrchestrator:
                     "task_graph_id": task_graph_id,
                 },
             )
+
+
+    async def _retire_oldest_completed_ace_if_needed(self) -> None:
+        """Retire one completed Ace session only after the project has >4 Aces.
+
+        Completed Aces remain available for operator follow-up while the project has
+        four or fewer Ace sessions. Once a newly completed task leaves more than the
+        retention floor visible, remove the Ace whose completed assignment is oldest;
+        the task graph still keeps assigned_ace_id/completed_at as the durable session
+        reference.
+        """
+        sessions = await db_ops.list_sessions(
+            self.conn,
+            project_id=self.project_id,
+            session_type="ace",
+        )
+        if len(sessions) <= _ACE_SESSION_RETENTION_FLOOR:
+            return
+
+        live_ace_ids = {session.id for session in sessions}
+        task_graphs = await db_ops.list_task_graphs(self.conn, project_id=self.project_id)
+        done_task_ids = {task.id for task in task_graphs if task.status == "done"}
+        assignments = await db_ops.list_task_assignments(self.conn)
+        completed_assignments = [
+            assignment
+            for assignment in assignments
+            if assignment.task_graph_id in done_task_ids
+            and assignment.status == "done"
+            and assignment.ace_session_id in live_ace_ids
+        ]
+        if not completed_assignments:
+            return
+
+        def completion_key(assignment: Any) -> str:
+            return (
+                assignment.last_activity_at
+                or assignment.updated_at
+                or assignment.created_at
+                or ""
+            )
+
+        oldest = min(completed_assignments, key=completion_key)
+        in_memory = self.assignments.get(oldest.task_graph_id)
+        task_title = in_memory.task_title if in_memory else oldest.task_graph_id
+        try:
+            await destroy_ace(
+                self.conn,
+                oldest.ace_session_id,
+                event_bus=self.event_bus,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to retire completed Ace %s for task '%s'",
+                oldest.ace_session_id,
+                task_title,
+            )
+            return
+
+        if in_memory and in_memory.deployed_root:
+            with contextlib.suppress(Exception):
+                cleanup_deployed_files(in_memory.deployed_root)
+        if in_memory and in_memory.ace_session_id == oldest.ace_session_id:
+            in_memory.deployed_root = None
 
     async def mark_task_failed(
         self,
