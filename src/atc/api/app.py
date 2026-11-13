@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from atc import __version__
@@ -692,6 +693,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+
+    # Packaged webviews fetch the loopback API cross-origin. Browser dev uses
+    # Vite's same-origin proxy, so it does not need additional allowed origins.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["tauri://localhost", "http://tauri.localhost"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type"],
+        allow_credentials=False,
+    )
 
     # Publish the server's actual address as an environment variable so that
     # agent deploy helpers (deploy.py) and any child processes can discover it
