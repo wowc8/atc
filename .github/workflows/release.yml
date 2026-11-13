@@ -74,7 +74,7 @@ jobs:
               x86_64-apple-darwin) sidecar_arch=x86_64 ;;
               *) echo "Unsupported macOS target" >&2; exit 1 ;;
             esac
-            lipo -verify_arch "$sidecar_arch" dist/atc-server
+            lipo dist/atc-server -verify_arch "$sidecar_arch"
           fi
           mv dist/atc-server "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
           chmod +x "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
