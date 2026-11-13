@@ -14,10 +14,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-14
+          # PyInstaller builds native sidecars, so runner and Rust architectures must match.
+          - platform: macos-15
             args: "--target aarch64-apple-darwin --bundles dmg"
             rust_target: aarch64-apple-darwin
-          - platform: macos-latest
+          - platform: macos-15-intel
             args: "--target x86_64-apple-darwin --bundles dmg"
             rust_target: x86_64-apple-darwin
           - platform: ubuntu-22.04
@@ -67,6 +68,14 @@ jobs:
             --hidden-import aiosqlite \
             --hidden-import sqlite3 \
             --hidden-import anthropic
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            case "${{ matrix.rust_target }}" in
+              aarch64-apple-darwin) sidecar_arch=arm64 ;;
+              x86_64-apple-darwin) sidecar_arch=x86_64 ;;
+              *) echo "Unsupported macOS target" >&2; exit 1 ;;
+            esac
+            lipo -verify_arch "$sidecar_arch" dist/atc-server
+          fi
           mv dist/atc-server "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
           chmod +x "src-tauri/binaries/atc-server-${{ matrix.rust_target }}"
 
