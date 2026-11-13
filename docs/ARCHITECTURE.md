@@ -25,6 +25,14 @@ FastAPI application with:
 - **REST routers** (`routers/`): tower, projects, tasks, aces, orchestration, usage, settings
 - **WebSocket hub** (`ws/`): channel-based pub/sub for real-time state
 
+Packaged Tauri webviews call the loopback REST API cross-origin. The app factory
+allows only `tauri://localhost` (macOS/Linux) and `http://tauri.localhost`
+(Windows default), with explicit REST methods and the `Content-Type` header.
+Credentials, wildcard origins, opaque `null` origins, and arbitrary web origins
+are not enabled. Browser development uses Vite's same-origin proxy instead.
+CORS governs browser response access, not authentication or WebSocket admission.
+See [desktop API origin policy](design_logs/015-desktop-api-cors.md).
+
 ### Domain Layer
 
 ### Orchestration Boundary (`src/atc/orchestration/`)
