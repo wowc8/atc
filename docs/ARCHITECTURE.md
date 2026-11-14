@@ -33,6 +33,12 @@ are not enabled. Browser development uses Vite's same-origin proxy instead.
 CORS governs browser response access, not authentication or WebSocket admission.
 See [desktop API origin policy](design_logs/015-desktop-api-cors.md).
 
+The desktop shell launches its owned backend explicitly in HOME, preserving
+legacy HOME database/config paths regardless of Finder's cwd. It drains backend
+output to `~/.atc/logs/desktop-backend.log`, exposes persisted launch/exit failures
+to the startup gate, and stops its child on normal application exit. See
+[desktop runtime policy](design_logs/016-desktop-backend-home.md).
+
 ### Domain Layer
 
 ### Orchestration Boundary (`src/atc/orchestration/`)
