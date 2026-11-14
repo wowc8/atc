@@ -48,6 +48,16 @@ export function useBackendReady(enabled: boolean): BackendReadyState {
       setState((prev) => ({ ...prev, attempt }));
 
       try {
+        if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+          const { invoke } = await import("@tauri-apps/api/core");
+          const startupError = await invoke<string | null>("backend_startup_error");
+          if (startupError) {
+            if (mountedRef.current) {
+              setState({ ready: false, error: startupError, attempt });
+            }
+            return;
+          }
+        }
         const res = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(4_000) });
         if (res.ok) {
           const body = (await res.json()) as { status?: string };

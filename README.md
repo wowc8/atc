@@ -83,6 +83,33 @@ Runtime config lives in `config.yaml`. Override locally with `config.local.yaml`
 
 See `config.yaml` for all available options.
 
+### Packaged desktop runtime
+
+The desktop app starts its bundled backend with the user's **HOME directory** as
+its working directory, independent of Finder's launch directory or shell PATH.
+This deliberately preserves the compatible `~/atc.db`, `~/config.yaml`, and
+`~/config.local.yaml` locations (including configured relative database paths).
+There is no automatic copy, rename, or migration to an empty application-data
+store. Data from a source checkout stays in that checkout; back it up and select
+its absolute database path in `~/config.local.yaml` if needed.
+
+Backend stdout/stderr are captured in `~/.atc/logs/desktop-backend.log`, replaced
+on each launch. Spawn failures and early backend exits appear in the startup UI
+with diagnostic details instead of waiting silently for the readiness timeout.
+Normal app exit stops only the backend child it owns. Do not run a second/manual
+backend on port 8420 while validating automatic desktop startup.
+
+For an isolated packaged-sidecar reproduction (refuses an occupied port):
+
+```bash
+python3 scripts/verify_desktop_cwd.py /absolute/path/to/ATC.app/Contents/MacOS/atc-server \
+  --output /tmp/atc-desktop-cwd-evidence
+```
+
+This checks the original `/` launch failure, HOME startup, and retention of a
+pre-existing disposable database/config. It is sidecar evidence, not a native
+webview acceptance test.
+
 ## Testing
 
 ```bash
